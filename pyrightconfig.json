@@ -1,0 +1,16 @@
+{
+    "extraPaths": [
+        ".gamestubs",
+        ".stubs",
+        "/home/zetters/.local/share/Steam/steamapps/common/Borderlands 2/sdk_mods",
+        "/home/zetters/git/willow2-sdk-mods-zeta",
+        "/home/zetters/git/version_zeta"
+    ],
+    "reportAny": "none",
+    "reportExplicitAny": "none",
+    "reportUnusedCallResult": "none",
+    "reportImplicitStringConcatenation": "none",
+    "reportUnknownVariableType": "none",
+    "reportMissingModuleSource": "none",
+    "reportUnnecessaryComparison": "none"
+}

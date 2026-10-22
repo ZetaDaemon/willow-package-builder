@@ -1,0 +1,40 @@
+line-length = 100
+
+[lint]
+select = ["ALL"]
+ignore = [
+    "FA102",
+    "EXE002",
+    "ANN401",
+    "FBT002",
+    "S311",
+    "D103",
+    "SLF001",
+    "D100",
+    "D104",
+    "FBT001",
+    "PLW0603",
+    "COM812",
+    "FBT003","PERF203"
+]
+
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+[lint.per-file-ignores]
+"bpd_gen_scripts/**.py" = ["F403", "F405"]
+
+
+[format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = true
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
