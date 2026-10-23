@@ -161,7 +161,7 @@ def build_example_package() -> Package:
         default_object=class_default.reference(),
         class_flags=ClassFlags.COMPILED | ClassFlags.PARSED,
         state_flags=StateFlags.AUTO,
-        function_map={"Test": test_function.reference()},
+        function_map={FName("Test"): test_function.reference()},
     )
 
     return package

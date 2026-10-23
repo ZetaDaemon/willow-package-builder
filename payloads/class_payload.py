@@ -33,6 +33,11 @@ class UStructPayload(UFieldPayload, ABC):
     script: bytes = b""
     script_memory_size: int = 0
 
+    def __post_init__(self) -> None:
+        if self.script_memory_size < len(self.script):
+            msg = "Script memory size cannot be smaller than serialized bytecode size"
+            raise ValueError(msg)
+
     @override
     def serialize_body(self, package: Package) -> bytes:
         """Serialize the inherited data and UStruct portion."""
@@ -70,13 +75,13 @@ class UStatePayload(UStructPayload, ABC):
     label_table_offset: int = NO_LABEL_TABLE
     state_flags: StateFlags = StateFlags.NONE
 
-    function_map: dict[str, ReferencePath] = field(default_factory=dict)
+    function_map: dict[FName, ReferencePath] = field(default_factory=dict)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
         """Serialize the inherited data and UState portion."""
         functions = b"".join(
-            FName(name).serialize(package) + function.serialize(package)
+            name.serialize(package) + function.serialize(package)
             for name, function in self.function_map.items()
         )
 
@@ -119,13 +124,13 @@ class UClassPayload(UStatePayload):
 
     component_defaults: dict[str, ReferencePath] = field(default_factory=dict)
 
-    dont_sort_categories: list[str] = field(default_factory=list)
-    hide_categories: list[str] = field(default_factory=list)
-    auto_expand_categories: list[str] = field(default_factory=list)
-    auto_collapse_categories: list[str] = field(default_factory=list)
+    dont_sort_categories: list[FName] = field(default_factory=list)
+    hide_categories: list[FName] = field(default_factory=list)
+    auto_expand_categories: list[FName] = field(default_factory=list)
+    auto_collapse_categories: list[FName] = field(default_factory=list)
 
     force_script_order: bool = False
-    class_groups: list[str] = field(default_factory=list)
+    class_groups: list[FName] = field(default_factory=list)
     native_class_name: str = ""
     dll_bind_name: FName = field(default_factory=lambda: FName("None"))
 
@@ -135,10 +140,14 @@ class UClassPayload(UStatePayload):
     def serialize_body(self, package: Package) -> bytes:
         """Serialize the inherited data and UClass portion."""
 
-        def serialize_names(names: list[str]) -> bytes:
+        def serialize_names(names: list[FName]) -> bytes:
             return struct.pack("<i", len(names)) + b"".join(
-                FName(name).serialize(package) for name in names
+                name.serialize(package) for name in names
             )
+
+        if self.default_object.is_none():
+            msg = "A ClassPayload must have a default object."
+            raise ValueError(msg)
 
         component_defaults = struct.pack("<i", len(self.component_defaults)) + b"".join(
             FName(name).serialize(package) + obj.serialize(package)

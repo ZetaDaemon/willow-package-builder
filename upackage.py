@@ -4,7 +4,7 @@ import struct
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import IntFlag
-from typing import overload, override
+from typing import Any, overload, override
 from uuid import UUID, uuid4
 from warnings import deprecated
 
@@ -78,27 +78,28 @@ class CompressionFlags(IntFlag):
     NONE = 0
 
 
+@dataclass(init=False, eq=False, frozen=True)
 class Name:
     """String with case insensitive comparisons."""
 
-    value: str
+    name: str
 
     def __init__(self, value: str) -> None:
-        self.value = value
+        object.__setattr__(self, "value", value)
 
     @override
     def __hash__(self) -> int:
-        return hash(self.value.casefold())
+        return hash(self.name.casefold())
 
     @override
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Name):
-            return self.value.casefold() == other.value.casefold()
+            return self.name.casefold() == other.name.casefold()
         return NotImplemented
 
     @override
     def __str__(self) -> str:
-        return self.value
+        return self.name
 
     @override
     def __repr__(self) -> str:
@@ -106,12 +107,13 @@ class Name:
 
     def is_none(self) -> bool:
         """Check if the value is none."""
-        return self.value.casefold() == "none"
+        return self.name.casefold() == "none"
 
 
 INT32_MAX = (1 << 31) - 1
 
 
+@dataclass(init=False, eq=False, frozen=True)
 class FName:
     """FName."""
 
@@ -126,8 +128,8 @@ class FName:
         if isinstance(name, str):
             name, number = FName._split_str_to_name_number(name)
 
-        self.name = name
-        self.number = number
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "number", number)
 
     @staticmethod
     def _split_str_to_name_number(value: str) -> tuple[Name, int]:
@@ -158,6 +160,16 @@ class FName:
     def __repr__(self) -> str:
         return str(self)
 
+    @override
+    def __hash__(self) -> int:
+        return hash(str(self).casefold())
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, FName):
+            return str(self).casefold() == str(other).casefold()
+        return NotImplemented
+
     def serialize(self, package: Package) -> bytes:
         """Convert to bytes."""
         return struct.pack("<ii", package.name_index(self.name), self.number)
@@ -167,39 +179,44 @@ class FName:
         return self.number == 0 and self.name.is_none()
 
 
+@dataclass(init=False, eq=False, frozen=True)
 class ReferencePath:
     """Path to a UObject or ExternalReference."""
 
-    value: FName
+    name: FName
     outer: ReferencePath | None
 
     @overload
     def __init__(self) -> None: ...
     @overload
-    def __init__(self, value: str | Name | FName) -> None: ...
+    def __init__(self, name: str | Name | FName) -> None: ...
     @overload
-    def __init__(self, value: str | Name | FName, outer: ReferencePath | None) -> None: ...
+    def __init__(self, name: str | Name | FName, outer: ReferencePath | None) -> None: ...
     def __init__(
-        self, value: str | Name | FName = "None", outer: ReferencePath | None = None
+        self, name: str | Name | FName = "None", outer: ReferencePath | None = None
     ) -> None:
 
-        if isinstance(value, str):
-            segments = value.split(".")
+        if isinstance(name, str):
+            segments = name.split(".")
 
             if any(not segment for segment in segments):
-                msg = f"Path contains an empty segment: {value!r}"
+                msg = f"Path contains an empty segment: {name!r}"
                 raise ValueError(msg)
 
             *parents, last = segments
             for segment in parents:
                 outer = ReferencePath(FName(segment), outer)
 
-            value = FName(last)
-        if isinstance(value, Name):
-            value = FName(value)
+            name = FName(last)
+        if isinstance(name, Name):
+            name = FName(name)
 
-        self.value = value
-        self.outer = outer
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "outer", outer)
+
+        if outer is not None and outer.is_none():
+            msg = "Outer cannot be a null ReferencePath; omit it for a root path"
+            raise ValueError(msg)
 
     @override
     def __hash__(self) -> int:
@@ -214,7 +231,7 @@ class ReferencePath:
 
     @override
     def __str__(self) -> str:
-        s = str(self.value)
+        s = str(self.name)
         if self.outer is not None and not self.outer.is_none():
             s = f"{self.outer}.{s}"
 
@@ -231,7 +248,7 @@ class ReferencePath:
 
     def is_none(self) -> bool:
         """Check if the path is none."""
-        return self.outer is None and self.value.is_none()
+        return self.outer is None and self.name.is_none()
 
     def serialize(self, package: Package) -> bytes:
         """Serialize the referenced object's package index."""
@@ -453,7 +470,13 @@ class Package:
                 msg = f"Object has no payload: {obj.reference()}"
                 raise ValueError(msg)
 
-            payloads.append(obj.payload.serialize(self))
+            try:
+                payload = obj.payload.serialize(self)
+            except ValueError as exc:
+                msg = f"Failed to serialize {obj.reference()}: {exc}"
+                raise ValueError(msg) from exc
+
+            payloads.append(payload)
 
         return payloads
 
