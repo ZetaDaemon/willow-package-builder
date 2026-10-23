@@ -33,14 +33,13 @@ class UStructPayload(UFieldPayload, ABC):
     script: bytes = b""
     script_memory_size: int = 0
 
-    def __post_init__(self) -> None:
+    @override
+    def serialize_body(self, package: Package) -> bytes:
+        """Serialize the inherited data and UStruct portion."""
         if self.script_memory_size < len(self.script):
             msg = "Script memory size cannot be smaller than serialized bytecode size"
             raise ValueError(msg)
 
-    @override
-    def serialize_body(self, package: Package) -> bytes:
-        """Serialize the inherited data and UStruct portion."""
         return (
             super().serialize_body(package)
             + self.super_struct.serialize(package)
@@ -122,7 +121,7 @@ class UClassPayload(UStatePayload):
     within: ReferencePath = field(default_factory=ReferencePath)
     config_name: FName = field(default_factory=lambda: FName("None"))
 
-    component_defaults: dict[str, ReferencePath] = field(default_factory=dict)
+    component_defaults: dict[FName, ReferencePath] = field(default_factory=dict)
 
     dont_sort_categories: list[FName] = field(default_factory=list)
     hide_categories: list[FName] = field(default_factory=list)
@@ -150,7 +149,7 @@ class UClassPayload(UStatePayload):
             raise ValueError(msg)
 
         component_defaults = struct.pack("<i", len(self.component_defaults)) + b"".join(
-            FName(name).serialize(package) + obj.serialize(package)
+            name.serialize(package) + obj.serialize(package)
             for name, obj in self.component_defaults.items()
         )
 

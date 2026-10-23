@@ -119,7 +119,7 @@ class UClassPropertyPayload(UObjectPropertyPayload):
     """UnrealScript class<T> property."""
 
     _: KW_ONLY
-    meta_class: ReferencePath = field(default_factory=ReferencePath)
+    meta_class: ReferencePath
 
     @override
     def serialize_body(self, package: Package) -> bytes:
@@ -143,7 +143,7 @@ class UArrayPropertyPayload(UPropertyPayload):
     """Dynamic array property."""
 
     _: KW_ONLY
-    inner: ReferencePath = field(default_factory=ReferencePath)
+    inner: ReferencePath
 
     @override
     def serialize_body(self, package: Package) -> bytes:
@@ -172,7 +172,7 @@ class UStructPropertyPayload(UPropertyPayload):
     """Struct property definition."""
 
     _: KW_ONLY
-    struct: ReferencePath = field(default_factory=ReferencePath)
+    struct: ReferencePath
 
     @override
     def serialize_body(self, package: Package) -> bytes:

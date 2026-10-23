@@ -166,9 +166,9 @@ class FName:
 
     @override
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, FName):
-            return str(self).casefold() == str(other).casefold()
-        return NotImplemented
+        if not isinstance(other, FName):
+            return NotImplemented
+        return self.name == other.name and self.number == other.number
 
     def serialize(self, package: Package) -> bytes:
         """Convert to bytes."""
@@ -545,11 +545,12 @@ class Package:
         """Convert the whole package to bytes."""
         # All names and objects must already be registered.
         payloads = self.serialize_payloads()
-
-        name_data = self.serialize_names()
         import_data = self.serialize_imports()
         dependency_data = self.serialize_dependencies()
 
+        export_table_size = len(self.serialize_exports(payloads, data_offset=0))
+
+        name_data = self.serialize_names()
         placeholder_layout = PackageLayout(
             names_offset=0,
             imports_offset=0,
@@ -559,7 +560,6 @@ class Package:
         )
 
         header_size = len(self.serialize_header(placeholder_layout))
-        export_table_size = len(self.serialize_exports(payloads, data_offset=0))
 
         names_offset = header_size
         imports_offset = names_offset + len(name_data)
