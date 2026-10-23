@@ -84,8 +84,8 @@ class Name:
 
     name: str
 
-    def __init__(self, value: str) -> None:
-        object.__setattr__(self, "value", value)
+    def __init__(self, name: str) -> None:
+        object.__setattr__(self, "name", name)
 
     @override
     def __hash__(self) -> int:
