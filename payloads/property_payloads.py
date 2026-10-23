@@ -1,8 +1,9 @@
+from multiprocessing import Value
 import struct
 from abc import ABC
 from dataclasses import KW_ONLY, dataclass, field
 from enum import IntFlag
-from typing import override
+from typing import ClassVar, override
 
 from payloads.class_payload import UFieldPayload
 from upackage import FName, Package, ReferencePath
@@ -102,7 +103,9 @@ class UObjectPropertyPayload(UPropertyPayload):
     """Object reference property."""
 
     _: KW_ONLY
-    property_class: ReferencePath = field(default_factory=ReferencePath)
+    property_class: ReferencePath
+
+    required_fields: ClassVar[tuple[str, ...]] = ("property_class",)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
@@ -121,6 +124,8 @@ class UClassPropertyPayload(UObjectPropertyPayload):
     _: KW_ONLY
     meta_class: ReferencePath
 
+    required_fields: ClassVar[tuple[str, ...]] = ("meta_class",)
+
     @override
     def serialize_body(self, package: Package) -> bytes:
         return super().serialize_body(package) + self.meta_class.serialize(package)
@@ -131,7 +136,9 @@ class UInterfacePropertyPayload(UPropertyPayload):
     """Interface reference property."""
 
     _: KW_ONLY
-    interface_class: ReferencePath = field(default_factory=ReferencePath)
+    interface_class: ReferencePath
+
+    required_fields: ClassVar[tuple[str, ...]] = ("interface_class",)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
@@ -145,6 +152,8 @@ class UArrayPropertyPayload(UPropertyPayload):
     _: KW_ONLY
     inner: ReferencePath
 
+    required_fields: ClassVar[tuple[str, ...]] = ("inner",)
+
     @override
     def serialize_body(self, package: Package) -> bytes:
         return super().serialize_body(package) + self.inner.serialize(package)
@@ -157,6 +166,8 @@ class UMapPropertyPayload(UPropertyPayload):
     _: KW_ONLY
     key: ReferencePath = field(default_factory=ReferencePath)
     value: ReferencePath = field(default_factory=ReferencePath)
+
+    required_fields: ClassVar[tuple[str, ...]] = ("key", "value")
 
     @override
     def serialize_body(self, package: Package) -> bytes:
@@ -174,6 +185,8 @@ class UStructPropertyPayload(UPropertyPayload):
     _: KW_ONLY
     struct: ReferencePath
 
+    required_fields: ClassVar[tuple[str, ...]] = ("struct",)
+
     @override
     def serialize_body(self, package: Package) -> bytes:
         return super().serialize_body(package) + self.struct.serialize(package)
@@ -188,6 +201,8 @@ class UDelegatePropertyPayload(UPropertyPayload):
     _: KW_ONLY
 
     function: ReferencePath = field(default_factory=ReferencePath)
+
+    required_fields: ClassVar[tuple[str, ...]] = ("function",)
 
     @override
     def serialize_body(self, package: Package) -> bytes:

@@ -548,6 +548,7 @@ class Package:
         import_data = self.serialize_imports()
         dependency_data = self.serialize_dependencies()
 
+        # This also registers all names in exports
         export_table_size = len(self.serialize_exports(payloads, data_offset=0))
 
         name_data = self.serialize_names()

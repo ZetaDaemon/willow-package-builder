@@ -13,8 +13,33 @@ class UFieldPayload(ObjectPayload, ABC):
 
     next_field: ReferencePath = field(default_factory=ReferencePath)
 
+    required_fields: ClassVar[tuple[str, ...]] = ()
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+
+        own_fields = cls.__dict__.get("required_fields", ())
+
+        inherited_fields = (
+            field_name
+            for base in cls.__bases__
+            for field_name in getattr(base, "required_fields", ())
+        )
+
+        cls.required_fields = tuple(dict.fromkeys((*inherited_fields, *own_fields)))
+
     def serialize_body(self, package: Package) -> bytes:
         """Serialize the UField portion of a payload."""
+        cls_name = type(self).__name__
+        for field_name in self.required_fields:
+            reference = getattr(self, field_name)
+            if not isinstance(reference, ReferencePath):
+                msg = f"field {field_name} of {cls_name} is not a ReferencePath"
+                raise TypeError(msg)
+            if reference.is_none():
+                msg = f"{cls_name} requires a valid {field_name}"
+                raise ValueError(msg)
+
         return self.next_field.serialize(package)
 
 
