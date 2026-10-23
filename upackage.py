@@ -4,7 +4,9 @@ import struct
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import IntFlag
+from typing import overload, override
 from uuid import UUID, uuid4
+from warnings import deprecated
 
 PACKAGE_SIGNATURE = 0x9E2A83C1
 
@@ -64,6 +66,11 @@ class PackageFlags(IntFlag):
 
     NONE = 0
 
+    ALLOW_DOWNLOAD = 0x00000001
+    COOKED = 0x00000008
+    CONTAINS_SCRIPT = 0x00200000
+    STRIPPED_SOURCE = 0x40000000
+
 
 class CompressionFlags(IntFlag):
     """CompressionFlags."""
@@ -71,23 +78,187 @@ class CompressionFlags(IntFlag):
     NONE = 0
 
 
+class Name:
+    """String with case insensitive comparisons."""
+
+    value: str
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    @override
+    def __hash__(self) -> int:
+        return hash(self.value.casefold())
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Name):
+            return self.value.casefold() == other.value.casefold()
+        return NotImplemented
+
+    @override
+    def __str__(self) -> str:
+        return self.value
+
+    @override
+    def __repr__(self) -> str:
+        return str(self)
+
+    def is_none(self) -> bool:
+        """Check if the value is none."""
+        return self.value.casefold() == "none"
+
+
+INT32_MAX = (1 << 31) - 1
+
+
+class FName:
+    """FName."""
+
+    name: Name
+    number: int = 0
+
+    @overload
+    def __init__(self, name: str) -> None: ...
+    @overload
+    def __init__(self, name: Name, number: int = 0) -> None: ...
+    def __init__(self, name: Name | str, number: int = 0) -> None:
+        if isinstance(name, str):
+            name, number = FName._split_str_to_name_number(name)
+
+        self.name = name
+        self.number = number
+
+    @staticmethod
+    def _split_str_to_name_number(value: str) -> tuple[Name, int]:
+        name = value
+        number = 0
+        base, separator, suffix = value.rpartition("_")
+        if (
+            separator
+            and base
+            and suffix.isascii()
+            and suffix.isdecimal()
+            and (suffix == "0" or not suffix.startswith("0"))
+        ):
+            number = int(suffix) + 1
+            if number > INT32_MAX:
+                raise ValueError
+            name = base
+        return Name(name), number
+
+    @override
+    def __str__(self) -> str:
+        if self.number == 0:
+            return str(self.name)
+
+        return f"{self.name}_{self.number - 1}"
+
+    @override
+    def __repr__(self) -> str:
+        return str(self)
+
+    def serialize(self, package: Package) -> bytes:
+        """Convert to bytes."""
+        return struct.pack("<ii", package.name_index(self.name), self.number)
+
+    def is_none(self) -> bool:
+        """Check if the name is none."""
+        return self.number == 0 and self.name.is_none()
+
+
+class ReferencePath:
+    """Path to a UObject or ExternalReference."""
+
+    value: FName
+    outer: ReferencePath | None
+
+    @overload
+    def __init__(self) -> None: ...
+    @overload
+    def __init__(self, value: str | Name | FName) -> None: ...
+    @overload
+    def __init__(self, value: str | Name | FName, outer: ReferencePath | None) -> None: ...
+    def __init__(
+        self, value: str | Name | FName = "None", outer: ReferencePath | None = None
+    ) -> None:
+
+        if isinstance(value, str):
+            segments = value.split(".")
+
+            if any(not segment for segment in segments):
+                msg = f"Path contains an empty segment: {value!r}"
+                raise ValueError(msg)
+
+            *parents, last = segments
+            for segment in parents:
+                outer = ReferencePath(FName(segment), outer)
+
+            value = FName(last)
+        if isinstance(value, Name):
+            value = FName(value)
+
+        self.value = value
+        self.outer = outer
+
+    @override
+    def __hash__(self) -> int:
+        return hash(str(self).casefold())
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ReferencePath):
+            return NotImplemented
+
+        return str(self).casefold() == str(other).casefold()
+
+    @override
+    def __str__(self) -> str:
+        s = str(self.value)
+        if self.outer is not None and not self.outer.is_none():
+            s = f"{self.outer}.{s}"
+
+        return s
+
+    @override
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __add__(self, other: Name | FName) -> ReferencePath:
+        if self.is_none():
+            return ReferencePath(other)
+        return ReferencePath(other, self)
+
+    def is_none(self) -> bool:
+        """Check if the path is none."""
+        return self.outer is None and self.value.is_none()
+
+    def serialize(self, package: Package) -> bytes:
+        """Serialize the referenced object's package index."""
+        index = 0 if self.is_none() else package.object_index(package.lookup_object_by_path(self))
+        return struct.pack("<i", index)
+
+
 @dataclass(eq=False)
 class ExternalReference:
     """ExternalReference."""
 
-    name: str
-    outer: ExternalReference | None
-    class_package: str
-    class_name: str
+    name: FName
+    class_package: FName
+    class_name: FName
+    outer: ReferencePath = field(default_factory=ReferencePath)
 
     def serialize(self, package: Package) -> bytes:
         """Convert to bytes."""
         return (
-            FName(self.class_package).serialize(package)
-            + FName(self.class_name).serialize(package)
-            + struct.pack("<i", package.object_index(self.outer))
-            + FName(self.name).serialize(package)
+            self.class_package.serialize(package)
+            + self.class_name.serialize(package)
+            + self.outer.serialize(package)
+            + self.name.serialize(package)
         )
+
+    def reference(self) -> ReferencePath:
+        return self.outer + self.name
 
 
 class ObjectPayload(ABC):
@@ -102,34 +273,26 @@ class ObjectPayload(ABC):
 class UObject:
     """UObject."""
 
-    name: str
-    outer: UObject | ExternalReference | None
-    object_class: UObject | ExternalReference | None
+    name: FName
     flags: ObjectFlags
-    super_object: UObject | ExternalReference | None = None
-    archetype: UObject | ExternalReference | None = None
+    outer: ReferencePath = field(default_factory=ReferencePath)
+    object_class: ReferencePath = field(default_factory=ReferencePath)
+    super_object: ReferencePath = field(default_factory=ReferencePath)
+    archetype: ReferencePath = field(default_factory=ReferencePath)
 
     payload: ObjectPayload | None = None
 
-    dependencies: list[UObject | ExternalReference] = field(default_factory=list)
+    dependencies: list[ReferencePath] = field(default_factory=list)
 
     def serialize(self, package: Package, payload_size: int, payload_offset: int) -> bytes:
         """Convert to bytes."""
         return (
-            struct.pack(
-                "<iii",
-                package.object_index(self.object_class),
-                package.object_index(self.super_object),
-                package.object_index(self.outer),
-            )
-            + FName(self.name).serialize(package)
-            + struct.pack(
-                "<iQii",
-                package.object_index(self.archetype),
-                int(self.flags),
-                payload_size,
-                payload_offset,
-            )
+            self.object_class.serialize(package)
+            + self.super_object.serialize(package)
+            + self.outer.serialize(package)
+            + self.name.serialize(package)
+            + self.archetype.serialize(package)
+            + struct.pack("<Qii", int(self.flags), payload_size, payload_offset)
             + struct.pack("<I", int(ExportFlags.NONE))
             + struct.pack("<i", 0)  # Generation net-object counts: empty.
             + UUID(int=0).bytes_le  # No originating package GUID.
@@ -138,20 +301,11 @@ class UObject:
 
     def serialize_dependencies(self, package: Package) -> bytes:
         return struct.pack("<i", len(self.dependencies)) + b"".join(
-            struct.pack("<i", package.object_index(obj)) for obj in self.dependencies
+            obj.serialize(package) for obj in self.dependencies
         )
 
-
-@dataclass
-class FName:
-    """FName."""
-
-    name: str
-    number: int = 0
-
-    def serialize(self, package: Package) -> bytes:
-        """Convert to bytes."""
-        return struct.pack("<ii", package.name_index(self.name), self.number)
+    def reference(self) -> ReferencePath:
+        return self.outer + self.name
 
 
 @dataclass
@@ -179,7 +333,7 @@ class PackageLayout:
 class Package:
     """Package."""
 
-    name: str
+    name: FName
     format: PackageFormat
     flags: int
 
@@ -188,44 +342,30 @@ class Package:
     _exports: list[UObject] = field(default_factory=list)
     _imports: list[ExternalReference] = field(default_factory=list)
 
-    _object_map: dict[str, UObject | ExternalReference] = field(
+    _object_map: dict[ReferencePath, UObject | ExternalReference] = field(
         default_factory=dict, init=False, repr=False
     )
-    _names: list[str] | tuple[str, ...] = field(default_factory=list)
+    _names: list[Name] | tuple[Name, ...] = field(default_factory=list)
 
-    def object_index_by_path(self, path: str) -> int:
-        """Lookup the index of an object path for serialization."""
-        return self.object_index(self._object_map[path.casefold()])
+    def add_name(self, name: Name | FName) -> None:
+        """Add a name to the list, without duplication."""
+        if isinstance(self._names, tuple):
+            msg = "Cannot add a name after name-table serialization."
+            raise RuntimeError(msg)  # noqa: TRY004
 
-    def object_index(self, obj: UObject | ExternalReference | None) -> int:
-        """Lookup the index of an object for serialization."""
-        if obj is None:
-            return 0
-        if isinstance(obj, UObject):
-            return self._exports.index(obj) + 1
-        return (self._imports.index(obj) + 1) * -1
+        if isinstance(name, FName):
+            name = name.name
 
-    def object_path(self, obj: UObject | ExternalReference) -> str:
-        """Build the path for an object."""
-        parts = [obj.name]
-        root = obj
+        if name not in self._names:
+            self._names.append(name)
 
-        while root.outer is not None:
-            root = root.outer
-            parts.append(root.name)
-
-        if isinstance(root, UObject):
-            parts.append(self.name)
-
-        return ".".join(reversed(parts)).casefold()
-
-    def add_import(self, obj: ExternalReference) -> None:
+    def add_import(self, obj: ExternalReference) -> ReferencePath:
         """Add an import."""
-        key = self.object_path(obj)
+        key = obj.reference()
         existing = self._object_map.get(key)
 
         if existing is obj:
-            return
+            return key
         if existing is not None:
             emsg = f"Object already registered: {key}"
             raise ValueError(emsg)
@@ -235,15 +375,16 @@ class Package:
         self.add_name(obj.class_name)
 
         self._imports.append(obj)
-        self._object_map[self.object_path(obj)] = obj
+        self._object_map[key] = obj
+        return key
 
-    def add_export(self, obj: UObject) -> None:
+    def add_export(self, obj: UObject) -> ReferencePath:
         """Add an export."""
-        key = self.object_path(obj)
+        key = obj.reference()
         existing = self._object_map.get(key)
 
         if existing is obj:
-            return
+            return key
         if existing is not None:
             emsg = f"Object already registered: {key}"
             raise ValueError(emsg)
@@ -252,13 +393,14 @@ class Package:
 
         self._exports.append(obj)
         self._object_map[key] = obj
+        return key
 
-    def name_index(self, name: str) -> int:
+    def name_index(self, name: Name) -> int:
         """Get the index of a name."""
-        key = name.casefold()
+        key = name
 
         for index, existing in enumerate(self._names):
-            if existing.casefold() == key:
+            if existing == key:
                 return index
 
         if isinstance(self._names, tuple):
@@ -268,17 +410,24 @@ class Package:
         self.add_name(name)
         return self.name_index(name)
 
-    def add_name(self, name: str) -> None:
-        """Add a name to the list, without duplication."""
-        if isinstance(self._names, tuple):
-            msg = "Cannot add a name post name map serialization."
-            raise RuntimeError(msg)  # noqa: TRY004
-        key = name.casefold()
+    def lookup_object_by_path(self, path: ReferencePath) -> UObject | ExternalReference:
+        """Lookup an object by the path."""
+        return self._object_map[path]
 
-        if any(existing.casefold() == key for existing in self._names):
-            return
-
-        self._names.append(name)
+    @overload
+    @deprecated("Use ReferencePath.serialize() instead")
+    def object_index(self, obj: ReferencePath) -> int: ...
+    @overload
+    def object_index(self, obj: UObject | ExternalReference | None) -> int: ...
+    def object_index(self, obj: UObject | ExternalReference | ReferencePath | None) -> int:
+        """Lookup the index of an object for serialization."""
+        if obj is None:
+            return 0
+        if isinstance(obj, ReferencePath):
+            obj = self.lookup_object_by_path(obj)
+        if isinstance(obj, UObject):
+            return self._exports.index(obj) + 1
+        return (self._imports.index(obj) + 1) * -1
 
     def serialize_names(self) -> bytes:
         """Convert all names to bytes."""
@@ -301,7 +450,7 @@ class Package:
 
         for obj in self._exports:
             if obj.payload is None:
-                msg = f"Object has no payload: {self.object_path(obj)}"
+                msg = f"Object has no payload: {obj.reference()}"
                 raise ValueError(msg)
 
             payloads.append(obj.payload.serialize(self))
@@ -416,7 +565,8 @@ class Package:
         )
 
 
-def serialize_fstring(value: str) -> bytes:
+def serialize_fstring(value: str | ReferencePath | Name) -> bytes:
+    value = str(value)
     try:
         encoded = value.encode("ascii") + b"\0"
         length = len(encoded)

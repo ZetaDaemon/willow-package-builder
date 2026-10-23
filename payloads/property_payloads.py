@@ -1,11 +1,11 @@
 import struct
 from abc import ABC
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from enum import IntFlag
 from typing import override
 
 from payloads.class_payload import UFieldPayload
-from upackage import ExternalReference, FName, Package, UObject
+from upackage import FName, Package, ReferencePath
 
 
 class PropertyFlags(IntFlag):
@@ -30,20 +30,20 @@ class UPropertyPayload(UFieldPayload, ABC):
     array_dimension: int = 1
     property_flags: PropertyFlags = PropertyFlags.NONE
     category: FName = field(default_factory=lambda: FName("None"))
-    array_enum: UObject | ExternalReference | None = None
+    array_enum: ReferencePath = field(default_factory=ReferencePath)
 
+    @override
     def serialize_body(self, package: Package) -> bytes:
         """Serialize the inherited data and UProperty portion."""
-        return b"".join(
-            (
-                super().serialize_body(package),
-                struct.pack("<i", self.array_dimension),
-                struct.pack("<Q", int(self.property_flags)),
-                self.category.serialize(package),
-                struct.pack("<i", package.object_index(self.array_enum)),
-            )
+        return (
+            super().serialize_body(package)
+            + struct.pack("<i", self.array_dimension)
+            + struct.pack("<Q", int(self.property_flags))
+            + self.category.serialize(package)
+            + self.array_enum.serialize(package)
         )
 
+    @override
     def serialize(self, package: Package) -> bytes:
         """Serialize a complete property definition."""
         if self.property_flags & PropertyFlags.NET:
@@ -54,12 +54,10 @@ class UPropertyPayload(UFieldPayload, ABC):
             msg = "Array dimension must be positive"
             raise ValueError(msg)
 
-        return b"".join(
-            (
-                struct.pack("<i", self.net_index),
-                FName("None").serialize(package),
-                self.serialize_body(package),
-            )
+        return (
+            struct.pack("<i", self.net_index)
+            + FName("None").serialize(package)
+            + self.serialize_body(package)
         )
 
 
@@ -92,24 +90,23 @@ class UStrPropertyPayload(UPropertyPayload):
 class UBytePropertyPayload(UPropertyPayload):
     """Byte or enum property."""
 
-    enum: UObject | ExternalReference | None = None
+    enum: ReferencePath = field(default_factory=ReferencePath)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
-        return super().serialize_body(package) + struct.pack("<i", package.object_index(self.enum))
+        return super().serialize_body(package) + self.enum.serialize(package)
 
 
 @dataclass
 class UObjectPropertyPayload(UPropertyPayload):
     """Object reference property."""
 
-    property_class: UObject | ExternalReference = field(kw_only=True)
+    _: KW_ONLY
+    property_class: ReferencePath = field(default_factory=ReferencePath)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
-        return super().serialize_body(package) + struct.pack(
-            "<i", package.object_index(self.property_class)
-        )
+        return super().serialize_body(package) + self.property_class.serialize(package)
 
 
 @dataclass
@@ -121,10 +118,81 @@ class UComponentPropertyPayload(UObjectPropertyPayload):
 class UClassPropertyPayload(UObjectPropertyPayload):
     """UnrealScript class<T> property."""
 
-    meta_class: UObject | ExternalReference = field(kw_only=True)
+    _: KW_ONLY
+    meta_class: ReferencePath = field(default_factory=ReferencePath)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
-        return super().serialize_body(package) + struct.pack(
-            "<i", package.object_index(self.meta_class)
+        return super().serialize_body(package) + self.meta_class.serialize(package)
+
+
+@dataclass
+class UInterfacePropertyPayload(UPropertyPayload):
+    """Interface reference property."""
+
+    _: KW_ONLY
+    interface_class: ReferencePath = field(default_factory=ReferencePath)
+
+    @override
+    def serialize_body(self, package: Package) -> bytes:
+        return super().serialize_body(package) + self.interface_class.serialize(package)
+
+
+@dataclass
+class UArrayPropertyPayload(UPropertyPayload):
+    """Dynamic array property."""
+
+    _: KW_ONLY
+    inner: ReferencePath = field(default_factory=ReferencePath)
+
+    @override
+    def serialize_body(self, package: Package) -> bytes:
+        return super().serialize_body(package) + self.inner.serialize(package)
+
+
+@dataclass
+class UMapPropertyPayload(UPropertyPayload):
+    """Map property definition."""
+
+    _: KW_ONLY
+    key: ReferencePath = field(default_factory=ReferencePath)
+    value: ReferencePath = field(default_factory=ReferencePath)
+
+    @override
+    def serialize_body(self, package: Package) -> bytes:
+        return (
+            super().serialize_body(package)
+            + self.key.serialize(package)
+            + self.value.serialize(package)
+        )
+
+
+@dataclass
+class UStructPropertyPayload(UPropertyPayload):
+    """Struct property definition."""
+
+    _: KW_ONLY
+    struct: ReferencePath = field(default_factory=ReferencePath)
+
+    @override
+    def serialize_body(self, package: Package) -> bytes:
+        return super().serialize_body(package) + self.struct.serialize(package)
+
+
+@dataclass
+class UDelegatePropertyPayload(UPropertyPayload):
+    """Delegate property definition."""
+
+    source_delegate: ReferencePath = field(default_factory=ReferencePath)
+
+    _: KW_ONLY
+
+    function: ReferencePath = field(default_factory=ReferencePath)
+
+    @override
+    def serialize_body(self, package: Package) -> bytes:
+        return (
+            super().serialize_body(package)
+            + self.function.serialize(package)
+            + self.source_delegate.serialize(package)
         )

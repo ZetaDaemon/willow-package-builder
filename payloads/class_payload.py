@@ -4,28 +4,28 @@ from dataclasses import dataclass, field
 from enum import IntFlag
 from typing import ClassVar, override
 
-from upackage import ExternalReference, FName, ObjectPayload, Package, UObject, serialize_fstring
+from upackage import FName, ObjectPayload, Package, ReferencePath, serialize_fstring
 
 
 @dataclass
 class UFieldPayload(ObjectPayload, ABC):
     """Shared payload data for fields."""
 
-    next_field: UObject | ExternalReference | None = field(default=None, kw_only=True)
+    next_field: ReferencePath = field(default_factory=ReferencePath)
 
     def serialize_body(self, package: Package) -> bytes:
         """Serialize the UField portion of a payload."""
-        return struct.pack("<i", package.object_index(self.next_field))
+        return self.next_field.serialize(package)
 
 
 @dataclass
 class UStructPayload(UFieldPayload, ABC):
     """Abstract shared payload data for structs."""
 
-    super_struct: UObject | ExternalReference | None = None
-    script_text: UObject | ExternalReference | None = None
-    children: UObject | ExternalReference | None = None
-    cpp_text: UObject | ExternalReference | None = None
+    super_struct: ReferencePath = field(default_factory=ReferencePath)
+    script_text: ReferencePath = field(default_factory=ReferencePath)
+    children: ReferencePath = field(default_factory=ReferencePath)
+    cpp_text: ReferencePath = field(default_factory=ReferencePath)
 
     source_line: int = -1
     source_text_position: int = -1
@@ -38,12 +38,12 @@ class UStructPayload(UFieldPayload, ABC):
         """Serialize the inherited data and UStruct portion."""
         return (
             super().serialize_body(package)
+            + self.super_struct.serialize(package)
+            + self.script_text.serialize(package)
+            + self.children.serialize(package)
+            + self.cpp_text.serialize(package)
             + struct.pack(
-                "<iiiiiiii",
-                package.object_index(self.super_struct),
-                package.object_index(self.script_text),
-                package.object_index(self.children),
-                package.object_index(self.cpp_text),
+                "<iiii",
                 self.source_line,
                 self.source_text_position,
                 self.script_memory_size,
@@ -70,13 +70,13 @@ class UStatePayload(UStructPayload, ABC):
     label_table_offset: int = NO_LABEL_TABLE
     state_flags: StateFlags = StateFlags.NONE
 
-    function_map: dict[str, UObject | ExternalReference] = field(default_factory=dict)
+    function_map: dict[str, ReferencePath] = field(default_factory=dict)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
         """Serialize the inherited data and UState portion."""
         functions = b"".join(
-            FName(name).serialize(package) + struct.pack("<i", package.object_index(function))
+            FName(name).serialize(package) + function.serialize(package)
             for name, function in self.function_map.items()
         )
 
@@ -114,10 +114,10 @@ class UClassPayload(UStatePayload):
     net_index: int = -1
 
     class_flags: ClassFlags = ClassFlags.COMPILED | ClassFlags.PARSED
-    within: UObject | ExternalReference | None = None
+    within: ReferencePath = field(default_factory=ReferencePath)
     config_name: FName = field(default_factory=lambda: FName("None"))
 
-    component_defaults: dict[str, UObject | ExternalReference] = field(default_factory=dict)
+    component_defaults: dict[str, ReferencePath] = field(default_factory=dict)
 
     dont_sort_categories: list[str] = field(default_factory=list)
     hide_categories: list[str] = field(default_factory=list)
@@ -129,7 +129,7 @@ class UClassPayload(UStatePayload):
     native_class_name: str = ""
     dll_bind_name: FName = field(default_factory=lambda: FName("None"))
 
-    default_object: UObject | ExternalReference | None = None
+    default_object: ReferencePath = field(default_factory=ReferencePath)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
@@ -141,29 +141,27 @@ class UClassPayload(UStatePayload):
             )
 
         component_defaults = struct.pack("<i", len(self.component_defaults)) + b"".join(
-            FName(name).serialize(package) + struct.pack("<i", package.object_index(obj))
+            FName(name).serialize(package) + obj.serialize(package)
             for name, obj in self.component_defaults.items()
         )
 
-        return b"".join(
-            (
-                super().serialize_body(package),
-                struct.pack("<I", int(self.class_flags)),
-                struct.pack("<i", package.object_index(self.within)),
-                self.config_name.serialize(package),
-                component_defaults,
-                struct.pack("<i", 0),  # No implemented interfaces.
-                serialize_names(self.dont_sort_categories),
-                serialize_names(self.hide_categories),
-                serialize_names(self.auto_expand_categories),
-                serialize_names(self.auto_collapse_categories),
-                struct.pack("<i", int(self.force_script_order)),
-                serialize_names(self.class_groups),
-                serialize_fstring(self.native_class_name),
-                self.dll_bind_name.serialize(package),
-                struct.pack("<B", self.UNKNOWN_BL2_BYTE),
-                struct.pack("<i", package.object_index(self.default_object)),
-            )
+        return (
+            super().serialize_body(package)
+            + struct.pack("<I", int(self.class_flags))
+            + self.within.serialize(package)
+            + self.config_name.serialize(package)
+            + component_defaults
+            + struct.pack("<i", 0)  # No implemented interfaces.
+            + serialize_names(self.dont_sort_categories)
+            + serialize_names(self.hide_categories)
+            + serialize_names(self.auto_expand_categories)
+            + serialize_names(self.auto_collapse_categories)
+            + struct.pack("<i", int(self.force_script_order))
+            + serialize_names(self.class_groups)
+            + serialize_fstring(self.native_class_name)
+            + self.dll_bind_name.serialize(package)
+            + struct.pack("<B", self.UNKNOWN_BL2_BYTE)
+            + self.default_object.serialize(package)
         )
 
     @override

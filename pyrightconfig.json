@@ -5,5 +5,6 @@
     "reportImplicitStringConcatenation": "none",
     "reportUnknownVariableType": "none",
     "reportMissingModuleSource": "none",
-    "reportUnnecessaryComparison": "none"
+    "reportUnnecessaryComparison": "none",
+    "reportDeprecated": "error"
 }

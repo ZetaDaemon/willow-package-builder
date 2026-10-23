@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import ClassVar, override
 
-from upackage import ExternalReference, FName, ObjectPayload, Package, UObject, serialize_fstring
+from upackage import FName, ObjectPayload, Package, ReferencePath, serialize_fstring
 
 INDEX_NONE = -1
 PROPERTY_LIST_END = FName("None")
@@ -17,12 +17,19 @@ class PropertyOverride(ABC):
     PROPERTY_TYPE: ClassVar[str]
 
     @abstractmethod
-    def serialize_value(self, package: Package) -> bytes: ...
+    def serialize_value(self, package: Package) -> bytes:
+        """Convert the stored value into bytes."""
 
-    def serialize_metadata(self, package: Package) -> bytes:
+    def serialize_metadata(self, package: Package) -> bytes:  # pyright: ignore[reportUnusedParameter]  # noqa: ARG002
+        """Convert the metadata into bytes.
+
+        Not all properties have metadata so an 'empty' default function is provided,
+        rather than an abstract function like serialize_value.
+        """
         return b""
 
     def serialize(self, package: Package) -> bytes:
+        """Convert the property override into bytes."""
         value_data = self.serialize_value(package)
 
         return (
@@ -111,25 +118,25 @@ class EnumPropertyOverride(PropertyOverride):
 
 @dataclass
 class ObjectPropertyOverride(PropertyOverride):
-    value: UObject | ExternalReference | None
+    value: ReferencePath
 
     PROPERTY_TYPE: ClassVar[str] = "ObjectProperty"
 
     @override
     def serialize_value(self, package: Package) -> bytes:
-        return struct.pack("<i", package.object_index(self.value))
+        return self.value.serialize(package)
 
 
 @dataclass
 class ObjectArrayPropertyOverride(PropertyOverride):
-    values: list[UObject | ExternalReference | None]
+    values: list[ReferencePath]
 
     PROPERTY_TYPE: ClassVar[str] = "ArrayProperty"
 
     @override
     def serialize_value(self, package: Package) -> bytes:
         return struct.pack("<i", len(self.values)) + b"".join(
-            struct.pack("<i", package.object_index(value)) for value in self.values
+            value.serialize(package) for value in self.values
         )
 
 
