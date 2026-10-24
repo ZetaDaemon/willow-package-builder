@@ -3,7 +3,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import ClassVar, override
 
-from upackage import FName, ObjectPayload, Package, ReferencePath, serialize_fstring
+from willow_package_builder.upackage import (
+    FName,
+    ObjectPayload,
+    Package,
+    ReferencePath,
+    serialize_fstring,
+)
 
 INDEX_NONE = -1
 PROPERTY_LIST_END = FName("None")

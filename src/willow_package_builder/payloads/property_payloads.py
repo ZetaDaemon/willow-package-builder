@@ -1,12 +1,11 @@
-from multiprocessing import Value
 import struct
 from abc import ABC
 from dataclasses import KW_ONLY, dataclass, field
 from enum import IntFlag
 from typing import ClassVar, override
 
-from payloads.class_payload import UFieldPayload
-from upackage import FName, Package, ReferencePath
+from willow_package_builder.payloads.class_payload import UFieldPayload
+from willow_package_builder.upackage import FName, Package, ReferencePath
 
 
 class PropertyFlags(IntFlag):

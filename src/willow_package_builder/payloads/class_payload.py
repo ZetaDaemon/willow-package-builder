@@ -4,7 +4,14 @@ from dataclasses import dataclass, field
 from enum import IntFlag
 from typing import ClassVar, override
 
-from upackage import FName, ObjectPayload, Package, ReferencePath, serialize_fstring
+from willow_package_builder.bytecode import Bytecode
+from willow_package_builder.upackage import (
+    FName,
+    ObjectPayload,
+    Package,
+    ReferencePath,
+    serialize_fstring,
+)
 
 
 @dataclass
@@ -55,15 +62,12 @@ class UStructPayload(UFieldPayload, ABC):
     source_line: int = -1
     source_text_position: int = -1
 
-    script: bytes = b""
-    script_memory_size: int = 0
+    script: Bytecode = field(default_factory=Bytecode)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
         """Serialize the inherited data and UStruct portion."""
-        if self.script_memory_size < len(self.script):
-            msg = "Script memory size cannot be smaller than serialized bytecode size"
-            raise ValueError(msg)
+        script_data = self.script.serialize(package)
 
         return (
             super().serialize_body(package)
@@ -75,10 +79,10 @@ class UStructPayload(UFieldPayload, ABC):
                 "<iiii",
                 self.source_line,
                 self.source_text_position,
-                self.script_memory_size,
-                len(self.script),
+                self.script.memory_size(),
+                len(script_data),
             )
-            + self.script
+            + script_data
         )
 
 

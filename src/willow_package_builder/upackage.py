@@ -4,7 +4,7 @@ import struct
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import IntFlag
-from typing import Any, overload, override
+from typing import overload, override
 from uuid import UUID, uuid4
 from warnings import deprecated
 

@@ -1,16 +1,16 @@
 from pathlib import Path
 
-from bytecode import ScriptOpcode
-from payloads.class_payload import (
+from willow_package_builder.bytecode import Bytecode, NativeFunction, ScriptOpcode
+from willow_package_builder.payloads.class_payload import (
     ClassFlags,
     FunctionFlags,
     StateFlags,
     UClassPayload,
     UFunctionPayload,
 )
-from payloads.instance_payload import ObjectInstancePayload
-from payloads.property_payloads import PropertyFlags, UIntPropertyPayload
-from upackage import (
+from willow_package_builder.payloads.instance_payload import ObjectInstancePayload
+from willow_package_builder.payloads.property_payloads import PropertyFlags, UIntPropertyPayload
+from willow_package_builder.upackage import (
     ExternalReference,
     FName,
     ObjectFlags,
@@ -134,15 +134,34 @@ def build_example_package() -> Package:
         object_class=int_property,
         flags=ObjectFlags.DEFAULT_EXPORT,
     )
+    return_value = package.add_export(
+        UObject(
+            name=FName("ReturnValue"),
+            outer=test_function.reference(),
+            object_class=int_property,
+            flags=ObjectFlags.DEFAULT_EXPORT,
+            payload=UIntPropertyPayload(
+                property_flags=(PropertyFlags.PARAM | PropertyFlags.RETURN_PARAM)
+            ),
+        )
+    )
 
     package.add_export(test_function)
     package.add_export(number_parameter)
 
     # Declare the input parameter.
-    number_parameter.payload = UIntPropertyPayload(property_flags=PropertyFlags.PARAM)
+    number_parameter.payload = UIntPropertyPayload(
+        property_flags=PropertyFlags.PARAM, next_field=return_value
+    )
 
-    # A void return followed by the script terminator.
-    script = bytes((ScriptOpcode.RETURN, ScriptOpcode.NOTHING, ScriptOpcode.END_OF_SCRIPT))
+    # Return number * value
+    script = Bytecode()
+
+    script += ScriptOpcode.RETURN
+    with script.native_function(NativeFunction.MULTIPLY_INT):
+        script.add_local_variable(number_parameter.reference())
+        script.add_instance_variable(value_property.reference())
+    script += ScriptOpcode.END_OF_SCRIPT
 
     test_function.payload = UFunctionPayload(
         friendly_name=FName("Test"),
@@ -150,7 +169,6 @@ def build_example_package() -> Package:
         children=number_parameter.reference(),
         next_field=value_property.reference(),
         script=script,
-        script_memory_size=len(script),
     )
 
     # Replace the earlier class payload assignment to include Test.
@@ -168,4 +186,4 @@ def build_example_package() -> Package:
 
 
 package = build_example_package()
-Path("ExampleClasses.upk").write_bytes(package.serialize())
+(Path(__file__).parent / "ExampleClasses.upk").write_bytes(package.serialize())
