@@ -1,0 +1,126 @@
+import sys
+import traceback
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import TYPE_CHECKING, TextIO, overload
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from pathlib import Path
+
+
+class WarningCode(StrEnum):
+    """Warning category."""
+
+    UNQUALIFIED_CLASS = "unqualified-class"
+    SHADOWED_INSTANCE_VARIABLE = "shadowed-instance-variable"
+    EXPLICIT_ENUM_SENTINEL = "explicit-enum-sentinel"
+    PLACEHOLDER_FUNCTION_BODY = "placeholder-function-body"
+    UNSUPPORTED_INTERFACE_COMPILATION = "unsupported-interface-compilation"
+
+
+class WarningAction(StrEnum):
+    """Warning action."""
+
+    WARN = "warn"
+    IGNORE = "ignore"
+    ERROR = "error"
+
+
+class CompilationError(Exception):
+    """An error in the source being compiled."""
+
+
+class ConfigError(Exception):
+    """An error in the package configuration."""
+
+
+@dataclass
+class Logger:
+    log_file: Path
+    debug: bool = False
+
+    warning_actions: dict[WarningCode, WarningAction] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.log_file.exists():
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            self.log_file.open("x").close()
+        if not self.log_file.is_file():
+            msg = f"{self.log_file} exists and is not a file."
+            raise RuntimeError(msg)
+        else:
+            self.log_file.open("w").close()
+
+    def log_to_file(self, *values: object) -> None:
+        with self.log_file.open("a", encoding="utf-8") as file:
+            print(*values, file=file)
+
+    def log(self, *values: object, out: TextIO = sys.stdout) -> None:
+        print(*values, file=out)
+        self.log_to_file(*values)
+
+    @overload
+    def warning(self, code: WarningCode, message: str) -> None: ...
+    @overload
+    def warning(
+        self, code: WarningCode, message: str, source: Path, line: int, column: int
+    ) -> None: ...
+    def warning(
+        self,
+        code: WarningCode,
+        message: str,
+        source: Path | None = None,
+        line: int = 0,
+        column: int = 0,
+    ) -> None:
+        action = self.warning_actions.get(code, WarningAction.WARN)
+
+        if source is not None:
+            message = f"{source}: {message} at {line}:{column}"
+
+        match action:
+            case WarningAction.IGNORE:
+                return
+            case WarningAction.WARN:
+                self.log(f"warning [{code.value}]: {message}", out=sys.stderr)
+            case WarningAction.ERROR:
+                msg = f"[{code.value}]: {message}"
+                raise CompilationError(msg)
+
+    @contextmanager
+    def catch_errors_and_warnings(self) -> Generator[None]:
+        token = _active_logger.set(self)
+
+        try:
+            yield
+        except (CompilationError, ConfigError) as error:
+            self.log(f"{type(error).__name__}: {error}", out=sys.stderr)
+            if self.debug:
+                raise
+            raise SystemExit(1) from None
+        except Exception:
+            self.log_to_file(traceback.format_exc())
+            raise
+        finally:
+            _active_logger.reset(token)
+
+
+_active_logger: ContextVar[Logger | None] = ContextVar("active_logger", default=None)
+
+
+@overload
+def warn(code: WarningCode, message: str) -> None: ...
+@overload
+def warn(code: WarningCode, message: str, source: Path, line: int, column: int) -> None: ...
+def warn(
+    code: WarningCode, message: str, source: Path | None = None, line: int = 0, column: int = 0
+) -> None:
+    logger = _active_logger.get()
+    if logger is None:
+        msg = "No compiler logger is active."
+        raise RuntimeError(msg)
+
+    logger.warning(code, message, source, line, column)  # pyright: ignore[reportArgumentType]

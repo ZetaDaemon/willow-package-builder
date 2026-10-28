@@ -1,0 +1,1402 @@
+{
+  "$type": "CachedClass",
+  "fields": {
+    "package_name": "ExamplePackage",
+    "source_path": "Classes/ExampleClass.uc",
+    "source_hash": "67e839109b263c3db1312e65affb8150e2ce745721fa533cc3e3aaafd9438fc1",
+    "declaration": {
+      "$type": "ClassDeclaration",
+      "fields": {
+        "name": "ExampleClass",
+        "parent": "Object",
+        "is_interface": false,
+        "within": null,
+        "modifiers": {
+          "$tuple": []
+        },
+        "constants": [],
+        "enums": [
+          {
+            "$type": "EnumDeclaration",
+            "fields": {
+              "name": "ExampleMode",
+              "members": {
+                "$tuple": [
+                  "EM_First",
+                  "EM_Second"
+                ]
+              }
+            }
+          }
+        ],
+        "structs": [
+          {
+            "$type": "StructDeclaration",
+            "fields": {
+              "name": "ExampleData",
+              "parent": null,
+              "modifiers": {
+                "$tuple": []
+              },
+              "variables": [
+                {
+                  "$type": "VariableDeclaration",
+                  "fields": {
+                    "name": "Count",
+                    "type_ref": {
+                      "$type": "TypeReference",
+                      "fields": {
+                        "name": "int",
+                        "arguments": {
+                          "$tuple": []
+                        }
+                      }
+                    },
+                    "array_dimension": 1,
+                    "modifiers": {
+                      "$tuple": []
+                    },
+                    "category_tokens": null
+                  }
+                },
+                {
+                  "$type": "VariableDeclaration",
+                  "fields": {
+                    "name": "Amount",
+                    "type_ref": {
+                      "$type": "TypeReference",
+                      "fields": {
+                        "name": "float",
+                        "arguments": {
+                          "$tuple": []
+                        }
+                      }
+                    },
+                    "array_dimension": 1,
+                    "modifiers": {
+                      "$tuple": []
+                    },
+                    "category_tokens": null
+                  }
+                }
+              ],
+              "default_tokens": null
+            }
+          },
+          {
+            "$type": "StructDeclaration",
+            "fields": {
+              "name": "PlainData",
+              "parent": null,
+              "modifiers": {
+                "$tuple": []
+              },
+              "variables": [
+                {
+                  "$type": "VariableDeclaration",
+                  "fields": {
+                    "name": "Count",
+                    "type_ref": {
+                      "$type": "TypeReference",
+                      "fields": {
+                        "name": "int",
+                        "arguments": {
+                          "$tuple": []
+                        }
+                      }
+                    },
+                    "array_dimension": 1,
+                    "modifiers": {
+                      "$tuple": []
+                    },
+                    "category_tokens": null
+                  }
+                }
+              ],
+              "default_tokens": null
+            }
+          },
+          {
+            "$type": "StructDeclaration",
+            "fields": {
+              "name": "TextData",
+              "parent": null,
+              "modifiers": {
+                "$tuple": []
+              },
+              "variables": [
+                {
+                  "$type": "VariableDeclaration",
+                  "fields": {
+                    "name": "Message",
+                    "type_ref": {
+                      "$type": "TypeReference",
+                      "fields": {
+                        "name": "string",
+                        "arguments": {
+                          "$tuple": []
+                        }
+                      }
+                    },
+                    "array_dimension": 1,
+                    "modifiers": {
+                      "$tuple": []
+                    },
+                    "category_tokens": null
+                  }
+                }
+              ],
+              "default_tokens": null
+            }
+          },
+          {
+            "$type": "StructDeclaration",
+            "fields": {
+              "name": "NestedData",
+              "parent": null,
+              "modifiers": {
+                "$tuple": []
+              },
+              "variables": [
+                {
+                  "$type": "VariableDeclaration",
+                  "fields": {
+                    "name": "Data",
+                    "type_ref": {
+                      "$type": "TypeReference",
+                      "fields": {
+                        "name": "TextData",
+                        "arguments": {
+                          "$tuple": []
+                        }
+                      }
+                    },
+                    "array_dimension": 1,
+                    "modifiers": {
+                      "$tuple": []
+                    },
+                    "category_tokens": null
+                  }
+                }
+              ],
+              "default_tokens": null
+            }
+          }
+        ],
+        "variables": [
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Value",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "int",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "SmallNumber",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "byte",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Fraction",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "float",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Enabled",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "bool",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Identifier",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "name",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Message",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "string",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "ObjectClass",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "class",
+                  "arguments": {
+                    "$tuple": [
+                      {
+                        "$type": "TypeReference",
+                        "fields": {
+                          "name": "Object",
+                          "arguments": {
+                            "$tuple": []
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "ExampleClassType",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "class",
+                  "arguments": {
+                    "$tuple": [
+                      {
+                        "$type": "TypeReference",
+                        "fields": {
+                          "name": "ExampleClass",
+                          "arguments": {
+                            "$tuple": []
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Targets",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "array",
+                  "arguments": {
+                    "$tuple": [
+                      {
+                        "$type": "TypeReference",
+                        "fields": {
+                          "name": "Object",
+                          "arguments": {
+                            "$tuple": []
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Mode",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "ExampleMode",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "BlendMode",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "AlphaBlendType",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Data",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "ExampleData",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Plain",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "PlainData",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Text",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "TextData",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          },
+          {
+            "$type": "VariableDeclaration",
+            "fields": {
+              "name": "Nested",
+              "type_ref": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "NestedData",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "array_dimension": 1,
+              "modifiers": {
+                "$tuple": []
+              },
+              "category_tokens": null
+            }
+          }
+        ],
+        "functions": [
+          {
+            "$type": "FunctionDeclaration",
+            "fields": {
+              "name": "Test",
+              "return_type": {
+                "$type": "TypeReference",
+                "fields": {
+                  "name": "int",
+                  "arguments": {
+                    "$tuple": []
+                  }
+                }
+              },
+              "parameters": [
+                {
+                  "$type": "ParameterDeclaration",
+                  "fields": {
+                    "name": "Number",
+                    "type_ref": {
+                      "$type": "TypeReference",
+                      "fields": {
+                        "name": "int",
+                        "arguments": {
+                          "$tuple": []
+                        }
+                      }
+                    },
+                    "modifiers": {
+                      "$tuple": []
+                    },
+                    "default_tokens": null
+                  }
+                }
+              ],
+              "func_type": {
+                "$enum": "FunctionType",
+                "name": "FUNCTION"
+              },
+              "modifiers": {
+                "$tuple": []
+              },
+              "native_index": null,
+              "has_body": true,
+              "body_tokens": [
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "local",
+                    "line": 48,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "int",
+                    "line": 48,
+                    "column": 11
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Temporary",
+                    "line": 48,
+                    "column": 15
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ";",
+                    "line": 48,
+                    "column": 24
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "while",
+                    "line": 49,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "(",
+                    "line": 49,
+                    "column": 11
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Number",
+                    "line": 49,
+                    "column": 12
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "<",
+                    "line": 49,
+                    "column": 19
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "5",
+                    "line": 49,
+                    "column": 21
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ")",
+                    "line": 49,
+                    "column": 22
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "{",
+                    "line": 50,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "if",
+                    "line": 51,
+                    "column": 9
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "(",
+                    "line": 51,
+                    "column": 11
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "number",
+                    "line": 51,
+                    "column": 12
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "%",
+                    "line": 51,
+                    "column": 19
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "2",
+                    "line": 51,
+                    "column": 21
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "==",
+                    "line": 51,
+                    "column": 23
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "0",
+                    "line": 51,
+                    "column": 26
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ")",
+                    "line": 51,
+                    "column": 27
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "{",
+                    "line": 52,
+                    "column": 9
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "break",
+                    "line": 53,
+                    "column": 13
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ";",
+                    "line": 53,
+                    "column": 18
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "}",
+                    "line": 54,
+                    "column": 9
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Number",
+                    "line": 55,
+                    "column": 9
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "=",
+                    "line": 55,
+                    "column": 16
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Number",
+                    "line": 55,
+                    "column": 18
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "+",
+                    "line": 55,
+                    "column": 25
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "1",
+                    "line": 55,
+                    "column": 27
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ";",
+                    "line": 55,
+                    "column": 28
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "}",
+                    "line": 56,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "if",
+                    "line": 57,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "(",
+                    "line": 57,
+                    "column": 7
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Number",
+                    "line": 57,
+                    "column": 8
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "<",
+                    "line": 57,
+                    "column": 15
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "10",
+                    "line": 57,
+                    "column": 17
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ")",
+                    "line": 57,
+                    "column": 19
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "{",
+                    "line": 58,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Temporary",
+                    "line": 59,
+                    "column": 9
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "=",
+                    "line": 59,
+                    "column": 19
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "5",
+                    "line": 59,
+                    "column": 21
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ";",
+                    "line": 59,
+                    "column": 22
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "}",
+                    "line": 60,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "else",
+                    "line": 61,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "if",
+                    "line": 61,
+                    "column": 10
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "(",
+                    "line": 61,
+                    "column": 12
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Number",
+                    "line": 61,
+                    "column": 13
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "<",
+                    "line": 61,
+                    "column": 20
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "100",
+                    "line": 61,
+                    "column": 22
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ")",
+                    "line": 61,
+                    "column": 25
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "{",
+                    "line": 62,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Temporary",
+                    "line": 63,
+                    "column": 9
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "=",
+                    "line": 63,
+                    "column": 19
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "15",
+                    "line": 63,
+                    "column": 21
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ";",
+                    "line": 63,
+                    "column": 23
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "}",
+                    "line": 64,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "else",
+                    "line": 65,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "{",
+                    "line": 66,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Temporary",
+                    "line": 67,
+                    "column": 9
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "=",
+                    "line": 67,
+                    "column": 19
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "150",
+                    "line": 67,
+                    "column": 21
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ";",
+                    "line": 67,
+                    "column": 24
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "}",
+                    "line": 68,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "return",
+                    "line": 69,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Temporary",
+                    "line": 69,
+                    "column": 12
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "+",
+                    "line": 69,
+                    "column": 22
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Value",
+                    "line": 69,
+                    "column": 24
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "*",
+                    "line": 69,
+                    "column": 30
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "Number",
+                    "line": 69,
+                    "column": 32
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ";",
+                    "line": 69,
+                    "column": 38
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "operators": []
+      }
+    },
+    "includes_body_tokens": true,
+    "schema_version": 1,
+    "parser_version": 3
+  }
+}

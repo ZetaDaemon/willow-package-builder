@@ -1,0 +1,66 @@
+{
+  "$type": "CachedClass",
+  "fields": {
+    "package_name": "Core",
+    "source_path": "Classes/Interface.uc",
+    "source_hash": "658e88e62d75310c45c547d14a1d72ef713f78bf15a5d4e46ff25734444155dc",
+    "declaration": {
+      "$type": "ClassDeclaration",
+      "fields": {
+        "name": "Interface",
+        "parent": null,
+        "is_interface": true,
+        "within": null,
+        "modifiers": {
+          "$tuple": [
+            {
+              "$type": "ClassModifier",
+              "fields": {
+                "name": "abstract",
+                "arguments": null
+              }
+            },
+            {
+              "$type": "ClassModifier",
+              "fields": {
+                "name": "native",
+                "arguments": null
+              }
+            },
+            {
+              "$type": "ClassModifier",
+              "fields": {
+                "name": "hidecategories",
+                "arguments": {
+                  "$tuple": [
+                    {
+                      "$type": "Token",
+                      "fields": {
+                        "type": {
+                          "$enum": "TokenType",
+                          "name": "IDENTIFIER"
+                        },
+                        "text": "Mobile",
+                        "line": 4,
+                        "column": 20
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "constants": [],
+        "enums": [],
+        "structs": [],
+        "variables": [],
+        "functions": [],
+        "operators": []
+      }
+    },
+    "includes_body_tokens": false,
+    "schema_version": 1,
+    "parser_version": 3
+  }
+}

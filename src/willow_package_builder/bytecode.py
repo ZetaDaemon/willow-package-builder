@@ -138,52 +138,6 @@ class ScriptOpcode(IntEnum):
     LET_ATTRIBUTE = 0x5F
 
 
-class NativeFunction(IntEnum):
-    """Native Function indexes.
-
-    Only temporary for testing, eventually will be pulled from source.
-    """
-
-    COMPLEMENT_INT = 141  # ~A
-    NEGATE_INT = 143  # -A
-
-    MULTIPLY_INT = 144  # A * B
-    DIVIDE_INT = 145  # A / B
-    MODULO_INT = 253  # A % B
-    ADD_INT = 146  # A + B
-    SUBTRACT_INT = 147  # A - B
-
-    SHIFT_LEFT_INT = 148  # A << B
-    SHIFT_RIGHT_INT = 149  # A >> B
-    SHIFT_RIGHT_UNSIGNED_INT = 196  # A >>> B
-
-    LESS_INT = 150  # A < B
-    GREATER_INT = 151  # A > B
-    LESS_EQUAL_INT = 152  # A <= B
-    GREATER_EQUAL_INT = 153  # A >= B
-    EQUAL_INT = 154  # A == B
-    NOT_EQUAL_INT = 155  # A != B
-
-    BITWISE_AND_INT = 156  # A & B
-    BITWISE_XOR_INT = 157  # A ^ B
-    BITWISE_OR_INT = 158  # A | B
-
-    MULTIPLY_ASSIGN_INT_FLOAT = 159  # A *= B; B is float
-    DIVIDE_ASSIGN_INT_FLOAT = 160  # A /= B; B is float
-    ADD_ASSIGN_INT = 161  # A += B
-    SUBTRACT_ASSIGN_INT = 162  # A -= B
-
-    PRE_INCREMENT_INT = 163  # ++A
-    PRE_DECREMENT_INT = 164  # --A
-    POST_INCREMENT_INT = 165  # A++
-    POST_DECREMENT_INT = 166  # A--
-
-    RAND_INT = 167  # Rand(Max)
-    MIN_INT = 249  # Min(A, B)
-    MAX_INT = 250  # Max(A, B)
-    CLAMP_INT = 251  # Clamp(V, A, B)
-
-
 FIRST_EXTENDED_NATIVE = 0x60
 LAST_EXTENDED_NATIVE = 0x6F
 
@@ -288,6 +242,34 @@ class IfBlock:
 
 
 @dataclass
+class LoopBlock:
+    bytecode: Bytecode
+    continue_target: BytecodeLabel
+    break_target: BytecodeLabel
+    active: bool = True
+
+    def break_statement(self) -> Bytecode:
+        if not self.active:
+            msg = "Loop block is no longer active"
+            raise RuntimeError(msg)
+
+        script = Bytecode()
+        script += ScriptOpcode.JUMP
+        script += BytecodeJump(self.break_target)
+        return script
+
+    def continue_statement(self) -> Bytecode:
+        if not self.active:
+            msg = "Loop block is no longer active"
+            raise RuntimeError(msg)
+
+        script = Bytecode()
+        script += ScriptOpcode.JUMP
+        script += BytecodeJump(self.continue_target)
+        return script
+
+
+@dataclass
 class Bytecode:
     parts: list[bytes | BytecodeItem] = field(default_factory=list)
 
@@ -377,9 +359,10 @@ class Bytecode:
     def native_function(self, native_index: int) -> Generator[None]:
         self.begin_native_call(native_index)
 
-        yield
-
-        self.end_native_call()
+        try:
+            yield
+        finally:
+            self.end_native_call()
 
     def begin_if(self, condition: Bytecode) -> BytecodeLabel:
         end = BytecodeLabel()
@@ -388,18 +371,9 @@ class Bytecode:
         self += condition
         return end
 
-    def begin_else(self, otherwise: BytecodeLabel) -> BytecodeLabel:
-        end = BytecodeLabel()
-
-        self += ScriptOpcode.JUMP
-        self += BytecodeJump(end)
-        self += otherwise
-
-        return end
-
     @contextmanager
     def if_statement(self, condition: Bytecode) -> Generator[IfBlock]:
-        branch = IfBlock(bytecode=self, otherwise=self.begin_if(condition))
+        branch = IfBlock(self, self.begin_if(condition))
 
         try:
             yield branch
@@ -410,3 +384,23 @@ class Bytecode:
             self += branch.otherwise
 
         self += branch.end
+
+    @contextmanager
+    def while_statement(self, condition: Bytecode) -> Generator[LoopBlock]:
+        start = BytecodeLabel()
+        end = BytecodeLabel()
+        loop = LoopBlock(self, start, end)
+
+        self += start
+        self += ScriptOpcode.JUMP_IF_NOT
+        self += BytecodeJump(end)
+        self += condition
+
+        try:
+            yield loop
+        finally:
+            loop.active = False
+
+        self += ScriptOpcode.JUMP
+        self += BytecodeJump(start)
+        self += end
