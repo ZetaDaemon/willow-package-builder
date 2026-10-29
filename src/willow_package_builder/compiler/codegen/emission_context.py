@@ -8,11 +8,14 @@ if TYPE_CHECKING:
 
 
 class EmissionContext(Protocol):
-    config: PackageConfig
-    context: BuildContext
-
     @property
     def package(self) -> Package: ...
+
+    @property
+    def config(self) -> PackageConfig: ...
+
+    @property
+    def context(self) -> BuildContext: ...
 
     def class_object_reference(
         self, class_path: str, *, default_object: bool = False
