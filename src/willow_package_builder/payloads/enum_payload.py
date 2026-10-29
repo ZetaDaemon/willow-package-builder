@@ -2,9 +2,10 @@ import struct
 from dataclasses import dataclass, field
 from typing import override
 
-from willow_package_builder import logging
-from willow_package_builder.payloads.class_payload import UFieldPayload
+from willow_package_builder.logging import WarningCode, warn
 from willow_package_builder.upackage import FName, Package
+
+from .class_payload import UFieldPayload
 
 
 @dataclass
@@ -25,8 +26,8 @@ class UEnumPayload(UFieldPayload):
         sentinel = FName(f"{prefix}_MAX")
 
         if self.names[-1] == sentinel:
-            logging.warn(
-                logging.WarningCode.EXPLICIT_ENUM_SENTINEL,
+            warn(
+                WarningCode.EXPLICIT_ENUM_SENTINEL,
                 f"Enum payload already contains sentinel {sentinel}.",
             )
         else:

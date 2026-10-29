@@ -2,7 +2,7 @@ import tomllib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from willow_package_builder.logging import ConfigError
+from .logging import ConfigError
 
 if TYPE_CHECKING:
     from pathlib import Path

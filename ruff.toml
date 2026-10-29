@@ -2,22 +2,7 @@ line-length = 100
 
 [lint]
 select = ["ALL"]
-ignore = [
-    "FA102",
-    "EXE002",
-    "ANN401",
-    "FBT002",
-    "S311",
-    "D103",
-    "SLF001",
-    "D100",
-    "D104",
-    "FBT001",
-    "PLW0603",
-    "COM812",
-    "FBT003",
-    "PERF203",
-]
+ignore = ["G004", "FBT001", "FBT002", "COM812"]
 
 # Allow autofix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]

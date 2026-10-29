@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, ClassVar, Self, override
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from willow_package_builder.upackage import Package, ReferencePath
+    from .upackage import Package, ReferencePath
 
 
 class ScriptOpcode(IntEnum):

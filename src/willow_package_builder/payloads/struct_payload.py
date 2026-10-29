@@ -3,11 +3,12 @@ from dataclasses import dataclass, field
 from enum import IntFlag
 from typing import TYPE_CHECKING, override
 
-from willow_package_builder.payloads.class_payload import UStructPayload
 from willow_package_builder.upackage import FName, Package
 
+from .class_payload import UStructPayload
+
 if TYPE_CHECKING:
-    from willow_package_builder.payloads.instance_payload import PropertyOverride
+    from .instance_payload import PropertyOverride
 
 
 class StructFlags(IntFlag):

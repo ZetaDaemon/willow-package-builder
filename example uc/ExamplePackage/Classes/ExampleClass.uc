@@ -46,25 +46,19 @@ var NestedData Nested;
 function int Test(int Number)
 {
     local int Temporary;
-    while (Number < 5)
+    Temporary = 0;
+    while (Number < 20)
     {
-        if(number % 2 == 0)
+        if(Value > 10)
         {
             break;
         }
         Number = Number + 1;
+        if(Value < 5)
+        {
+            continue;
+        }
+        Number = Number + 1;
     }
-    if(Number < 10)
-    {
-        Temporary = 5;
-    }
-    else if(Number < 100)
-    {
-        Temporary = 15;
-    }
-    else
-    {
-        Temporary = 150;
-    }
-    return Temporary + Value * Number;
+    return Temporary;
 }

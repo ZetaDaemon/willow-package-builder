@@ -24,14 +24,14 @@ from .types import TypeType
 from .validation import FunctionBodyValidator
 
 if TYPE_CHECKING:
+    from .emission_context import EmissionContext
     from .expression_resolver import ExpressionResolver
-    from .package_builder import PackageBuilder
 
 
 @dataclass
 class FunctionEmitter:
     resolver: ExpressionResolver
-    builder: PackageBuilder
+    builder: EmissionContext
     function_object: UObject
 
     _loops: list[LoopBlock] = field(default_factory=list, init=False, repr=False)
@@ -83,7 +83,7 @@ class FunctionEmitter:
                         f"Scripted operator calls are not supported yet: "
                         f"{member.owner_class}.{operator.name}"
                     )
-                    raise CompilationError(msg)
+                    raise RuntimeError(msg)
 
                 for parameter in operator.parameters:
                     if "out" in parameter.modifiers or "skip" in parameter.modifiers:
@@ -91,7 +91,7 @@ class FunctionEmitter:
                             f"Operator {operator.name!r} requires unsupported "
                             "out or skip argument handling"
                         )
-                        raise CompilationError(msg)
+                        raise RuntimeError(msg)
 
                 with script.native_function(operator.native_index):
                     script += self.emit_expression(expression.left)

@@ -1,0 +1,21 @@
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from willow_package_builder.package_config import PackageConfig
+    from willow_package_builder.upackage import Package, ReferencePath
+
+    from .build_context import BuildContext
+
+
+class EmissionContext(Protocol):
+    package: Package
+    config: PackageConfig
+    context: BuildContext
+
+    def class_object_reference(
+        self, class_path: str, *, default_object: bool = False
+    ) -> ReferencePath: ...
+
+    def ensure_import(
+        self, *, name: str, outer: ReferencePath, class_package: str, class_name: str
+    ) -> ReferencePath: ...

@@ -1,25 +1,15 @@
-from dataclasses import dataclass
+import json
 from pathlib import Path
 
-from willow_package_builder.compiler.package_builder import PackageBuilder
-from willow_package_builder.logging import CompilationError, Logger
-from willow_package_builder.package_config import (
-    PackageConfig,
-    collect_build_packages,
-    load_package_graph,
-)
+from willow_package_builder.logging import CompilationError, Logger, info
+from willow_package_builder.package_config import collect_build_packages, load_package_graph
 
+from .build_context import BuildContext
 from .cache import load_or_parse_class
+from .package_builder import PackageBuilder
 from .references import ReferenceDatabase
 
-
-@dataclass
-class BuildContext:
-    packages: tuple[PackageConfig, ...]
-    build_packages: set[Path]
-    references: ReferenceDatabase
-    parents: dict[str, str | None]
-    class_order: tuple[str, ...]
+__all__ = ["build_package"]
 
 
 def prepare_build(target_directory: Path) -> BuildContext:
@@ -30,6 +20,10 @@ def prepare_build(target_directory: Path) -> BuildContext:
     references = ReferenceDatabase()
 
     for config in packages:
+        if config.directory in build_packages:
+            info(f"Preparing package {config.name}")
+        else:
+            info(f"Loading reference package {config.name}")
         for source_path in config.source_files():
             cached = load_or_parse_class(
                 config, source_path, include_body_tokens=config.directory in build_packages
@@ -76,5 +70,11 @@ def build_package(
             output_path.write_bytes(data)
 
             outputs.append(output_path)
+
+            manifest_path = output_path.with_suffix(".manifest.json")
+            manifest_path.write_text(
+                json.dumps(builder.manifest(), indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
 
     return tuple(outputs)

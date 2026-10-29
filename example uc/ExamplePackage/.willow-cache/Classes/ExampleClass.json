@@ -3,7 +3,7 @@
   "fields": {
     "package_name": "ExamplePackage",
     "source_path": "Classes/ExampleClass.uc",
-    "source_hash": "67e839109b263c3db1312e65affb8150e2ce745721fa533cc3e3aaafd9438fc1",
+    "source_hash": "d79e50e8a42999b4003627a84b6b5e613dcc78220fdb436e367f5ee4259cb55d",
     "declaration": {
       "$type": "ClassDeclaration",
       "fields": {
@@ -615,7 +615,7 @@
                       "$enum": "TokenType",
                       "name": "IDENTIFIER"
                     },
-                    "text": "while",
+                    "text": "Temporary",
                     "line": 49,
                     "column": 5
                   }
@@ -627,8 +627,56 @@
                       "$enum": "TokenType",
                       "name": "SYMBOL"
                     },
-                    "text": "(",
+                    "text": "=",
                     "line": 49,
+                    "column": 15
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "0",
+                    "line": 49,
+                    "column": 17
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": ";",
+                    "line": 49,
+                    "column": 18
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "IDENTIFIER"
+                    },
+                    "text": "while",
+                    "line": 50,
+                    "column": 5
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "(",
+                    "line": 50,
                     "column": 11
                   }
                 },
@@ -640,7 +688,7 @@
                       "name": "IDENTIFIER"
                     },
                     "text": "Number",
-                    "line": 49,
+                    "line": 50,
                     "column": 12
                   }
                 },
@@ -652,7 +700,7 @@
                       "name": "SYMBOL"
                     },
                     "text": "<",
-                    "line": 49,
+                    "line": 50,
                     "column": 19
                   }
                 },
@@ -663,8 +711,8 @@
                       "$enum": "TokenType",
                       "name": "INTEGER"
                     },
-                    "text": "5",
-                    "line": 49,
+                    "text": "20",
+                    "line": 50,
                     "column": 21
                   }
                 },
@@ -676,8 +724,8 @@
                       "name": "SYMBOL"
                     },
                     "text": ")",
-                    "line": 49,
-                    "column": 22
+                    "line": 50,
+                    "column": 23
                   }
                 },
                 {
@@ -688,7 +736,7 @@
                       "name": "SYMBOL"
                     },
                     "text": "{",
-                    "line": 50,
+                    "line": 51,
                     "column": 5
                   }
                 },
@@ -700,7 +748,7 @@
                       "name": "IDENTIFIER"
                     },
                     "text": "if",
-                    "line": 51,
+                    "line": 52,
                     "column": 9
                   }
                 },
@@ -712,7 +760,7 @@
                       "name": "SYMBOL"
                     },
                     "text": "(",
-                    "line": 51,
+                    "line": 52,
                     "column": 11
                   }
                 },
@@ -723,8 +771,8 @@
                       "$enum": "TokenType",
                       "name": "IDENTIFIER"
                     },
-                    "text": "number",
-                    "line": 51,
+                    "text": "Value",
+                    "line": 52,
                     "column": 12
                   }
                 },
@@ -735,9 +783,9 @@
                       "$enum": "TokenType",
                       "name": "SYMBOL"
                     },
-                    "text": "%",
-                    "line": 51,
-                    "column": 19
+                    "text": ">",
+                    "line": 52,
+                    "column": 18
                   }
                 },
                 {
@@ -747,33 +795,9 @@
                       "$enum": "TokenType",
                       "name": "INTEGER"
                     },
-                    "text": "2",
-                    "line": 51,
-                    "column": 21
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": "==",
-                    "line": 51,
-                    "column": 23
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "INTEGER"
-                    },
-                    "text": "0",
-                    "line": 51,
-                    "column": 26
+                    "text": "10",
+                    "line": 52,
+                    "column": 20
                   }
                 },
                 {
@@ -784,8 +808,8 @@
                       "name": "SYMBOL"
                     },
                     "text": ")",
-                    "line": 51,
-                    "column": 27
+                    "line": 52,
+                    "column": 22
                   }
                 },
                 {
@@ -796,7 +820,7 @@
                       "name": "SYMBOL"
                     },
                     "text": "{",
-                    "line": 52,
+                    "line": 53,
                     "column": 9
                   }
                 },
@@ -808,7 +832,7 @@
                       "name": "IDENTIFIER"
                     },
                     "text": "break",
-                    "line": 53,
+                    "line": 54,
                     "column": 13
                   }
                 },
@@ -820,7 +844,7 @@
                       "name": "SYMBOL"
                     },
                     "text": ";",
-                    "line": 53,
+                    "line": 54,
                     "column": 18
                   }
                 },
@@ -832,7 +856,7 @@
                       "name": "SYMBOL"
                     },
                     "text": "}",
-                    "line": 54,
+                    "line": 55,
                     "column": 9
                   }
                 },
@@ -844,7 +868,7 @@
                       "name": "IDENTIFIER"
                     },
                     "text": "Number",
-                    "line": 55,
+                    "line": 56,
                     "column": 9
                   }
                 },
@@ -856,7 +880,7 @@
                       "name": "SYMBOL"
                     },
                     "text": "=",
-                    "line": 55,
+                    "line": 56,
                     "column": 16
                   }
                 },
@@ -868,7 +892,7 @@
                       "name": "IDENTIFIER"
                     },
                     "text": "Number",
-                    "line": 55,
+                    "line": 56,
                     "column": 18
                   }
                 },
@@ -880,7 +904,7 @@
                       "name": "SYMBOL"
                     },
                     "text": "+",
-                    "line": 55,
+                    "line": 56,
                     "column": 25
                   }
                 },
@@ -892,7 +916,7 @@
                       "name": "INTEGER"
                     },
                     "text": "1",
-                    "line": 55,
+                    "line": 56,
                     "column": 27
                   }
                 },
@@ -904,20 +928,8 @@
                       "name": "SYMBOL"
                     },
                     "text": ";",
-                    "line": 55,
-                    "column": 28
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": "}",
                     "line": 56,
-                    "column": 5
+                    "column": 28
                   }
                 },
                 {
@@ -929,7 +941,7 @@
                     },
                     "text": "if",
                     "line": 57,
-                    "column": 5
+                    "column": 9
                   }
                 },
                 {
@@ -941,7 +953,7 @@
                     },
                     "text": "(",
                     "line": 57,
-                    "column": 7
+                    "column": 11
                   }
                 },
                 {
@@ -951,9 +963,9 @@
                       "$enum": "TokenType",
                       "name": "IDENTIFIER"
                     },
-                    "text": "Number",
+                    "text": "Value",
                     "line": 57,
-                    "column": 8
+                    "column": 12
                   }
                 },
                 {
@@ -965,7 +977,7 @@
                     },
                     "text": "<",
                     "line": 57,
-                    "column": 15
+                    "column": 18
                   }
                 },
                 {
@@ -975,9 +987,9 @@
                       "$enum": "TokenType",
                       "name": "INTEGER"
                     },
-                    "text": "10",
+                    "text": "5",
                     "line": 57,
-                    "column": 17
+                    "column": 20
                   }
                 },
                 {
@@ -989,7 +1001,7 @@
                     },
                     "text": ")",
                     "line": 57,
-                    "column": 19
+                    "column": 21
                   }
                 },
                 {
@@ -1001,7 +1013,7 @@
                     },
                     "text": "{",
                     "line": 58,
-                    "column": 5
+                    "column": 9
                   }
                 },
                 {
@@ -1011,33 +1023,9 @@
                       "$enum": "TokenType",
                       "name": "IDENTIFIER"
                     },
-                    "text": "Temporary",
+                    "text": "continue",
                     "line": 59,
-                    "column": 9
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": "=",
-                    "line": 59,
-                    "column": 19
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "INTEGER"
-                    },
-                    "text": "5",
-                    "line": 59,
-                    "column": 21
+                    "column": 13
                   }
                 },
                 {
@@ -1049,7 +1037,7 @@
                     },
                     "text": ";",
                     "line": 59,
-                    "column": 22
+                    "column": 21
                   }
                 },
                 {
@@ -1061,43 +1049,7 @@
                     },
                     "text": "}",
                     "line": 60,
-                    "column": 5
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "IDENTIFIER"
-                    },
-                    "text": "else",
-                    "line": 61,
-                    "column": 5
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "IDENTIFIER"
-                    },
-                    "text": "if",
-                    "line": 61,
-                    "column": 10
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": "(",
-                    "line": 61,
-                    "column": 12
+                    "column": 9
                   }
                 },
                 {
@@ -1109,7 +1061,7 @@
                     },
                     "text": "Number",
                     "line": 61,
-                    "column": 13
+                    "column": 9
                   }
                 },
                 {
@@ -1119,9 +1071,9 @@
                       "$enum": "TokenType",
                       "name": "SYMBOL"
                     },
-                    "text": "<",
+                    "text": "=",
                     "line": 61,
-                    "column": 20
+                    "column": 16
                   }
                 },
                 {
@@ -1129,11 +1081,11 @@
                   "fields": {
                     "type": {
                       "$enum": "TokenType",
-                      "name": "INTEGER"
+                      "name": "IDENTIFIER"
                     },
-                    "text": "100",
+                    "text": "Number",
                     "line": 61,
-                    "column": 22
+                    "column": 18
                   }
                 },
                 {
@@ -1143,7 +1095,7 @@
                       "$enum": "TokenType",
                       "name": "SYMBOL"
                     },
-                    "text": ")",
+                    "text": "+",
                     "line": 61,
                     "column": 25
                   }
@@ -1153,9 +1105,33 @@
                   "fields": {
                     "type": {
                       "$enum": "TokenType",
+                      "name": "INTEGER"
+                    },
+                    "text": "1",
+                    "line": 61,
+                    "column": 27
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
                       "name": "SYMBOL"
                     },
-                    "text": "{",
+                    "text": ";",
+                    "line": 61,
+                    "column": 28
+                  }
+                },
+                {
+                  "$type": "Token",
+                  "fields": {
+                    "type": {
+                      "$enum": "TokenType",
+                      "name": "SYMBOL"
+                    },
+                    "text": "}",
                     "line": 62,
                     "column": 5
                   }
@@ -1167,152 +1143,8 @@
                       "$enum": "TokenType",
                       "name": "IDENTIFIER"
                     },
-                    "text": "Temporary",
-                    "line": 63,
-                    "column": 9
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": "=",
-                    "line": 63,
-                    "column": 19
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "INTEGER"
-                    },
-                    "text": "15",
-                    "line": 63,
-                    "column": 21
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": ";",
-                    "line": 63,
-                    "column": 23
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": "}",
-                    "line": 64,
-                    "column": 5
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "IDENTIFIER"
-                    },
-                    "text": "else",
-                    "line": 65,
-                    "column": 5
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": "{",
-                    "line": 66,
-                    "column": 5
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "IDENTIFIER"
-                    },
-                    "text": "Temporary",
-                    "line": 67,
-                    "column": 9
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": "=",
-                    "line": 67,
-                    "column": 19
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "INTEGER"
-                    },
-                    "text": "150",
-                    "line": 67,
-                    "column": 21
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": ";",
-                    "line": 67,
-                    "column": 24
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": "}",
-                    "line": 68,
-                    "column": 5
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "IDENTIFIER"
-                    },
                     "text": "return",
-                    "line": 69,
+                    "line": 63,
                     "column": 5
                   }
                 },
@@ -1324,7 +1156,7 @@
                       "name": "IDENTIFIER"
                     },
                     "text": "Temporary",
-                    "line": 69,
+                    "line": 63,
                     "column": 12
                   }
                 },
@@ -1335,57 +1167,9 @@
                       "$enum": "TokenType",
                       "name": "SYMBOL"
                     },
-                    "text": "+",
-                    "line": 69,
-                    "column": 22
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "IDENTIFIER"
-                    },
-                    "text": "Value",
-                    "line": 69,
-                    "column": 24
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
-                    "text": "*",
-                    "line": 69,
-                    "column": 30
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "IDENTIFIER"
-                    },
-                    "text": "Number",
-                    "line": 69,
-                    "column": 32
-                  }
-                },
-                {
-                  "$type": "Token",
-                  "fields": {
-                    "type": {
-                      "$enum": "TokenType",
-                      "name": "SYMBOL"
-                    },
                     "text": ";",
-                    "line": 69,
-                    "column": 38
+                    "line": 63,
+                    "column": 21
                   }
                 }
               ]

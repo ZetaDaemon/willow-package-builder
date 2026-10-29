@@ -1,12 +1,12 @@
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from willow_package_builder import logging
-from willow_package_builder.logging import CompilationError
+from willow_package_builder.logging import CompilationError, WarningCode, warn
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .declarations import FunctionDeclaration, ParameterDeclaration, VariableDeclaration
     from .references import ReferenceDatabase
 
@@ -46,8 +46,8 @@ class FunctionScope:
             self.class_path, self.parents
         ):
             if any(variable.name.casefold() == key for variable in class_declaration.variables):
-                logging.warn(
-                    logging.WarningCode.SHADOWED_INSTANCE_VARIABLE,
+                warn(
+                    WarningCode.SHADOWED_INSTANCE_VARIABLE,
                     f"{declaration.name!r} in "
                     f"{self.class_path}.{self.function.name} "
                     f"shadows instance variable {owner}.{declaration.name}.",

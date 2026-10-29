@@ -1,8 +1,7 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-from willow_package_builder import logging
-from willow_package_builder.logging import CompilationError
+from willow_package_builder.logging import CompilationError, WarningCode, info, warn
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import (
     ClassFlags,
@@ -44,14 +43,14 @@ from .emitter import FunctionEmitter
 from .expression_resolver import ExpressionResolver
 from .intrinsics import IntrinsicDefinition
 from .lexer import TokenType
-from .parser import Parser
+from .parser import FunctionParser
 from .scope import FunctionScope
 from .types import TypeType
 
 if TYPE_CHECKING:
     from willow_package_builder.package_config import PackageConfig
 
-    from .build import BuildContext
+    from .build_context import BuildContext
     from .declarations import ClassDeclaration
 
 
@@ -115,14 +114,15 @@ class PackageBuilder:
             declaration = self.context.references.classes[class_path]
 
             if declaration.is_interface:
-                logging.warn(
-                    logging.WarningCode.UNSUPPORTED_INTERFACE_COMPILATION,
+                warn(
+                    WarningCode.UNSUPPORTED_INTERFACE_COMPILATION,
                     f"Interface {class_path!r} is available for reference only; "
                     "its export will be omitted because interface compilation "
                     "is not supported yet.",
                 )
                 continue
 
+            info(f"Compiling class {class_path}")
             class_object = UObject(name=FName(declaration.name), flags=ObjectFlags.CLASS_EXPORT)
 
             class_reference = self.package.add_export(class_object)
@@ -505,7 +505,7 @@ class PackageBuilder:
 
                 resolver = ExpressionResolver(self.context, scope)
 
-                body = Parser.from_function_body(
+                body = FunctionParser.from_function_body(
                     function, expression_resolver=resolver
                 ).parse_function_body()
 
@@ -944,3 +944,11 @@ class PackageBuilder:
                     return True
 
         return False
+
+    def manifest(self) -> dict[str, object]:
+        return {
+            "classes": [
+                f"{self.config.name}.{exports.class_object.reference()}"
+                for exports in self.classes.values()
+            ]
+        }

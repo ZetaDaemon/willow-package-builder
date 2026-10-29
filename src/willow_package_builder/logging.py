@@ -37,6 +37,12 @@ class ConfigError(Exception):
     """An error in the package configuration."""
 
 
+class LogPrefix(StrEnum):
+    INFO = "[INFO] "
+    WARN = "[WARN] "
+    ERROR = "[ERROR]"
+
+
 @dataclass
 class Logger:
     log_file: Path
@@ -51,16 +57,17 @@ class Logger:
         if not self.log_file.is_file():
             msg = f"{self.log_file} exists and is not a file."
             raise RuntimeError(msg)
-        else:
-            self.log_file.open("w").close()
 
-    def log_to_file(self, *values: object) -> None:
+        self.log_file.open("w").close()
+
+    def _log_to_file(self, message: str, prefix: LogPrefix) -> None:
         with self.log_file.open("a", encoding="utf-8") as file:
-            print(*values, file=file)
+            for line in message.splitlines() or [""]:
+                print(f"{prefix} {line}", file=file)
 
-    def log(self, *values: object, out: TextIO = sys.stdout) -> None:
-        print(*values, file=out)
-        self.log_to_file(*values)
+    def _log(self, message: str, console_out: TextIO, file_prefix: LogPrefix) -> None:
+        print(message, file=console_out)
+        self._log_to_file(message, file_prefix)
 
     @overload
     def warning(self, code: WarningCode, message: str) -> None: ...
@@ -85,10 +92,13 @@ class Logger:
             case WarningAction.IGNORE:
                 return
             case WarningAction.WARN:
-                self.log(f"warning [{code.value}]: {message}", out=sys.stderr)
+                self._log(f"warning [{code.value}]: {message}", sys.stderr, LogPrefix.WARN)
             case WarningAction.ERROR:
                 msg = f"[{code.value}]: {message}"
                 raise CompilationError(msg)
+
+    def info(self, message: str) -> None:
+        self._log(message, sys.stdout, LogPrefix.INFO)
 
     @contextmanager
     def catch_errors_and_warnings(self) -> Generator[None]:
@@ -97,12 +107,12 @@ class Logger:
         try:
             yield
         except (CompilationError, ConfigError) as error:
-            self.log(f"{type(error).__name__}: {error}", out=sys.stderr)
+            self._log(f"{type(error).__name__}: {error}", sys.stderr, LogPrefix.ERROR)
             if self.debug:
                 raise
             raise SystemExit(1) from None
         except Exception:
-            self.log_to_file(traceback.format_exc())
+            self._log_to_file(traceback.format_exc(), LogPrefix.ERROR)
             raise
         finally:
             _active_logger.reset(token)
@@ -124,3 +134,12 @@ def warn(
         raise RuntimeError(msg)
 
     logger.warning(code, message, source, line, column)  # pyright: ignore[reportArgumentType]
+
+
+def info(message: str):
+    logger = _active_logger.get()
+    if logger is None:
+        msg = "No compiler logger is active."
+        raise RuntimeError(msg)
+
+    logger.info(message)

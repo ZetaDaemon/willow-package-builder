@@ -4,8 +4,9 @@ from dataclasses import KW_ONLY, dataclass, field
 from enum import IntFlag
 from typing import ClassVar, override
 
-from willow_package_builder.payloads.class_payload import UFieldPayload
 from willow_package_builder.upackage import FName, Package, ReferencePath
+
+from .class_payload import UFieldPayload
 
 
 class PropertyFlags(IntFlag):

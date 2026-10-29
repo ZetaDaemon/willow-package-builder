@@ -6,7 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from willow_package_builder.logging import CompilationError
+from willow_package_builder.logging import CompilationError, info
 
 from .declarations import (
     ClassDeclaration,
@@ -23,7 +23,7 @@ from .declarations import (
     VariableDeclaration,
 )
 from .lexer import Lexer, Token, TokenType
-from .parser import Parser
+from .parser import DeclarationParser
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -211,10 +211,14 @@ def load_or_parse_class(
     ):
         return cached
 
+    if include_body_tokens:
+        info(f"Parsing class {config.name}.{source_path.stem}")
+    else:
+        info(f"Parsing reference class {config.name}.{source_path.stem}")
     source = source_bytes.decode("utf-8-sig")
 
     try:
-        declaration = Parser(Lexer(source).tokenize()).parse_class_declaration(
+        declaration = DeclarationParser(Lexer(source).tokenize()).parse_class_declaration(
             include_body_tokens=include_body_tokens
         )
     except CompilationError as exc:
