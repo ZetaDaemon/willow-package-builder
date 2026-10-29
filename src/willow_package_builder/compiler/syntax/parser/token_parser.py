@@ -1,4 +1,4 @@
-from willow_package_builder.compiler.lexer import Token, TokenType
+from willow_package_builder.compiler.syntax.lexer import Token, TokenType
 from willow_package_builder.logging import CompilationError
 
 

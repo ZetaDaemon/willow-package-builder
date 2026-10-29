@@ -1,4 +1,4 @@
-from willow_package_builder.compiler.declarations import (
+from willow_package_builder.compiler.syntax.declarations import (
     ClassDeclaration,
     ClassModifier,
     ConstantDeclaration,
@@ -10,7 +10,7 @@ from willow_package_builder.compiler.declarations import (
     ParameterDeclaration,
     StructDeclaration,
 )
-from willow_package_builder.compiler.lexer import Token, TokenType
+from willow_package_builder.compiler.syntax.lexer import Token, TokenType
 from willow_package_builder.logging import CompilationError, WarningCode, warn
 
 from .declaration_syntax_parser import DeclarationSyntaxParser

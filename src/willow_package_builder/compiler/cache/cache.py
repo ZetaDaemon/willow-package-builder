@@ -6,9 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from willow_package_builder.logging import CompilationError, info
-
-from .declarations import (
+from willow_package_builder.compiler.syntax.declarations import (
     ClassDeclaration,
     ClassModifier,
     ConstantDeclaration,
@@ -22,8 +20,9 @@ from .declarations import (
     TypeReference,
     VariableDeclaration,
 )
-from .lexer import Lexer, Token, TokenType
-from .parser import DeclarationParser
+from willow_package_builder.compiler.syntax.lexer import Lexer, Token, TokenType
+from willow_package_builder.compiler.syntax.parser import DeclarationParser
+from willow_package_builder.logging import CompilationError, info
 
 if TYPE_CHECKING:
     from collections.abc import Callable

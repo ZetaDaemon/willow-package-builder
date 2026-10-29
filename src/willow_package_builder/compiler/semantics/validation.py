@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from willow_package_builder.logging import CompilationError
-
-from .expressions import BinaryExpression, Expression, IdentifierExpression
-from .scope import VariableType
-from .statements import (
+from willow_package_builder.compiler.syntax.expressions import (
+    BinaryExpression,
+    Expression,
+    IdentifierExpression,
+)
+from willow_package_builder.compiler.syntax.statements import (
     AssignmentStatement,
     BreakStatement,
     ContinueStatement,
@@ -17,6 +18,9 @@ from .statements import (
     Statement,
     WhileStatement,
 )
+from willow_package_builder.logging import CompilationError
+
+from .scope import VariableType
 from .types import ResolvedType, TypeType
 
 if TYPE_CHECKING:

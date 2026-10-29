@@ -1,13 +1,13 @@
 from typing import TYPE_CHECKING, Self
 
-from willow_package_builder.compiler.expressions import (
+from willow_package_builder.compiler.syntax.expressions import (
     BinaryExpression,
     Expression,
     IdentifierExpression,
     IntegerExpression,
 )
-from willow_package_builder.compiler.lexer import Token, TokenType
-from willow_package_builder.compiler.statements import (
+from willow_package_builder.compiler.syntax.lexer import Token, TokenType
+from willow_package_builder.compiler.syntax.statements import (
     AssignmentStatement,
     BreakStatement,
     ContinueStatement,
@@ -24,11 +24,11 @@ from willow_package_builder.logging import CompilationError
 from .declaration_syntax_parser import DeclarationSyntaxParser
 
 if TYPE_CHECKING:
-    from willow_package_builder.compiler.declarations import (
+    from willow_package_builder.compiler.semantics.expression_resolver import ExpressionResolver
+    from willow_package_builder.compiler.syntax.declarations import (
         FunctionDeclaration,
         VariableDeclaration,
     )
-    from willow_package_builder.compiler.expression_resolver import ExpressionResolver
 
 
 class FunctionParser(DeclarationSyntaxParser):

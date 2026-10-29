@@ -1,16 +1,25 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from willow_package_builder.compiler.syntax.declarations import OperatorType
+from willow_package_builder.compiler.syntax.expressions import (
+    BinaryExpression,
+    Expression,
+    IdentifierExpression,
+    IntegerExpression,
+)
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.package_config import collect_visible_packages
 
-from .declarations import OperatorType
-from .expressions import BinaryExpression, Expression, IdentifierExpression, IntegerExpression
 from .types import ResolvedType, TypeType
 
 if TYPE_CHECKING:
-    from .build_context import BuildContext
-    from .declarations import OperatorDeclaration, TypeReference
+    from willow_package_builder.compiler.build_context import BuildContext
+    from willow_package_builder.compiler.syntax.declarations import (
+        OperatorDeclaration,
+        TypeReference,
+    )
+
     from .references import ResolvedMember
     from .scope import FunctionScope
 

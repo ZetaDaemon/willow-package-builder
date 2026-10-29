@@ -7,7 +7,12 @@ from willow_package_builder.logging import CompilationError, WarningCode, warn
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .declarations import FunctionDeclaration, ParameterDeclaration, VariableDeclaration
+    from willow_package_builder.compiler.syntax.declarations import (
+        FunctionDeclaration,
+        ParameterDeclaration,
+        VariableDeclaration,
+    )
+
     from .references import ReferenceDatabase
 
 

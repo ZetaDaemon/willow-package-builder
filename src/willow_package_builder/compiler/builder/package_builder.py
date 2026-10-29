@@ -1,6 +1,15 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
+from willow_package_builder.compiler.builder.build_state import PackageBuildState
+from willow_package_builder.compiler.codegen.emitter import FunctionEmitter
+from willow_package_builder.compiler.semantics.expression_resolver import ExpressionResolver
+from willow_package_builder.compiler.semantics.intrinsics import IntrinsicDefinition
+from willow_package_builder.compiler.semantics.scope import FunctionScope
+from willow_package_builder.compiler.semantics.types import TypeType
+from willow_package_builder.compiler.syntax.declarations import FunctionType, TypeReference
+from willow_package_builder.compiler.syntax.lexer import TokenType
+from willow_package_builder.compiler.syntax.parser.function_parser import FunctionParser
 from willow_package_builder.logging import CompilationError, WarningCode, info, warn
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import (
@@ -38,34 +47,11 @@ from willow_package_builder.upackage import (
     UObject,
 )
 
-from .declarations import FunctionType, StructDeclaration, TypeReference
-from .emitter import FunctionEmitter
-from .expression_resolver import ExpressionResolver
-from .intrinsics import IntrinsicDefinition
-from .lexer import TokenType
-from .parser import FunctionParser
-from .scope import FunctionScope
-from .types import TypeType
+from .exports import ClassExports, StructExports
 
 if TYPE_CHECKING:
+    from willow_package_builder.compiler.build_context import BuildContext
     from willow_package_builder.package_config import PackageConfig
-
-    from .build_context import BuildContext
-    from .declarations import ClassDeclaration
-
-
-@dataclass
-class ClassExports:
-    declaration: ClassDeclaration
-    class_object: UObject
-    default_object: UObject
-
-
-@dataclass
-class StructExports:
-    owner_class: str
-    declaration: StructDeclaration
-    struct_object: UObject
 
 
 @dataclass
@@ -73,23 +59,35 @@ class PackageBuilder:
     context: BuildContext
     config: PackageConfig
 
-    package: Package = field(init=False)
-    classes: dict[str, ClassExports] = field(default_factory=dict, init=False)
-    structs: dict[str, StructExports] = field(default_factory=dict, init=False)
+    state: PackageBuildState = field(init=False)
+
+    @property
+    def package(self) -> Package:
+        return self.state.package
+
+    @property
+    def classes(self) -> dict[str, ClassExports]:
+        return self.state.classes
+
+    @property
+    def structs(self) -> dict[str, StructExports]:
+        return self.state.structs
 
     def __post_init__(self) -> None:
-        self.package = Package(
-            name=FName(self.config.name),
-            format=PackageFormat(
+        package = Package(
+            FName(self.config.name),
+            PackageFormat(
                 version=832, license_version=46, engine_version=1712575, cooker_version=134
             ),
-            flags=(
+            (
                 PackageFlags.ALLOW_DOWNLOAD
                 | PackageFlags.COOKED
                 | PackageFlags.CONTAINS_SCRIPT
                 | PackageFlags.STRIPPED_SOURCE
             ),
         )
+
+        self.state = PackageBuildState(self.context, self.config, package)
 
     def build(self) -> Package:
         self.reserve_classes()

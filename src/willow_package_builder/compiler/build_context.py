@@ -1,11 +1,10 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from willow_package_builder.compiler.references import ReferenceDatabase
+    from willow_package_builder.compiler.semantics.references import ReferenceDatabase
     from willow_package_builder.package_config import PackageConfig
 
 

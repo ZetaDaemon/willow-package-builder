@@ -1,10 +1,7 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from willow_package_builder.logging import CompilationError
-from willow_package_builder.package_config import PackageConfig, collect_visible_packages
-
-from .declarations import (
+from willow_package_builder.compiler.syntax.declarations import (
     ClassDeclaration,
     EnumDeclaration,
     FunctionDeclaration,
@@ -14,6 +11,9 @@ from .declarations import (
     TypeReference,
     VariableDeclaration,
 )
+from willow_package_builder.logging import CompilationError
+from willow_package_builder.package_config import PackageConfig, collect_visible_packages
+
 from .intrinsics import INTRINSICS, PROPERTY_CLASS_PATHS, IntrinsicDefinition
 from .types import ResolvedType, TypeType
 

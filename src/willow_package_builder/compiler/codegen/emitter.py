@@ -2,13 +2,17 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from willow_package_builder.bytecode import Bytecode, BytecodeReference, LoopBlock, ScriptOpcode
-from willow_package_builder.logging import CompilationError
-from willow_package_builder.upackage import FName, ReferencePath, UObject
-
-from .declarations import VariableDeclaration
-from .expressions import BinaryExpression, Expression, IdentifierExpression, IntegerExpression
-from .scope import VariableType
-from .statements import (
+from willow_package_builder.compiler.semantics.scope import VariableType
+from willow_package_builder.compiler.semantics.types import TypeType
+from willow_package_builder.compiler.semantics.validation import FunctionBodyValidator
+from willow_package_builder.compiler.syntax.declarations import VariableDeclaration
+from willow_package_builder.compiler.syntax.expressions import (
+    BinaryExpression,
+    Expression,
+    IdentifierExpression,
+    IntegerExpression,
+)
+from willow_package_builder.compiler.syntax.statements import (
     AssignmentStatement,
     BreakStatement,
     ContinueStatement,
@@ -20,12 +24,13 @@ from .statements import (
     Statement,
     WhileStatement,
 )
-from .types import TypeType
-from .validation import FunctionBodyValidator
+from willow_package_builder.logging import CompilationError
+from willow_package_builder.upackage import FName, ReferencePath, UObject
 
 if TYPE_CHECKING:
+    from willow_package_builder.compiler.semantics.expression_resolver import ExpressionResolver
+
     from .emission_context import EmissionContext
-    from .expression_resolver import ExpressionResolver
 
 
 @dataclass
