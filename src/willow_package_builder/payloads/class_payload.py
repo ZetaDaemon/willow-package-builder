@@ -5,6 +5,7 @@ from enum import IntFlag
 from typing import ClassVar, override
 
 from willow_package_builder.bytecode import Bytecode
+from willow_package_builder.game_constants import Bl2Consts
 from willow_package_builder.upackage import (
     FName,
     ObjectPayload,
@@ -142,8 +143,6 @@ class ClassFlags(IntFlag):
 class UClassPayload(UStatePayload):
     """BL2 class definition payload."""
 
-    UNKNOWN_BL2_BYTE: ClassVar[int] = 45
-
     net_index: int = -1
 
     class_flags: ClassFlags = ClassFlags.COMPILED | ClassFlags.PARSED
@@ -197,7 +196,7 @@ class UClassPayload(UStatePayload):
             + serialize_names(self.class_groups)
             + serialize_fstring(self.native_class_name)
             + self.dll_bind_name.serialize(package)
-            + struct.pack("<B", self.UNKNOWN_BL2_BYTE)
+            + struct.pack("<B", Bl2Consts.CLASS_UNKNOWN_BYTE)
             + self.default_object.serialize(package)
         )
 

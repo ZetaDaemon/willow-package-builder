@@ -1,12 +1,12 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from willow_package_builder.compiler.syntax.declarations import (
     ClassDeclaration,
     EnumDeclaration,
     FunctionDeclaration,
+    OperatorCategory,
     OperatorDeclaration,
-    OperatorType,
     StructDeclaration,
     TypeReference,
     VariableDeclaration,
@@ -15,7 +15,7 @@ from willow_package_builder.logging import CompilationError
 from willow_package_builder.package_config import PackageConfig, collect_visible_packages
 
 from .intrinsics import INTRINSICS, PROPERTY_CLASS_PATHS, IntrinsicDefinition
-from .types import ResolvedType, TypeType
+from .types import ResolvedType, TypeCategory
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -23,12 +23,12 @@ if TYPE_CHECKING:
 PRIMITIVE_TYPES = {
     t.value: ResolvedType(t)
     for t in (
-        TypeType.BYTE,
-        TypeType.INT,
-        TypeType.BOOL,
-        TypeType.FLOAT,
-        TypeType.STRING,
-        TypeType.NAME,
+        TypeCategory.BYTE,
+        TypeCategory.INT,
+        TypeCategory.BOOL,
+        TypeCategory.FLOAT,
+        TypeCategory.STRING,
+        TypeCategory.NAME,
     )
 }
 
@@ -54,7 +54,7 @@ class ReferenceDatabase:
             raise CompilationError(msg)
 
         for operator in declaration.operators:
-            if operator.op_type is OperatorType.BINARY and operator.precedence is None:
+            if operator.op_category is OperatorCategory.BINARY and operator.precedence is None:
                 msg = f"Binary operator {operator.name!r} in {path} has no precedence"
                 raise CompilationError(msg)
 
@@ -65,7 +65,7 @@ class ReferenceDatabase:
             self.operators.setdefault(operator_key, []).append(operator)
 
     def resolve_class(
-        self, name: str, *, current_package: str, visible_packages: set[str]
+        self, name: str, current_package: str, visible_packages: set[str]
     ) -> tuple[str, ClassDeclaration]:
         allowed_packages = {
             current_package.casefold(),
@@ -138,9 +138,7 @@ class ReferenceDatabase:
                 parents[class_path] = None
                 continue
 
-            parent_path, _ = self.resolve_class(
-                parent_name, current_package=config.name, visible_packages=visibility[package_key]
-            )
+            parent_path, _ = self.resolve_class(parent_name, config.name, visibility[package_key])
 
             parents[class_path] = parent_path
 
@@ -218,7 +216,7 @@ class ReferenceDatabase:
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for variable in declaration.variables:
                 if variable.name.casefold() == key:
-                    return ResolvedMember(owner_class=owner, declaration=variable)
+                    return ResolvedMember(owner, variable)
 
         msg = f"Unknown variable {name!r} on {class_path}"
         raise CompilationError(msg)
@@ -231,7 +229,7 @@ class ReferenceDatabase:
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for function in declaration.functions:
                 if function.name.casefold() == key:
-                    return ResolvedMember(owner_class=owner, declaration=function)
+                    return ResolvedMember(owner, function)
 
         msg = f"Unknown function {name!r} on {class_path}"
         raise CompilationError(msg)
@@ -239,7 +237,6 @@ class ReferenceDatabase:
     def resolve_type(
         self,
         type_ref: TypeReference | None,
-        *,
         current_class: str,
         visible_packages: set[str],
         parents: Mapping[str, str | None],
@@ -247,7 +244,7 @@ class ReferenceDatabase:
         current_package = current_class.partition(".")[0]
 
         if type_ref is None:
-            return ResolvedType(type=TypeType.VOID)
+            return ResolvedType(TypeCategory.VOID)
 
         name = type_ref.name.casefold()
 
@@ -257,13 +254,10 @@ class ReferenceDatabase:
                 raise CompilationError(msg)
 
             element_type = self.resolve_type(
-                type_ref.arguments[0],
-                current_class=current_class,
-                visible_packages=visible_packages,
-                parents=parents,
+                type_ref.arguments[0], current_class, visible_packages, parents
             )
 
-            return ResolvedType(type=TypeType.ARRAY, arguments=(element_type,))
+            return ResolvedType(TypeCategory.ARRAY, arguments=(element_type,))
 
         if name == "class":
             if len(type_ref.arguments) > 1:
@@ -271,21 +265,16 @@ class ReferenceDatabase:
                 raise CompilationError(msg)
 
             bound_ref = (
-                type_ref.arguments[0] if type_ref.arguments else TypeReference(name="Core.Object")
+                type_ref.arguments[0] if type_ref.arguments else TypeReference("Core.Object")
             )
 
-            bound = self.resolve_type(
-                bound_ref,
-                current_class=current_class,
-                visible_packages=visible_packages,
-                parents=parents,
-            )
+            bound = self.resolve_type(bound_ref, current_class, visible_packages, parents)
 
-            if bound.type is not TypeType.OBJECT:
+            if bound.category is not TypeCategory.OBJECT:
                 msg = "class requires an object class as its bound"
                 raise CompilationError(msg)
 
-            return ResolvedType(type=TypeType.CLASS, arguments=(bound,))
+            return ResolvedType(TypeCategory.CLASS, arguments=(bound,))
 
         if type_ref.arguments:
             msg = f"Type {type_ref.name!r} does not accept type arguments"
@@ -305,9 +294,7 @@ class ReferenceDatabase:
             # Examples: Object.Vector or Core.Object.Vector.
             owner_name, _, member_name = type_ref.name.rpartition(".")
 
-            owner_path, _ = self.resolve_class(
-                owner_name, current_package=current_package, visible_packages=visible_packages
-            )
+            owner_path, _ = self.resolve_class(owner_name, current_package, visible_packages)
 
             member_type = self.find_member_type(owner_path, member_name, parents)
 
@@ -317,11 +304,9 @@ class ReferenceDatabase:
 
             return member_type
 
-        class_path, _ = self.resolve_class(
-            type_ref.name, current_package=current_package, visible_packages=visible_packages
-        )
+        class_path, _ = self.resolve_class(type_ref.name, current_package, visible_packages)
 
-        return ResolvedType(type=TypeType.OBJECT, declaration_path=class_path)
+        return ResolvedType(TypeCategory.OBJECT, class_path)
 
     def resolve_struct(
         self, class_path: str, name: str, parents: Mapping[str, str | None]
@@ -331,7 +316,7 @@ class ReferenceDatabase:
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for struct in declaration.structs:
                 if struct.name.casefold() == key:
-                    return ResolvedMember(owner_class=owner, declaration=struct)
+                    return ResolvedMember(owner, struct)
 
         msg = f"Unknown struct {name!r} on {class_path}"
         raise CompilationError(msg)
@@ -344,7 +329,7 @@ class ReferenceDatabase:
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for enum in declaration.enums:
                 if enum.name.casefold() == key:
-                    return ResolvedMember(owner_class=owner, declaration=enum)
+                    return ResolvedMember(owner, enum)
 
         msg = f"Unknown enum {name!r} on {class_path}"
         raise CompilationError(msg)
@@ -357,15 +342,11 @@ class ReferenceDatabase:
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for struct in declaration.structs:
                 if struct.name.casefold() == key:
-                    return ResolvedType(
-                        type=TypeType.STRUCT, declaration_path=f"{owner}.{struct.name}".casefold()
-                    )
+                    return ResolvedType(TypeCategory.STRUCT, f"{owner}.{struct.name}".casefold())
 
             for enum in declaration.enums:
                 if enum.name.casefold() == key:
-                    return ResolvedType(
-                        type=TypeType.ENUM, declaration_path=f"{owner}.{enum.name}".casefold()
-                    )
+                    return ResolvedType(TypeCategory.ENUM, f"{owner}.{enum.name}".casefold())
 
         return None
 
@@ -374,7 +355,6 @@ class ReferenceDatabase:
         name: str,
         left: ResolvedType,
         right: ResolvedType,
-        *,
         current_class: str,
         visible_packages: set[str],
         parents: Mapping[str, str | None],
@@ -385,24 +365,21 @@ class ReferenceDatabase:
             matches: list[OperatorDeclaration] = []
 
             for operator in declaration.operators:
-                if operator.op_type is not OperatorType.BINARY or operator.name.casefold() != key:
+                if (
+                    operator.op_category is not OperatorCategory.BINARY
+                    or operator.name.casefold() != key
+                ):
                     continue
 
                 left_type = self.resolve_type(
-                    operator.parameters[0].type_ref,
-                    current_class=owner,
-                    visible_packages=visible_packages,
-                    parents=parents,
+                    operator.parameters[0].type_ref, owner, visible_packages, parents
                 )
 
                 if left_type != left:
                     continue
 
                 right_type = self.resolve_type(
-                    operator.parameters[1].type_ref,
-                    current_class=owner,
-                    visible_packages=visible_packages,
-                    parents=parents,
+                    operator.parameters[1].type_ref, owner, visible_packages, parents
                 )
 
                 if right_type == right:
@@ -413,7 +390,7 @@ class ReferenceDatabase:
                 raise CompilationError(msg)
 
             if matches:
-                return ResolvedMember(owner_class=owner, declaration=matches[0])
+                return ResolvedMember(owner, matches[0])
 
         msg = f"No exact overload of {name!r} for {left!r} and {right!r}"
         raise CompilationError(msg)
@@ -433,10 +410,49 @@ class ReferenceDatabase:
         raise CompilationError(msg)
 
     def property_class(self, resolved: ResolvedType) -> IntrinsicDefinition:
-        path = PROPERTY_CLASS_PATHS.get(resolved.type)
+        path = PROPERTY_CLASS_PATHS.get(resolved.category)
 
         if path is None:
             msg = f"Type {resolved!r} cannot be represented as a property"
             raise CompilationError(msg)
 
         return self.intrinsics[path.casefold()]
+
+    def resolve_unary_operator(
+        self,
+        name: str,
+        category: Literal[OperatorCategory.PREFIX, OperatorCategory.POSTFIX],
+        operand: ResolvedType,
+        current_class: str,
+        visible_packages: set[str],
+        parents: Mapping[str, str | None],
+    ) -> ResolvedMember[OperatorDeclaration]:
+
+        key = name.casefold()
+
+        for owner, declaration in self.iter_class_hierarchy(current_class, parents):
+            matches: list[OperatorDeclaration] = []
+
+            for operator in declaration.operators:
+                if operator.op_category is not category or operator.name.casefold() != key:
+                    continue
+
+                parameter_type = self.resolve_type(
+                    operator.parameters[0].type_ref, owner, visible_packages, parents
+                )
+
+                if parameter_type == operand:
+                    matches.append(operator)
+
+            if len(matches) > 1:
+                msg = (
+                    f"Multiple exact {category.value} overloads "
+                    f"of {name!r} on {owner} for {operand!r}"
+                )
+                raise CompilationError(msg)
+
+            if matches:
+                return ResolvedMember(owner, matches[0])
+
+        msg = f"No exact {category.value} overload of {name!r} for {operand!r}"
+        raise CompilationError(msg)

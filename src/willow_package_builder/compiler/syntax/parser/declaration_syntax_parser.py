@@ -1,5 +1,5 @@
 from willow_package_builder.compiler.syntax.declarations import TypeReference, VariableDeclaration
-from willow_package_builder.compiler.syntax.lexer import Token, TokenType
+from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
 from willow_package_builder.logging import CompilationError
 
 from .token_parser import TokenParser
@@ -29,7 +29,7 @@ class DeclarationSyntaxParser(TokenParser):
     def expect_type_close(self) -> None:
         token = self.peek()
 
-        if token.type is not TokenType.SYMBOL or token.text not in (">", ">>", ">>>"):
+        if token.category is not TokenCategory.SYMBOL or token.text not in (">", ">>", ">>>"):
             msg = f"Expected '>', got {token.text!r} at {token.line}:{token.column}"
             raise CompilationError(msg)
 
@@ -39,12 +39,7 @@ class DeclarationSyntaxParser(TokenParser):
         if len(token.text) > 1:
             self.tokens.insert(
                 self.position,
-                Token(
-                    type=TokenType.SYMBOL,
-                    text=token.text[1:],
-                    line=token.line,
-                    column=token.column + 1,
-                ),
+                Token(TokenCategory.SYMBOL, token.text[1:], token.line, token.column + 1),
             )
 
     def parse_type(self) -> TypeReference:
@@ -60,7 +55,7 @@ class DeclarationSyntaxParser(TokenParser):
 
             self.expect_type_close()
 
-        return TypeReference(name=name, arguments=tuple(arguments))
+        return TypeReference(name, tuple(arguments))
 
     def parse_variable_declaration(self, *, is_local: bool = False) -> list[VariableDeclaration]:
         """Parse out a variable declaration.
@@ -93,7 +88,7 @@ class DeclarationSyntaxParser(TokenParser):
             if self.match("["):
                 size = self.peek()
 
-                if size.type is not TokenType.INTEGER:
+                if size.category is not TokenCategory.INTEGER:
                     msg = f"Expected array dimension at {size.line}:{size.column}"
                     raise CompilationError(msg)
 
@@ -109,11 +104,7 @@ class DeclarationSyntaxParser(TokenParser):
 
             variables.append(
                 VariableDeclaration(
-                    name=name,
-                    type_ref=type_ref,
-                    array_dimension=array_dimension,
-                    modifiers=tuple(modifiers),
-                    category_tokens=category_tokens,
+                    name, type_ref, array_dimension, tuple(modifiers), category_tokens
                 )
             )
 

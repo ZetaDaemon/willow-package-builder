@@ -16,6 +16,7 @@ class PropertyFlags(IntFlag):
 
     EDIT = 0x00000001
     CONST = 0x00000002
+    OPTIONAL_PARAM = 0x00000010
     NET = 0x00000020
     PARAM = 0x00000080
     OUT_PARAM = 0x00000100

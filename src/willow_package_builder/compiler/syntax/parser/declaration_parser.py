@@ -3,14 +3,14 @@ from willow_package_builder.compiler.syntax.declarations import (
     ClassModifier,
     ConstantDeclaration,
     EnumDeclaration,
+    FunctionCategory,
     FunctionDeclaration,
-    FunctionType,
+    OperatorCategory,
     OperatorDeclaration,
-    OperatorType,
     ParameterDeclaration,
     StructDeclaration,
 )
-from willow_package_builder.compiler.syntax.lexer import Token, TokenType
+from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
 from willow_package_builder.logging import CompilationError, WarningCode, warn
 
 from .declaration_syntax_parser import DeclarationSyntaxParser
@@ -68,7 +68,7 @@ class DeclarationParser(DeclarationSyntaxParser):
         while not self.match(";"):
             token = self.peek()
 
-            if token.type is TokenType.EOF:
+            if token.category is TokenCategory.EOF:
                 msg = f"Unterminated class header for {name!r}"
                 raise CompilationError(msg)
 
@@ -94,7 +94,7 @@ class DeclarationParser(DeclarationSyntaxParser):
             if self.peek().text == "(":
                 arguments = self.parse_parenthesized_tokens()
 
-            modifiers.append(ClassModifier(name=keyword, arguments=arguments))
+            modifiers.append(ClassModifier(keyword, arguments))
 
         return ClassDeclaration(name, parent, is_interface, within, tuple(modifiers))
 
@@ -110,7 +110,7 @@ class DeclarationParser(DeclarationSyntaxParser):
         while True:
             token = self.peek()
 
-            if token.type is TokenType.EOF:
+            if token.category is TokenCategory.EOF:
                 msg = f"Unterminated constant declaration for {name!r}"
                 raise CompilationError(msg)
 
@@ -118,7 +118,7 @@ class DeclarationParser(DeclarationSyntaxParser):
                 self.advance()
                 break
 
-            if token.type is TokenType.SYMBOL:
+            if token.category is TokenCategory.SYMBOL:
                 if token.text in pairs:
                     closing_symbols.append(pairs[token.text])
                 elif token.text in (")", "]", "}"):
@@ -137,7 +137,7 @@ class DeclarationParser(DeclarationSyntaxParser):
             msg = f"Constant {name!r} requires a value"
             raise CompilationError(msg)
 
-        return ConstantDeclaration(name=name, value_tokens=tuple(value_tokens))
+        return ConstantDeclaration(name, tuple(value_tokens))
 
     def parse_enum_declaration(self, *, warn_explicit_sentinel: bool = True) -> EnumDeclaration:
         self.expect("enum")
@@ -150,7 +150,7 @@ class DeclarationParser(DeclarationSyntaxParser):
         while not self.match("}"):
             token = self.peek()
 
-            if token.type is TokenType.EOF:
+            if token.category is TokenCategory.EOF:
                 msg = f"Unterminated enum {name!r}, opened at {opening.line}:{opening.column}"
                 raise CompilationError(msg)
 
@@ -187,7 +187,7 @@ class DeclarationParser(DeclarationSyntaxParser):
             msg = f"Enum {name!r} has no non-sentinel members"
             raise CompilationError(msg)
 
-        return EnumDeclaration(name=name, members=tuple(members))
+        return EnumDeclaration(name, tuple(members))
 
     def parse_struct_declaration(self) -> StructDeclaration:
         self.expect("struct")
@@ -203,7 +203,7 @@ class DeclarationParser(DeclarationSyntaxParser):
         if self.match("extends"):
             parent = self.parse_qualified_name()
 
-        declaration = StructDeclaration(name=name, parent=parent, modifiers=tuple(modifiers))
+        declaration = StructDeclaration(name, parent, tuple(modifiers))
 
         opening = self.expect("{")
 
@@ -211,7 +211,7 @@ class DeclarationParser(DeclarationSyntaxParser):
             token = self.peek()
             keyword = token.text.casefold()
 
-            if token.type is TokenType.EOF:
+            if token.category is TokenCategory.EOF:
                 msg = f"Unterminated struct {name!r}, opened at {opening.line}:{opening.column}"
                 raise CompilationError(msg)
 
@@ -247,7 +247,7 @@ class DeclarationParser(DeclarationSyntaxParser):
             if modifier == "native" and self.peek(offset).text == "(":
                 offset += 1
 
-                if self.peek(offset).type is not TokenType.INTEGER:
+                if self.peek(offset).category is not TokenCategory.INTEGER:
                     return False
 
                 offset += 1
@@ -257,7 +257,7 @@ class DeclarationParser(DeclarationSyntaxParser):
 
                 offset += 1
 
-        return self.peek(offset).text.casefold() in OperatorType
+        return self.peek(offset).text.casefold() in OperatorCategory
 
     def parse_parameter_default(self) -> tuple[Token, ...]:
         tokens: list[Token] = []
@@ -267,11 +267,11 @@ class DeclarationParser(DeclarationSyntaxParser):
         while True:
             token = self.peek()
 
-            if token.type is TokenType.EOF:
+            if token.category is TokenCategory.EOF:
                 msg = f"Unterminated parameter default at {token.line}:{token.column}"
                 raise CompilationError(msg)
 
-            if token.type is TokenType.SYMBOL:
+            if token.category is TokenCategory.SYMBOL:
                 if not closing_symbols and token.text in (",", ")"):
                     break
 
@@ -336,16 +336,16 @@ class DeclarationParser(DeclarationSyntaxParser):
                 native_index = self.parse_integer()
                 self.expect(")")
 
-        kind_token = self.expect_identifier()
+        category_token = self.expect_identifier()
 
         try:
-            kind = OperatorType(kind_token.text.casefold())
+            category = OperatorCategory(category_token.text.casefold())
         except ValueError:
-            msg = f"Expected operator declaration at {kind_token.line}:{kind_token.column}"
+            msg = f"Expected operator declaration at {category_token.line}:{category_token.column}"
             raise CompilationError(msg) from None
 
         precedence = None
-        if kind is OperatorType.BINARY:
+        if category is OperatorCategory.BINARY:
             self.expect("(")
             precedence = self.parse_integer()
             self.expect(")")
@@ -353,26 +353,20 @@ class DeclarationParser(DeclarationSyntaxParser):
         return_type = self.parse_type()
 
         name_token = self.peek()
-        if name_token.type not in (TokenType.SYMBOL, TokenType.IDENTIFIER):
+        if name_token.category not in (TokenCategory.SYMBOL, TokenCategory.IDENTIFIER):
             msg = f"Expected operator name at {name_token.line}:{name_token.column}"
             raise CompilationError(msg)
 
         name = self.advance().text
         parameters = self.parse_parameters()
 
-        expected_count = 2 if kind is OperatorType.BINARY else 1
+        expected_count = 2 if category is OperatorCategory.BINARY else 1
         if len(parameters) != expected_count:
-            msg = f"{kind} {name!r} requires {expected_count} parameters"
+            msg = f"{category} {name!r} requires {expected_count} parameters"
             raise CompilationError(msg)
 
         declaration = OperatorDeclaration(
-            name=name,
-            op_type=kind,
-            return_type=return_type,
-            parameters=parameters,
-            native_index=native_index,
-            precedence=precedence,
-            modifiers=tuple(modifiers),
+            name, category, return_type, parameters, native_index, precedence, tuple(modifiers)
         )
 
         if self.match(";"):
@@ -389,14 +383,14 @@ class DeclarationParser(DeclarationSyntaxParser):
         while depth:
             token = self.advance()
 
-            if token.type is TokenType.EOF:
+            if token.category is TokenCategory.EOF:
                 msg = (
                     f"Unterminated operator body for {name!r}, opened at "
                     f"{opening.line}:{opening.column}"
                 )
                 raise CompilationError(msg)
 
-            if token.type is TokenType.SYMBOL:
+            if token.category is TokenCategory.SYMBOL:
                 if token.text == "{":
                     depth += 1
                 elif token.text == "}":
@@ -419,13 +413,13 @@ class DeclarationParser(DeclarationSyntaxParser):
                 native_index = self.parse_integer()
                 self.expect(")")
 
-        kind_token = self.expect_identifier()
+        category_token = self.expect_identifier()
         try:
-            kind = FunctionType(kind_token.text.casefold())
+            category = FunctionCategory(category_token.text.casefold())
         except ValueError:
             msg = (
-                f"Expected function declaration, got {kind_token.text!r} "
-                f"at {kind_token.line}:{kind_token.column}"
+                f"Expected function declaration, got {category_token.text!r} "
+                f"at {category_token.line}:{category_token.column}"
             )
             raise CompilationError(msg) from None
 
@@ -446,12 +440,7 @@ class DeclarationParser(DeclarationSyntaxParser):
         parameters = self.parse_parameters()
 
         return FunctionDeclaration(
-            name=name,
-            return_type=return_type,
-            parameters=parameters,
-            func_type=kind,
-            modifiers=tuple(modifiers),
-            native_index=native_index,
+            name, return_type, parameters, category, tuple(modifiers), native_index
         )
 
     def parse_function_declaration(self, *, include_body_tokens: bool) -> FunctionDeclaration:
@@ -472,14 +461,14 @@ class DeclarationParser(DeclarationSyntaxParser):
         while depth:
             token = self.advance()
 
-            if token.type is TokenType.EOF:
+            if token.category is TokenCategory.EOF:
                 msg = (
                     f"Unterminated function body for {declaration.name!r}, "
                     f"opened at {opening.line}:{opening.column}"
                 )
                 raise CompilationError(msg)
 
-            if token.type is TokenType.SYMBOL:
+            if token.category is TokenCategory.SYMBOL:
                 if token.text == "{":
                     depth += 1
                 elif token.text == "}":
@@ -494,7 +483,7 @@ class DeclarationParser(DeclarationSyntaxParser):
     def parse_class_declaration(self, *, include_body_tokens: bool) -> ClassDeclaration:
         declaration = self.parse_class_header()
 
-        while self.peek().type is not TokenType.EOF:
+        while self.peek().category is not TokenCategory.EOF:
             token = self.peek()
             keyword = token.text.casefold()
 
@@ -527,7 +516,7 @@ class DeclarationParser(DeclarationSyntaxParser):
                 )
                 continue
 
-            if keyword in FUNCTION_MODIFIERS or keyword in FunctionType:
+            if keyword in FUNCTION_MODIFIERS or keyword in FunctionCategory:
                 declaration.functions.append(
                     self.parse_function_declaration(include_body_tokens=include_body_tokens)
                 )

@@ -12,12 +12,7 @@ class PackageReferences(BuildComponent):
     def ensure_import(
         self, name: str, outer: ReferencePath, class_package: str, class_name: str
     ) -> ReferencePath:
-        obj = ExternalReference(
-            name=FName(name),
-            outer=outer,
-            class_package=FName(class_package),
-            class_name=FName(class_name),
-        )
+        obj = ExternalReference(FName(name), FName(class_package), FName(class_name), outer)
         reference = obj.reference()
 
         try:
@@ -47,19 +42,14 @@ class PackageReferences(BuildComponent):
                     f"Default-object references for intrinsic "
                     f"{definition.path!r} are not supported yet"
                 )
-                raise CompilationError(msg)
+                raise NotImplementedError(msg)
 
             package_name, _, name = definition.path.partition(".")
 
-            package_reference = self.ensure_import(
-                name=package_name, outer=ReferencePath(), class_package="Core", class_name="Package"
-            )
+            package_reference = self.ensure_import(package_name, ReferencePath(), "Core", "Package")
 
             return self.ensure_import(
-                name=name,
-                outer=package_reference,
-                class_package=definition.class_package,
-                class_name=definition.class_name,
+                name, package_reference, definition.class_package, definition.class_name
             )
 
         if definition.is_interface:
@@ -80,21 +70,14 @@ class PackageReferences(BuildComponent):
             config for config in self.context.packages if config.name.casefold() == package_key
         )
 
-        package_reference = self.ensure_import(
-            name=config.name, outer=ReferencePath(), class_package="Core", class_name="Package"
-        )
+        package_reference = self.ensure_import(config.name, ReferencePath(), "Core", "Package")
 
         if default_object:
             return self.ensure_import(
-                name=f"Default__{definition.name}",
-                outer=package_reference,
-                class_package=config.name,
-                class_name=definition.name,
+                f"Default__{definition.name}", package_reference, config.name, definition.name
             )
 
-        return self.ensure_import(
-            name=definition.name, outer=package_reference, class_package="Core", class_name="Class"
-        )
+        return self.ensure_import(definition.name, package_reference, "Core", "Class")
 
     def enum_reference(self, enum_path: str) -> ReferencePath:
         owner_path, separator, name = enum_path.rpartition(".")
@@ -114,9 +97,7 @@ class PackageReferences(BuildComponent):
             # Local enum exports must already have been built.
             return self.package.lookup_object_by_path(reference).reference()
 
-        return self.ensure_import(
-            name=member.declaration.name, outer=outer, class_package="Core", class_name="Enum"
-        )
+        return self.ensure_import(member.declaration.name, outer, "Core", "Enum")
 
     def struct_reference(self, struct_path: str) -> ReferencePath:
         owner_path, separator, name = struct_path.rpartition(".")
@@ -135,9 +116,22 @@ class PackageReferences(BuildComponent):
 
         outer = self.class_object_reference(member.owner_class)
 
-        return self.ensure_import(
-            name=member.declaration.name,
-            outer=outer,
-            class_package="Core",
-            class_name="ScriptStruct",
-        )
+        return self.ensure_import(member.declaration.name, outer, "Core", "ScriptStruct")
+
+    def function_reference(self, function_path: str) -> ReferencePath:
+        owner_path, separator, name = function_path.rpartition(".")
+
+        if not separator:
+            msg = f"Expected a qualified function path: {function_path}"
+            raise ValueError(msg)
+
+        member = self.context.references.resolve_function(owner_path, name, self.context.parents)
+
+        outer = self.class_object_reference(member.owner_class)
+        package_name = member.owner_class.partition(".")[0]
+
+        if package_name.casefold() == self.config.name.casefold():
+            reference = outer + FName(member.declaration.name)
+            return self.package.lookup_object_by_path(reference).reference()
+
+        return self.ensure_import(member.declaration.name, outer, "Core", "Function")

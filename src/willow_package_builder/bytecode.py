@@ -2,8 +2,11 @@ import struct
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from enum import IntEnum
 from typing import TYPE_CHECKING, ClassVar, Self, override
+
+from willow_package_builder.upackage import FName
+
+from .opcode import ScriptOpcode
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -11,135 +14,11 @@ if TYPE_CHECKING:
     from .upackage import Package, ReferencePath
 
 
-class ScriptOpcode(IntEnum):
-    """Bl2 opcode statements."""
-
-    # Variable access.
-    LOCAL_VARIABLE = 0x00
-    INSTANCE_VARIABLE = 0x01
-    DEFAULT_VARIABLE = 0x02
-    STATE_VARIABLE = 0x03
-    NATIVE_PARAMETER = 0x29
-    BOOL_VARIABLE = 0x2D
-    STRUCT_MEMBER = 0x35
-    OUT_VARIABLE = 0x48
-
-    # BL2 optimized local access.
-    # These use local-table operands, not ordinary property references.
-    LOCAL_VARIABLE_INT = 0x4C
-    LOCAL_VARIABLE_FLOAT = 0x4D
-    LOCAL_VARIABLE_BYTE = 0x4E
-    LOCAL_VARIABLE_BOOL = 0x4F
-    LOCAL_VARIABLE_OBJECT = 0x50
-
-    # Assignment.
-    LET = 0x0F
-    LET_BOOL = 0x14
-    LET_DELEGATE = 0x44
-
-    # Control flow.
-    RETURN = 0x04
-    SWITCH = 0x05
-    JUMP = 0x06
-    JUMP_IF_NOT = 0x07
-    STOP = 0x08
-    ASSERT = 0x09
-    CASE = 0x0A
-    NOTHING = 0x0B
-    LABEL_TABLE = 0x0C
-    GOTO_LABEL = 0x0D
-    EAT_RETURN_VALUE = 0x0E
-    SKIP = 0x18
-    RETURN_NOTHING = 0x3A
-    CONDITIONAL = 0x45
-    END_OF_SCRIPT = 0x53
-    FILTER_EDITOR_ONLY = 0x5A
-
-    # Function calls and arguments.
-    END_PARAMETER_VALUE = 0x15
-    END_FUNCTION_PARAMS = 0x16
-    VIRTUAL_FUNCTION = 0x1B
-    FINAL_FUNCTION = 0x1C
-    GLOBAL_FUNCTION = 0x37
-    DEFAULT_PARAMETER_VALUE = 0x49
-    EMPTY_PARAMETER_VALUE = 0x4A
-
-    # Context and object creation.
-    NEW = 0x11
-    CLASS_CONTEXT = 0x12
-    SELF = 0x17
-    CONTEXT = 0x19
-    INTERFACE_CONTEXT = 0x51
-
-    # Casts.
-    META_CLASS_CAST = 0x13
-    DYNAMIC_CAST = 0x2E
-    PRIMITIVE_CAST = 0x38
-    INTERFACE_CAST = 0x52
-
-    # Constants.
-    INT_CONST = 0x1D
-    FLOAT_CONST = 0x1E
-    STRING_CONST = 0x1F
-    OBJECT_CONST = 0x20
-    NAME_CONST = 0x21
-    ROTATOR_CONST = 0x22
-    VECTOR_CONST = 0x23
-    BYTE_CONST = 0x24
-    INT_ZERO = 0x25
-    INT_ONE = 0x26
-    TRUE = 0x27
-    FALSE = 0x28
-    NO_OBJECT = 0x2A
-    INT_CONST_BYTE = 0x2C
-    UNICODE_STRING_CONST = 0x34
-
-    # Struct comparisons.
-    STRUCT_EQUAL = 0x32
-    STRUCT_NOT_EQUAL = 0x33
-
-    # Fixed-size array access.
-    ARRAY_ELEMENT = 0x1A
-
-    # Dynamic arrays.
-    DYNAMIC_ARRAY_ELEMENT = 0x10
-    DYNAMIC_ARRAY_LENGTH = 0x36
-    DYNAMIC_ARRAY_INSERT = 0x39
-    DYNAMIC_ARRAY_REMOVE = 0x40
-    DYNAMIC_ARRAY_FIND = 0x46
-    DYNAMIC_ARRAY_FIND_STRUCT = 0x47
-    DYNAMIC_ARRAY_ADD = 0x54
-    DYNAMIC_ARRAY_ADD_ITEM = 0x55
-    DYNAMIC_ARRAY_REMOVE_ITEM = 0x56
-    DYNAMIC_ARRAY_INSERT_ITEM = 0x57
-    DYNAMIC_ARRAY_ITERATOR = 0x58
-    DYNAMIC_ARRAY_SORT = 0x59
-
-    # Iteration.
-    ITERATOR = 0x2F
-    ITERATOR_POP = 0x30
-    ITERATOR_NEXT = 0x31
-
-    # Delegates.
-    DELEGATE_EQUAL = 0x3B
-    DELEGATE_NOT_EQUAL = 0x3C
-    DELEGATE_FUNCTION_EQUAL = 0x3D
-    DELEGATE_FUNCTION_NOT_EQUAL = 0x3E
-    EMPTY_DELEGATE = 0x3F
-    DELEGATE_FUNCTION = 0x42
-    DELEGATE_PROPERTY = 0x43
-    INSTANCE_DELEGATE = 0x4B
-
-    # Debug information.
-    DEBUG_INFO = 0x41
-
-    # Gearbox attribute expressions.
-    ATTRIBUTE_VARIABLE = 0x5E
-    LET_ATTRIBUTE = 0x5F
-
-
 FIRST_EXTENDED_NATIVE = 0x60
 LAST_EXTENDED_NATIVE = 0x6F
+
+MIN_NATIVE_INDEX = 1
+MAX_NATIVE_INDEX = 0x0FFF
 
 FIRST_DIRECT_NATIVE = 0x70
 LAST_DIRECT_NATIVE = 0xFF
@@ -205,6 +84,35 @@ class BytecodeReference(BytecodeItem):
     @override
     def serialize(self, package: Package, bytecode: Bytecode) -> bytes:
         return self.reference.serialize(package)
+
+
+@dataclass(frozen=True)
+class BytecodeRelativeJump(BytecodeItem):
+    origin: BytecodeLabel
+    target: BytecodeLabel
+
+    _MEMORY_SIZE: ClassVar[int] = 2
+
+    @override
+    def serialize(self, package: Package, bytecode: Bytecode) -> bytes:
+        offset = bytecode.get_label_offset(self.target) - bytecode.get_label_offset(self.origin)
+
+        if not 0 <= offset <= UINT16_MAX:
+            msg = f"Relative jump distance outside encoding range: {offset}"
+            raise ValueError(msg)
+
+        return struct.pack("<H", offset)
+
+
+@dataclass(frozen=True)
+class BytecodeName(BytecodeItem):
+    name: FName
+
+    _MEMORY_SIZE: ClassVar[int] = 8
+
+    @override
+    def serialize(self, package: Package, bytecode: Bytecode) -> bytes:
+        return self.name.serialize(package)
 
 
 @dataclass
@@ -275,31 +183,60 @@ class Bytecode:
 
     _label_offsets: dict[BytecodeLabel, int] = field(default_factory=dict, init=False, repr=False)
 
-    def __iadd__(self, other: Bytecode | bytes | BytecodeItem | ScriptOpcode | int) -> Self:
-        if isinstance(other, Bytecode):
-            self.parts.extend(other.parts)
+    def __iadd__(self, other: Bytecode | bytes | BytecodeItem | ScriptOpcode) -> Self:
+        match other:
+            case Bytecode():
+                self.parts.extend(other.parts)
 
-        elif isinstance(other, ScriptOpcode):
-            self.parts.append(struct.pack("<B", int(other)))
+            case ScriptOpcode():
+                self.parts.append(struct.pack("<B", int(other)))
 
-        elif isinstance(other, int):
-            if other == 0:
-                self += ScriptOpcode.INT_ZERO
-            elif other == 1:
-                self += ScriptOpcode.INT_ONE
-            else:
-                self += ScriptOpcode.INT_CONST
-                self += struct.pack("<i", other)
+            case bytes() | BytecodeItem():
+                self.parts.append(other)
 
-        else:
-            self.parts.append(other)
+            case _:
+                return NotImplemented  # pyright: ignore[reportUnreachable]
 
         return self
 
-    def __add__(self, other: Bytecode | bytes | BytecodeItem | ScriptOpcode | int) -> Bytecode:
+    def __add__(self, other: Bytecode | bytes | BytecodeItem | ScriptOpcode) -> Bytecode:
         result = Bytecode(self.parts.copy())
         result += other
         return result
+
+    def add_constant(self, value: bool | float | str) -> None:
+        match value:
+            case bool():
+                self += ScriptOpcode.TRUE if value else ScriptOpcode.FALSE
+
+            case int():
+                match value:
+                    case 0:
+                        self += ScriptOpcode.INT_ZERO
+                    case 1:
+                        self += ScriptOpcode.INT_ONE
+                    case _:
+                        self += ScriptOpcode.INT_CONST
+                        self += struct.pack("<i", value)
+
+            case float():
+                self += ScriptOpcode.FLOAT_CONST
+                self += struct.pack("<f", value)
+
+            case str():
+                if "\0" in value:
+                    msg = "Bytecode string constants cannot contain embedded null characters"
+                    raise ValueError(msg)
+
+                try:
+                    encoded = value.encode("ascii") + b"\0"
+                    opcode = ScriptOpcode.STRING_CONST
+                except UnicodeEncodeError:
+                    encoded = value.encode("utf-16-le") + b"\0\0"
+                    opcode = ScriptOpcode.UNICODE_STRING_CONST
+
+                self += opcode
+                self += encoded
 
     def memory_size(self) -> int:
         return sum(
@@ -345,12 +282,18 @@ class Bytecode:
         self += BytecodeReference(reference)
 
     def begin_native_call(self, native_index: int) -> None:
-        if not FIRST_DIRECT_NATIVE <= native_index <= LAST_DIRECT_NATIVE:
-            msg = "Native index requires an unsupported encoding"
+        if not MIN_NATIVE_INDEX <= native_index <= MAX_NATIVE_INDEX:
+            msg = (
+                f"Native index {native_index} is outside the supported "
+                f"format range {MIN_NATIVE_INDEX}-{MAX_NATIVE_INDEX}"
+            )
             raise ValueError(msg)
 
-        # Append raw bytes, rather than an integer-constant expression.
-        self += struct.pack("<B", native_index)
+        if FIRST_DIRECT_NATIVE <= native_index <= LAST_DIRECT_NATIVE:
+            self += struct.pack("<B", native_index)
+        else:
+            high, low = native_index.to_bytes(2, "big")
+            self += struct.pack("<BB", FIRST_EXTENDED_NATIVE + high, low)
 
     def end_native_call(self) -> None:
         self += ScriptOpcode.END_FUNCTION_PARAMS
@@ -403,4 +346,66 @@ class Bytecode:
 
         self += ScriptOpcode.JUMP
         self += BytecodeJump(start)
+        self += end
+
+    @contextmanager
+    def for_statement(
+        self, initializer: Bytecode, condition: Bytecode, increment: Bytecode
+    ) -> Generator[LoopBlock]:
+        condition_label = BytecodeLabel()
+        increment_label = BytecodeLabel()
+        end = BytecodeLabel()
+        loop = LoopBlock(self, increment_label, end)
+
+        self += initializer
+
+        self += condition_label
+        self += ScriptOpcode.JUMP_IF_NOT
+        self += BytecodeJump(end)
+        self += condition
+
+        try:
+            yield loop
+        finally:
+            loop.active = False
+
+        self += increment_label
+        self += increment
+
+        self += ScriptOpcode.JUMP
+        self += BytecodeJump(condition_label)
+        self += end
+
+    @contextmanager
+    def do_until_statement(self, condition: Bytecode) -> Generator[LoopBlock]:
+        start = BytecodeLabel()
+        condition_label = BytecodeLabel()
+        end = BytecodeLabel()
+        loop = LoopBlock(self, condition_label, end)
+
+        self += start
+
+        try:
+            yield loop
+        finally:
+            loop.active = False
+
+        self += condition_label
+        self += ScriptOpcode.JUMP_IF_NOT
+        self += BytecodeJump(start)
+        self += condition
+        self += end
+
+    @contextmanager
+    def default_parameter(self) -> Generator[None]:
+        origin = BytecodeLabel()
+        end = BytecodeLabel()
+
+        self += ScriptOpcode.DEFAULT_PARAMETER_VALUE
+        self += BytecodeRelativeJump(origin, end)
+        self += origin
+
+        yield
+
+        self += ScriptOpcode.END_PARAMETER_VALUE
         self += end

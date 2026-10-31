@@ -1,17 +1,25 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from willow_package_builder.compiler.syntax.declarations import OperatorType
+from willow_package_builder.compiler.syntax.declarations import (
+    FunctionDeclaration,
+    OperatorCategory,
+)
 from willow_package_builder.compiler.syntax.expressions import (
     BinaryExpression,
+    BooleanExpression,
+    CallExpression,
     Expression,
+    FloatExpression,
     IdentifierExpression,
     IntegerExpression,
+    StringExpression,
+    UnaryExpression,
 )
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.package_config import collect_visible_packages
 
-from .types import ResolvedType, TypeType
+from .types import ResolvedType, TypeCategory
 
 if TYPE_CHECKING:
     from willow_package_builder.compiler.build_context import BuildContext
@@ -43,10 +51,7 @@ class ExpressionResolver:
         package_name = owner_class.partition(".")[0].casefold()
 
         return self.context.references.resolve_type(
-            type_ref,
-            current_class=owner_class,
-            visible_packages=self._visibility[package_name],
-            parents=self.context.parents,
+            type_ref, owner_class, self._visibility[package_name], self.context.parents
         )
 
     def resolve_operator(self, expression: BinaryExpression) -> ResolvedMember[OperatorDeclaration]:
@@ -58,29 +63,53 @@ class ExpressionResolver:
             expression.operator,
             left,
             right,
-            current_class=self.scope.class_path,
-            visible_packages=self._visibility[package_name],
-            parents=self.context.parents,
+            self.scope.class_path,
+            self._visibility[package_name],
+            self.context.parents,
         )
 
     def type_of(self, expression: Expression) -> ResolvedType:
-        if isinstance(expression, IntegerExpression):
-            return ResolvedType(type=TypeType.INT)
+        match expression:
+            case IntegerExpression():
+                return ResolvedType(TypeCategory.INT)
 
-        if isinstance(expression, IdentifierExpression):
-            symbol = self.scope.resolve_variable(expression.name)
+            case IdentifierExpression():
+                symbol = self.scope.resolve_variable(expression.name)
+                return self.resolve_declared_type(symbol.declaration.type_ref, symbol.owner_class)
 
-            return self.resolve_declared_type(symbol.declaration.type_ref, symbol.owner_class)
+            case BinaryExpression():
+                operator = self.resolve_operator(expression)
 
-        if isinstance(expression, BinaryExpression):
-            operator = self.resolve_operator(expression)
+                return self.resolve_declared_type(
+                    operator.declaration.return_type, operator.owner_class
+                )
 
-            return self.resolve_declared_type(
-                operator.declaration.return_type, operator.owner_class
-            )
+            case UnaryExpression():
+                operator = self.resolve_unary_operator(expression)
 
-        msg = f"Unsupported expression type: {type(expression).__name__}"
-        raise CompilationError(msg)
+                return self.resolve_declared_type(
+                    operator.declaration.return_type, operator.owner_class
+                )
+
+            case BooleanExpression():
+                return ResolvedType(TypeCategory.BOOL)
+
+            case FloatExpression():
+                return ResolvedType(TypeCategory.FLOAT)
+
+            case StringExpression():
+                return ResolvedType(TypeCategory.STRING)
+
+            case CallExpression():
+                function = self.resolve_call(expression)
+
+                return self.resolve_declared_type(
+                    function.declaration.return_type, function.owner_class
+                )
+
+            case _:
+                msg = f"Unsupported expression type: {type(expression).__name__}"
+                raise NotImplementedError(msg)
 
     def binary_precedence(self, name: str, left: ResolvedType) -> int | None:
         key = name.casefold()
@@ -94,7 +123,10 @@ class ExpressionResolver:
             self.scope.class_path, self.context.parents
         ):
             for operator in declaration.operators:
-                if operator.op_type is not OperatorType.BINARY or operator.name.casefold() != key:
+                if (
+                    operator.op_category is not OperatorCategory.BINARY
+                    or operator.name.casefold() != key
+                ):
                     continue
 
                 left_type = self.resolve_declared_type(operator.parameters[0].type_ref, owner)
@@ -124,6 +156,48 @@ class ExpressionResolver:
                 f"left operand type {left!r}; right-dependent precedence "
                 "is not supported yet"
             )
-            raise CompilationError(msg)
+            raise NotImplementedError(msg)
 
         return next(iter(precedences))
+
+    def resolve_unary_operator(
+        self, expression: UnaryExpression
+    ) -> ResolvedMember[OperatorDeclaration]:
+        operand = self.type_of(expression.operand)
+        package_name = self.scope.class_path.partition(".")[0].casefold()
+
+        return self.context.references.resolve_unary_operator(
+            expression.operator,
+            expression.op_category,
+            operand,
+            self.scope.class_path,
+            self._visibility[package_name],
+            self.context.parents,
+        )
+
+    def has_unary_operator(
+        self, name: str, category: Literal[OperatorCategory.PREFIX, OperatorCategory.POSTFIX]
+    ) -> bool:
+        key = name.casefold()
+
+        for _, declaration in self.context.references.iter_class_hierarchy(
+            self.scope.class_path, self.context.parents
+        ):
+            if any(
+                operator.op_category is category and operator.name.casefold() == key
+                for operator in declaration.operators
+            ):
+                return True
+
+        return False
+
+    def resolve_call(self, expression: CallExpression) -> ResolvedMember[FunctionDeclaration]:
+        match expression.callee:
+            case IdentifierExpression():
+                return self.context.references.resolve_function(
+                    self.scope.class_path, expression.callee.name, self.context.parents
+                )
+
+            case _:
+                msg = "This function-call target is not implemented yet"
+                raise NotImplementedError(msg)

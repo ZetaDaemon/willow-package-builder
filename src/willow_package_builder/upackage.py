@@ -552,13 +552,7 @@ class Package:
         export_table_size = len(self.serialize_exports(payloads, data_offset=0))
 
         name_data = self.serialize_names()
-        placeholder_layout = PackageLayout(
-            names_offset=0,
-            imports_offset=0,
-            exports_offset=0,
-            dependencies_offset=0,
-            payload_offset=0,
-        )
+        placeholder_layout = PackageLayout(0, 0, 0, 0, 0)
 
         header_size = len(self.serialize_header(placeholder_layout))
 
@@ -569,11 +563,7 @@ class Package:
         payload_offset = dependencies_offset + len(dependency_data)
 
         layout = PackageLayout(
-            names_offset=names_offset,
-            imports_offset=imports_offset,
-            exports_offset=exports_offset,
-            dependencies_offset=dependencies_offset,
-            payload_offset=payload_offset,
+            names_offset, imports_offset, exports_offset, dependencies_offset, payload_offset
         )
 
         header_data = self.serialize_header(layout)

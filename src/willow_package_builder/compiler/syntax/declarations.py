@@ -6,13 +6,13 @@ if TYPE_CHECKING:
     from .lexer import Token
 
 
-class OperatorType(StrEnum):
+class OperatorCategory(StrEnum):
     BINARY = "operator"
     PREFIX = "preoperator"
     POSTFIX = "postoperator"
 
 
-class FunctionType(StrEnum):
+class FunctionCategory(StrEnum):
     FUNCTION = "function"
     EVENT = "event"
     DELEGATE = "delegate"
@@ -66,7 +66,7 @@ class ParameterDeclaration:
 @dataclass
 class OperatorDeclaration:
     name: str
-    op_type: OperatorType
+    op_category: OperatorCategory
     return_type: TypeReference
     parameters: list[ParameterDeclaration]
     native_index: int | None
@@ -83,7 +83,7 @@ class FunctionDeclaration:
     return_type: TypeReference | None
     parameters: list[ParameterDeclaration]
 
-    func_type: FunctionType = FunctionType.FUNCTION
+    func_category: FunctionCategory = FunctionCategory.FUNCTION
     modifiers: tuple[str, ...] = ()
     native_index: int | None = None
 

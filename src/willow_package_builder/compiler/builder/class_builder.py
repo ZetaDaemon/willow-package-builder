@@ -39,22 +39,20 @@ class ClassBuilder(BuildComponent):
                 continue
 
             info(f"Compiling class {class_path}")
-            class_object = UObject(name=FName(declaration.name), flags=ObjectFlags.CLASS_EXPORT)
+            class_object = UObject(FName(declaration.name), ObjectFlags.CLASS_EXPORT)
 
             class_reference = self.package.add_export(class_object)
 
             default_object = UObject(
-                name=FName(f"Default__{declaration.name}"),
+                FName(f"Default__{declaration.name}"),
+                ObjectFlags.CDO_EXPORT,
                 object_class=class_reference,
-                flags=ObjectFlags.CDO_EXPORT,
                 payload=ObjectInstancePayload(),
             )
 
             self.package.add_export(default_object)
 
-            self.classes[class_path] = ClassExports(
-                declaration=declaration, class_object=class_object, default_object=default_object
-            )
+            self.classes[class_path] = ClassExports(declaration, class_object, default_object)
 
     def resolve_within_class(self, class_path: str) -> str:
         current: str | None = class_path.casefold()
@@ -72,8 +70,8 @@ class ClassBuilder(BuildComponent):
 
                 resolved, _ = self.context.references.resolve_class(
                     declaration.within,
-                    current_package=config.name,
-                    visible_packages=collect_visible_packages(config, self.context.packages),
+                    config.name,
+                    collect_visible_packages(config, self.context.packages),
                 )
                 return resolved
 
@@ -93,7 +91,7 @@ class ClassBuilder(BuildComponent):
 
             if parent is None:
                 msg = "Building root classes is not supported yet"
-                raise CompilationError(msg)
+                raise NotImplementedError(msg)
 
             flags = ClassFlags.COMPILED | ClassFlags.PARSED
 

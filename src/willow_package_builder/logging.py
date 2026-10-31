@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, TextIO, overload
 
+from willow_package_builder.source_location import SourceLocation
+
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
@@ -31,6 +33,20 @@ class WarningAction(StrEnum):
 
 class CompilationError(Exception):
     """An error in the source being compiled."""
+
+    location: SourceLocation | None
+
+    def __init__(self, message: str, location: SourceLocation | None = None) -> None:
+        super().__init__(message)
+        self.location = location
+
+    def __str__(self) -> str:
+        message = super().__str__()
+
+        if self.location is not None:
+            return f"({self.location.line}, {self.location.column}) {message}"
+
+        return message
 
 
 class ConfigError(Exception):

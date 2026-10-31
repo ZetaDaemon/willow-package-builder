@@ -70,6 +70,7 @@ def build_package(
             output_path.write_bytes(data)
 
             outputs.append(output_path)
+            info(f"Wrote {config.name} to {output_path}")
 
             manifest_path = output_path.with_suffix(".manifest.json")
             manifest_path.write_text(

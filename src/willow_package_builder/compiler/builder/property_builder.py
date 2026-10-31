@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from willow_package_builder.compiler.semantics.types import TypeType
+from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.declarations import TypeReference, VariableDeclaration
-from willow_package_builder.compiler.syntax.lexer import TokenType
+from willow_package_builder.compiler.syntax.lexer import TokenCategory
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.property_payloads import (
@@ -52,16 +52,13 @@ class PropertyBuilder(BuildComponent):
 
         for type_ref in type_refs:
             resolved = self.context.references.resolve_type(
-                type_ref,
-                current_class=member.owner_class,
-                visible_packages=visible,
-                parents=self.context.parents,
+                type_ref, member.owner_class, visible, self.context.parents
             )
 
-            if resolved.type in (TypeType.STRING, TypeType.ARRAY):
+            if resolved.category in (TypeCategory.STRING, TypeCategory.ARRAY):
                 return True
 
-            if resolved.type is TypeType.STRUCT:
+            if resolved.category is TypeCategory.STRUCT:
                 if resolved.declaration_path is None:
                     msg = "Resolved struct type has no declaration path"
                     raise ValueError(msg)
@@ -82,18 +79,18 @@ class PropertyBuilder(BuildComponent):
     ) -> UObject:
         resolved = self.context.references.resolve_type(
             type_ref,
-            current_class=class_path,
-            visible_packages=collect_visible_packages(self.config, self.context.packages),
-            parents=self.context.parents,
+            class_path,
+            collect_visible_packages(self.config, self.context.packages),
+            self.context.parents,
         )
 
         payload: UPropertyPayload
 
-        match resolved.type:
-            case TypeType.INT:
+        match resolved.category:
+            case TypeCategory.INT:
                 payload = UIntPropertyPayload()
 
-            case TypeType.OBJECT:
+            case TypeCategory.OBJECT:
                 if resolved.declaration_path is None:
                     msg = "Resolved object type has no declaration path"
                     raise ValueError(msg)
@@ -102,23 +99,23 @@ class PropertyBuilder(BuildComponent):
                     property_class=self.references.class_object_reference(resolved.declaration_path)
                 )
 
-            case TypeType.BYTE:
+            case TypeCategory.BYTE:
                 payload = UBytePropertyPayload()
 
-            case TypeType.FLOAT:
+            case TypeCategory.FLOAT:
                 payload = UFloatPropertyPayload()
 
-            case TypeType.BOOL:
+            case TypeCategory.BOOL:
                 payload = UBoolPropertyPayload()
 
-            case TypeType.NAME:
+            case TypeCategory.NAME:
                 payload = UNamePropertyPayload()
 
-            case TypeType.STRING:
+            case TypeCategory.STRING:
                 payload = UStrPropertyPayload()
                 flags |= PropertyFlags.NEED_CTOR_LINK
 
-            case TypeType.CLASS:
+            case TypeCategory.CLASS:
                 bound = resolved.arguments[0]
 
                 if bound.declaration_path is None:
@@ -130,11 +127,11 @@ class PropertyBuilder(BuildComponent):
                     meta_class=self.references.class_object_reference(bound.declaration_path),
                 )
 
-            case TypeType.ARRAY:
+            case TypeCategory.ARRAY:
                 payload = UArrayPropertyPayload(inner=ReferencePath())
                 flags |= PropertyFlags.NEED_CTOR_LINK
 
-            case TypeType.ENUM:
+            case TypeCategory.ENUM:
                 if resolved.declaration_path is None:
                     msg = "Resolved enum type has no declaration path"
                     raise ValueError(msg)
@@ -143,7 +140,7 @@ class PropertyBuilder(BuildComponent):
                     enum=self.references.enum_reference(resolved.declaration_path)
                 )
 
-            case TypeType.STRUCT:
+            case TypeCategory.STRUCT:
                 if resolved.declaration_path is None:
                     msg = "Resolved struct type has no declaration path"
                     raise ValueError(msg)
@@ -157,7 +154,7 @@ class PropertyBuilder(BuildComponent):
 
             case _:
                 msg = f"Property {owner.reference()}.{name} requires unsupported type {resolved!r}"
-                raise CompilationError(msg)
+                raise NotImplementedError(msg)
 
         payload.array_dimension = array_dimension
         payload.property_flags = flags
@@ -205,7 +202,7 @@ class PropertyBuilder(BuildComponent):
             flags |= PropertyFlags.EDIT
 
             if tokens:
-                if len(tokens) != 1 or tokens[0].type is not TokenType.IDENTIFIER:
+                if len(tokens) != 1 or tokens[0].category is not TokenCategory.IDENTIFIER:
                     msg = f"Unsupported category syntax on {path}"
                     raise CompilationError(msg)
 

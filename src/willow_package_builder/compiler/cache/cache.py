@@ -1,6 +1,6 @@
 import contextlib
 import json
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import KW_ONLY, dataclass, fields, is_dataclass
 from enum import Enum
 from hashlib import sha256
 from pathlib import Path
@@ -11,16 +11,16 @@ from willow_package_builder.compiler.syntax.declarations import (
     ClassModifier,
     ConstantDeclaration,
     EnumDeclaration,
+    FunctionCategory,
     FunctionDeclaration,
-    FunctionType,
+    OperatorCategory,
     OperatorDeclaration,
-    OperatorType,
     ParameterDeclaration,
     StructDeclaration,
     TypeReference,
     VariableDeclaration,
 )
-from willow_package_builder.compiler.syntax.lexer import Lexer, Token, TokenType
+from willow_package_builder.compiler.syntax.lexer import Lexer, Token, TokenCategory
 from willow_package_builder.compiler.syntax.parser import DeclarationParser
 from willow_package_builder.logging import CompilationError, info
 
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from willow_package_builder.package_config import PackageConfig
 
 
-CLASS_CACHE_SCHEMA_VERSION = 1
+CLASS_CACHE_SCHEMA_VERSION = 2
 DECLARATION_PARSER_VERSION = 3
 
 
@@ -41,10 +41,12 @@ class CachedClass:
     source_hash: str
     declaration: ClassDeclaration
 
-    includes_body_tokens: bool
-
     schema_version: int = CLASS_CACHE_SCHEMA_VERSION
     parser_version: int = DECLARATION_PARSER_VERSION
+
+    _: KW_ONLY
+
+    includes_body_tokens: bool
 
 
 CACHE_TYPES: dict[str, Callable[..., object]] = {
@@ -66,7 +68,7 @@ CACHE_TYPES: dict[str, Callable[..., object]] = {
 }
 
 CACHE_ENUMS: dict[str, type[Enum]] = {
-    cls.__name__: cls for cls in (FunctionType, OperatorType, TokenType)
+    cls.__name__: cls for cls in (FunctionCategory, OperatorCategory, TokenCategory)
 }
 
 
@@ -106,67 +108,71 @@ def write_cached_class(path: Path, cached: CachedClass) -> None:
 
 
 def decode_cache_value(value: object) -> object:
-    if isinstance(value, list):
-        return [decode_cache_value(item) for item in value]
+    match value:
+        case list():
+            return [decode_cache_value(item) for item in value]
 
-    if isinstance(value, dict):
-        if "$tuple" in value:
-            items = value["$tuple"]
+        case dict():
+            if "$tuple" in value:
+                items = value["$tuple"]
 
-            if not isinstance(items, list):
-                msg = "Cached tuple must contain a list"
-                raise ValueError(msg)
+                if not isinstance(items, list):
+                    msg = "Cached tuple must contain a list"
+                    raise ValueError(msg)
 
-            return tuple(decode_cache_value(item) for item in items)
+                return tuple(decode_cache_value(item) for item in items)
 
-        if "$enum" in value:
-            enum_name = value["$enum"]
-            member_name = value.get("name")
+            if "$enum" in value:
+                enum_name = value["$enum"]
+                member_name = value.get("name")
 
-            if not isinstance(enum_name, str) or not isinstance(member_name, str):
-                msg = "Invalid cached enum"
-                raise ValueError(msg)
+                if not isinstance(enum_name, str) or not isinstance(member_name, str):
+                    msg = "Invalid cached enum"
+                    raise ValueError(msg)
 
-            enum_type = CACHE_ENUMS.get(enum_name)
-            if enum_type is None:
-                msg = f"Unknown cached enum: {enum_name!r}"
-                raise ValueError(msg)
+                enum_type = CACHE_ENUMS.get(enum_name)
+                if enum_type is None:
+                    msg = f"Unknown cached enum: {enum_name!r}"
+                    raise ValueError(msg)
 
-            try:
-                return enum_type[member_name]
-            except KeyError:
-                msg = f"Unknown member {member_name!r} of {enum_name}"
-                raise ValueError(msg) from None
+                try:
+                    return enum_type[member_name]
+                except KeyError:
+                    msg = f"Unknown member {member_name!r} of {enum_name}"
+                    raise ValueError(msg) from None
 
-        if "$type" in value:
-            type_name = value["$type"]
-            encoded_fields = value.get("fields")
+            if "$type" in value:
+                type_name = value["$type"]
+                encoded_fields = value.get("fields")
 
-            if not isinstance(type_name, str) or not isinstance(encoded_fields, dict):
-                msg = "Invalid cached declaration"
-                raise ValueError(msg)
+                if not isinstance(type_name, str) or not isinstance(encoded_fields, dict):
+                    msg = "Invalid cached declaration"
+                    raise ValueError(msg)
 
-            constructor = CACHE_TYPES.get(type_name)
-            if constructor is None:
-                msg = f"Unknown cached type: {type_name!r}"
-                raise ValueError(msg)
+                constructor = CACHE_TYPES.get(type_name)
+                if constructor is None:
+                    msg = f"Unknown cached type: {type_name!r}"
+                    raise ValueError(msg)
 
-            if not all(isinstance(key, str) for key in encoded_fields):
-                msg = "Cached field names must be strings"
-                raise ValueError(msg)
+                if not all(isinstance(key, str) for key in encoded_fields):
+                    msg = "Cached field names must be strings"
+                    raise ValueError(msg)
 
-            decoded_fields = {key: decode_cache_value(item) for key, item in encoded_fields.items()}
+                decoded_fields = {
+                    key: decode_cache_value(item) for key, item in encoded_fields.items()
+                }
 
-            return constructor(**decoded_fields)
+                return constructor(**decoded_fields)
 
-        msg = "Unrecognized cache object"
-        raise ValueError(msg)
+            msg = "Unrecognized cache object"
+            raise ValueError(msg)
 
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
+        case str() | int() | float() | bool() | None:
+            return value
 
-    msg = f"Unsupported cache value type: {type(value).__name__}"
-    raise TypeError(msg)
+        case _:
+            msg = f"Unsupported cache value type: {type(value).__name__}"
+            raise TypeError(msg)
 
 
 def read_cached_class(path: Path) -> CachedClass:
@@ -225,10 +231,10 @@ def load_or_parse_class(
         raise CompilationError(msg) from exc
 
     cached = CachedClass(
-        package_name=config.name,
-        source_path=relative_path,
-        source_hash=source_hash,
-        declaration=declaration,
+        config.name,
+        relative_path,
+        source_hash,
+        declaration,
         includes_body_tokens=include_body_tokens,
     )
 

@@ -4,7 +4,7 @@ from enum import Enum, auto
 from willow_package_builder.logging import CompilationError
 
 
-class TokenType(Enum):
+class TokenCategory(Enum):
     IDENTIFIER = auto()
     INTEGER = auto()
     FLOAT = auto()
@@ -16,7 +16,7 @@ class TokenType(Enum):
 
 @dataclass(frozen=True)
 class Token:
-    type: TokenType
+    category: TokenCategory
     text: str
     line: int
     column: int
@@ -176,16 +176,16 @@ class Lexer:
                 msg = f"Expected hexadecimal digits at {line}:{column}"
                 raise CompilationError(msg)
 
-            return Token(TokenType.INTEGER, self.source[start : self.position], line, column)
+            return Token(TokenCategory.INTEGER, self.source[start : self.position], line, column)
 
         while self.peek() and self.peek().isdigit():
             self.advance()
 
-        kind = TokenType.INTEGER
+        category = TokenCategory.INTEGER
 
         # Fractional portion.
         if self.peek() == ".":
-            kind = TokenType.FLOAT
+            category = TokenCategory.FLOAT
             self.advance()
 
             while self.peek() and self.peek().isdigit():
@@ -193,7 +193,7 @@ class Lexer:
 
         # Scientific notation.
         if self.peek() in ("e", "E"):
-            kind = TokenType.FLOAT
+            category = TokenCategory.FLOAT
             self.advance()
 
             if self.peek() in ("+", "-"):
@@ -208,7 +208,7 @@ class Lexer:
                 msg = f"Expected exponent digits at {line}:{column}"
                 raise CompilationError(msg)
 
-        return Token(kind, self.source[start : self.position], line, column)
+        return Token(category, self.source[start : self.position], line, column)
 
     def read_quoted(self) -> Token:
         start = self.position
@@ -216,7 +216,7 @@ class Lexer:
         column = self.column
         quote = self.advance()
 
-        kind = TokenType.STRING if quote == '"' else TokenType.NAME
+        category = TokenCategory.STRING if quote == '"' else TokenCategory.NAME
 
         while True:
             character = self.peek()
@@ -239,7 +239,7 @@ class Lexer:
 
                 self.advance()
 
-        return Token(kind, self.source[start : self.position], line, column)
+        return Token(category, self.source[start : self.position], line, column)
 
     def next_token(self) -> Token:
         self.skip_trivia()
@@ -250,7 +250,7 @@ class Lexer:
         character = self.peek()
 
         if not character:
-            return Token(TokenType.EOF, "", line, column)
+            return Token(TokenCategory.EOF, "", line, column)
 
         if character.isalpha() or character == "_":
             self.advance()
@@ -258,14 +258,14 @@ class Lexer:
             while self.peek() and (self.peek().isalnum() or self.peek() == "_"):
                 self.advance()
 
-            return Token(TokenType.IDENTIFIER, self.source[start : self.position], line, column)
+            return Token(TokenCategory.IDENTIFIER, self.source[start : self.position], line, column)
 
         if character.isdigit() or (character == "." and self.peek(1).isdigit()):
             return self.read_number()
 
         if character in PUNCTUATION:
             self.advance()
-            return Token(TokenType.SYMBOL, character, line, column)
+            return Token(TokenCategory.SYMBOL, character, line, column)
 
         if character in ('"', "'"):
             return self.read_quoted()
@@ -275,7 +275,7 @@ class Lexer:
                 for _ in operator:
                     self.advance()
 
-                return Token(TokenType.SYMBOL, operator, line, column)
+                return Token(TokenCategory.SYMBOL, operator, line, column)
 
         msg = f"Unexpected character {character!r} at {line}:{column}"
         raise CompilationError(msg)
@@ -287,5 +287,5 @@ class Lexer:
             token = self.next_token()
             tokens.append(token)
 
-            if token.type is TokenType.EOF:
+            if token.category is TokenCategory.EOF:
                 return tokens

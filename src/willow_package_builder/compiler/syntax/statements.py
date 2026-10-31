@@ -1,14 +1,18 @@
 from abc import ABC
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from willow_package_builder.source_location import SourceLocation
+
     from .declarations import VariableDeclaration
     from .expressions import Expression
 
 
+@dataclass
 class Statement(ABC):
-    pass
+    _: KW_ONLY
+    location: SourceLocation | None = field(default=None)
 
 
 @dataclass
@@ -34,7 +38,7 @@ class EmptyStatement(Statement):
 
 @dataclass
 class FunctionBody:
-    locals: list[VariableDeclaration]
+    function_locals: list[VariableDeclaration]
     statements: list[Statement]
 
 
@@ -59,3 +63,17 @@ class BreakStatement(Statement):
 @dataclass
 class ContinueStatement(Statement):
     pass
+
+
+@dataclass
+class ForStatement(Statement):
+    initializer: Statement
+    condition: Expression
+    increment: Statement
+    statements: list[Statement]
+
+
+@dataclass
+class DoUntilStatement(Statement):
+    statements: list[Statement]
+    condition: Expression

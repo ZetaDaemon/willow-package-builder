@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from willow_package_builder.upackage import FName, Package, PackageFlags, PackageFormat
+from willow_package_builder.game_constants import Bl2Consts
+from willow_package_builder.upackage import FName, Package, PackageFormat
 
 from .build_state import PackageBuildState
 from .class_builder import ClassBuilder
@@ -57,14 +58,12 @@ class PackageBuilder:
         package = Package(
             FName(self.config.name),
             PackageFormat(
-                version=832, license_version=46, engine_version=1712575, cooker_version=134
+                Bl2Consts.PACKAGE_VERSION,
+                Bl2Consts.LICENSE_VERSION,
+                Bl2Consts.ENGINE_VERSION,
+                Bl2Consts.COOKER_VERSION,
             ),
-            (
-                PackageFlags.ALLOW_DOWNLOAD
-                | PackageFlags.COOKED
-                | PackageFlags.CONTAINS_SCRIPT
-                | PackageFlags.STRIPPED_SOURCE
-            ),
+            Bl2Consts.PACKAGE_FLAGS,
         )
 
         self.state = PackageBuildState(self.context, self.config, package)

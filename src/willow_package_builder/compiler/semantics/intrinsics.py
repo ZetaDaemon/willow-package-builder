@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from .types import TypeType
+from .types import TypeCategory
 
 
 @dataclass(frozen=True)
@@ -32,17 +32,17 @@ _INTRINSIC_PATHS = (
 )
 
 PROPERTY_CLASS_PATHS = {
-    TypeType.BYTE: "Core.ByteProperty",
-    TypeType.INT: "Core.IntProperty",
-    TypeType.BOOL: "Core.BoolProperty",
-    TypeType.FLOAT: "Core.FloatProperty",
-    TypeType.STRING: "Core.StrProperty",
-    TypeType.NAME: "Core.NameProperty",
-    TypeType.OBJECT: "Core.ObjectProperty",
-    TypeType.ARRAY: "Core.ArrayProperty",
-    TypeType.CLASS: "Core.ClassProperty",
-    TypeType.STRUCT: "Core.StructProperty",
-    TypeType.ENUM: "Core.ByteProperty",
+    TypeCategory.BYTE: "Core.ByteProperty",
+    TypeCategory.INT: "Core.IntProperty",
+    TypeCategory.BOOL: "Core.BoolProperty",
+    TypeCategory.FLOAT: "Core.FloatProperty",
+    TypeCategory.STRING: "Core.StrProperty",
+    TypeCategory.NAME: "Core.NameProperty",
+    TypeCategory.OBJECT: "Core.ObjectProperty",
+    TypeCategory.ARRAY: "Core.ArrayProperty",
+    TypeCategory.CLASS: "Core.ClassProperty",
+    TypeCategory.STRUCT: "Core.StructProperty",
+    TypeCategory.ENUM: "Core.ByteProperty",
 }
 
 INTRINSICS = {path.casefold(): IntrinsicDefinition(path) for path in _INTRINSIC_PATHS}

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from .references import ReferenceDatabase
 
 
-class VariableType(StrEnum):
+class VariableCategory(StrEnum):
     PARAMETER = "parameter"
     LOCAL = "local"
     INSTANCE = "instance"
@@ -24,7 +24,7 @@ class VariableType(StrEnum):
 
 @dataclass(frozen=True)
 class VariableSymbol:
-    type: VariableType
+    category: VariableCategory
     owner_class: str
     declaration: ParameterDeclaration | VariableDeclaration
 
@@ -40,10 +40,12 @@ class FunctionScope:
 
     def __post_init__(self) -> None:
         for parameter in self.function.parameters:
-            self.add_variable(parameter, VariableType.PARAMETER)
+            self.add_variable(parameter, VariableCategory.PARAMETER)
 
     def add_variable(
-        self, declaration: ParameterDeclaration | VariableDeclaration, variable_type: VariableType
+        self,
+        declaration: ParameterDeclaration | VariableDeclaration,
+        variable_category: VariableCategory,
     ) -> None:
         key = declaration.name.casefold()
 
@@ -67,11 +69,11 @@ class FunctionScope:
             raise CompilationError(msg)
 
         self._variables[key] = VariableSymbol(
-            type=variable_type, owner_class=self.class_path.casefold(), declaration=declaration
+            variable_category, self.class_path.casefold(), declaration
         )
 
     def add_local(self, declaration: VariableDeclaration) -> None:
-        self.add_variable(declaration, VariableType.LOCAL)
+        self.add_variable(declaration, VariableCategory.LOCAL)
 
     def resolve_variable(self, name: str) -> VariableSymbol:
         local = self._variables.get(name.casefold())
@@ -81,8 +83,4 @@ class FunctionScope:
 
         member = self.references.resolve_variable(self.class_path, name, self.parents)
 
-        return VariableSymbol(
-            type=VariableType.INSTANCE,
-            owner_class=member.owner_class,
-            declaration=member.declaration,
-        )
+        return VariableSymbol(VariableCategory.INSTANCE, member.owner_class, member.declaration)

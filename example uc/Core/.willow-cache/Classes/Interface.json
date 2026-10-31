@@ -36,8 +36,8 @@
                     {
                       "$type": "Token",
                       "fields": {
-                        "type": {
-                          "$enum": "TokenType",
+                        "category": {
+                          "$enum": "TokenCategory",
                           "name": "IDENTIFIER"
                         },
                         "text": "Mobile",
@@ -59,8 +59,8 @@
         "operators": []
       }
     },
-    "includes_body_tokens": false,
-    "schema_version": 1,
-    "parser_version": 3
+    "schema_version": 2,
+    "parser_version": 3,
+    "includes_body_tokens": false
   }
 }

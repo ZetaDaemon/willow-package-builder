@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from willow_package_builder.compiler.semantics.types import TypeType
+from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.declarations import TypeReference
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.package_config import collect_visible_packages
@@ -53,7 +53,7 @@ class StructBuilder(BuildComponent):
 
                     if flag is None:
                         msg = f"Unsupported struct modifier {modifier!r} on {path}"
-                        raise CompilationError(msg)
+                        raise NotImplementedError(msg)
 
                     flags |= flag
 
@@ -84,13 +84,10 @@ class StructBuilder(BuildComponent):
                 continue
 
             parent = self.context.references.resolve_type(
-                TypeReference(parent_name),
-                current_class=exports.owner_class,
-                visible_packages=visible,
-                parents=self.context.parents,
+                TypeReference(parent_name), exports.owner_class, visible, self.context.parents
             )
 
-            if parent.type is not TypeType.STRUCT:
+            if parent.category is not TypeCategory.STRUCT:
                 msg = f"Struct {path} cannot extend non-struct {parent_name!r}"
                 raise CompilationError(msg)
 
@@ -197,13 +194,10 @@ class StructBuilder(BuildComponent):
 
             for type_ref in type_refs:
                 resolved = self.context.references.resolve_type(
-                    type_ref,
-                    current_class=member.owner_class,
-                    visible_packages=visible,
-                    parents=self.context.parents,
+                    type_ref, member.owner_class, visible, self.context.parents
                 )
 
-                if resolved.type is TypeType.STRUCT:
+                if resolved.category is TypeCategory.STRUCT:
                     if resolved.declaration_path is None:
                         msg = "Resolved struct type has no declaration path"
                         raise ValueError(msg)

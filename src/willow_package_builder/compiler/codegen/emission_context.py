@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING, Protocol
 
-
 if TYPE_CHECKING:
     from willow_package_builder.compiler.build_context import BuildContext
     from willow_package_builder.package_config import PackageConfig
@@ -22,5 +21,7 @@ class EmissionContext(Protocol):
     ) -> ReferencePath: ...
 
     def ensure_import(
-        self, *, name: str, outer: ReferencePath, class_package: str, class_name: str
+        self, name: str, outer: ReferencePath, class_package: str, class_name: str
     ) -> ReferencePath: ...
+
+    def function_reference(self, function_path: str) -> ReferencePath: ...

@@ -1,4 +1,4 @@
-from willow_package_builder.compiler.syntax.lexer import Token, TokenType
+from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
 from willow_package_builder.logging import CompilationError
 
 
@@ -7,7 +7,7 @@ class TokenParser:
     position: int = 0
 
     def __init__(self, tokens: list[Token]) -> None:
-        if not tokens or tokens[-1].type is not TokenType.EOF:
+        if not tokens or tokens[-1].category is not TokenCategory.EOF:
             msg = "Token stream must end with EOF"
             raise ValueError(msg)
 
@@ -21,7 +21,7 @@ class TokenParser:
     def advance(self) -> Token:
         token = self.peek()
 
-        if token.type is not TokenType.EOF:
+        if token.category is not TokenCategory.EOF:
             self.position += 1
 
         return token
@@ -29,7 +29,7 @@ class TokenParser:
     def match(self, text: str) -> bool:
         token = self.peek()
 
-        if token.type is TokenType.EOF:
+        if token.category is TokenCategory.EOF:
             return False
 
         if token.text.casefold() != text.casefold():
@@ -50,7 +50,7 @@ class TokenParser:
     def expect_identifier(self) -> Token:
         token = self.peek()
 
-        if token.type is not TokenType.IDENTIFIER:
+        if token.category is not TokenCategory.IDENTIFIER:
             msg = f"Expected identifier, got {token.text!r} at {token.line}:{token.column}"
             raise CompilationError(msg)
 
@@ -67,7 +67,7 @@ class TokenParser:
     def parse_integer(self) -> int:
         token = self.peek()
 
-        if token.type is not TokenType.INTEGER:
+        if token.category is not TokenCategory.INTEGER:
             msg = f"Expected integer at {token.line}:{token.column}"
             raise CompilationError(msg)
 
@@ -83,11 +83,11 @@ class TokenParser:
         while depth:
             token = self.advance()
 
-            if token.type is TokenType.EOF:
+            if token.category is TokenCategory.EOF:
                 msg = f"Unterminated parentheses opened at {opening.line}:{opening.column}"
                 raise CompilationError(msg)
 
-            if token.type is TokenType.SYMBOL:
+            if token.category is TokenCategory.SYMBOL:
                 if token.text == "(":
                     depth += 1
                 elif token.text == ")":
@@ -106,11 +106,11 @@ class TokenParser:
         while depth:
             token = self.advance()
 
-            if token.type is TokenType.EOF:
+            if token.category is TokenCategory.EOF:
                 msg = f"Unterminated block opened at {opening.line}:{opening.column}"
                 raise CompilationError(msg)
 
-            if token.type is TokenType.SYMBOL:
+            if token.category is TokenCategory.SYMBOL:
                 if token.text == "{":
                     depth += 1
                 elif token.text == "}":

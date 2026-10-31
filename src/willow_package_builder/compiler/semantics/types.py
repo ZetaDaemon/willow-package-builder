@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 
-class TypeType(StrEnum):
+class TypeCategory(StrEnum):
     VOID = "void"
     BYTE = "byte"
     INT = "int"
@@ -19,6 +19,6 @@ class TypeType(StrEnum):
 
 @dataclass(frozen=True)
 class ResolvedType:
-    type: TypeType
+    category: TypeCategory
     declaration_path: str | None = None
     arguments: tuple[ResolvedType, ...] = ()
