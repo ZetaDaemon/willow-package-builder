@@ -225,3 +225,6 @@ __marimo__/
 
 # vscode
 *.vscode
+
+# package manifest
+*.manifest.json
