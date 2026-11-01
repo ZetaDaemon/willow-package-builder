@@ -222,6 +222,7 @@ __marimo__/
 
 # UPK
 *.upk
+*.willow-cache
 
 # vscode
 *.vscode
