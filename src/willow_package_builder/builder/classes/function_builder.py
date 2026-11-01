@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
+from willow_package_builder.builder.build_component import BuildComponent
 from willow_package_builder.compiler.codegen.emitter import FunctionEmitter
 from willow_package_builder.compiler.semantics.expression_resolver import ExpressionResolver
 from willow_package_builder.compiler.semantics.function_body_validator import FunctionBodyValidator
@@ -22,15 +23,14 @@ from willow_package_builder.payloads.class_payload import (
 from willow_package_builder.payloads.property_payloads import PropertyFlags, UPropertyPayload
 from willow_package_builder.upackage import FName, ObjectFlags, ReferencePath, UObject
 
-from .build_component import BuildComponent
 from .prepared_function import PreparedFunction
 
 if TYPE_CHECKING:
-    from willow_package_builder.builder.exports import ClassExports
+    from willow_package_builder.builder.references import PackageReferences
     from willow_package_builder.compiler.syntax.expressions import Expression
 
+    from .exports import ClassExports
     from .property_builder import PropertyBuilder
-    from .references import PackageReferences
 
 FUNCTION_MODIFIER_FLAGS: dict[FunctionModifier, FunctionFlags] = {
     # Implementation and dispatch

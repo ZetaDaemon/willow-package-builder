@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from willow_package_builder.builder.exports import ClassExports
+from willow_package_builder.builder.build_component import BuildComponent
 from willow_package_builder.compiler.syntax.modifiers import ClassModifierName
 from willow_package_builder.logging import CompilationError, WarningCode, info, warn
 from willow_package_builder.package_config import collect_visible_packages
@@ -9,11 +9,12 @@ from willow_package_builder.payloads.class_payload import ClassFlags, StateFlags
 from willow_package_builder.payloads.instance_payload import ObjectInstancePayload
 from willow_package_builder.upackage import FName, ObjectFlags, UObject
 
-from .build_component import BuildComponent
+from .exports import ClassExports
 
 if TYPE_CHECKING:
+    from willow_package_builder.builder.references import PackageReferences
+
     from .property_builder import PropertyBuilder
-    from .references import PackageReferences
 
 CLASS_MODIFIER_FLAGS: dict[ClassModifierName, ClassFlags] = {
     # Implementation

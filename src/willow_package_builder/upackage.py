@@ -60,6 +60,8 @@ class ExportFlags(IntFlag):
 
     NONE = 0
 
+    FORCED_EXPORT = 0x00000001
+
 
 class PackageFlags(IntFlag):
     """PackageFlags."""
@@ -110,6 +112,7 @@ class Name:
         return self.name.casefold() == "none"
 
 
+UINT8_MAX = (1 << 8) - 1
 INT32_MAX = (1 << 31) - 1
 
 
@@ -301,6 +304,8 @@ class UObject:
 
     dependencies: list[ReferencePath] = field(default_factory=list)
 
+    export_flags: ExportFlags = ExportFlags.NONE
+
     def serialize(self, package: Package, payload_size: int, payload_offset: int) -> bytes:
         """Convert to bytes."""
         return (
@@ -310,7 +315,7 @@ class UObject:
             + self.name.serialize(package)
             + self.archetype.serialize(package)
             + struct.pack("<Qii", int(self.flags), payload_size, payload_offset)
-            + struct.pack("<I", int(ExportFlags.NONE))
+            + struct.pack("<I", int(self.export_flags))
             + struct.pack("<i", 0)  # Generation net-object counts: empty.
             + UUID(int=0).bytes_le  # No originating package GUID.
             + struct.pack("<I", int(PackageFlags.NONE))

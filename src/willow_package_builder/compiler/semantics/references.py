@@ -456,3 +456,48 @@ class ReferenceDatabase:
 
         msg = f"No exact {category.value} overload of {name!r} for {operand!r}"
         raise CompilationError(msg)
+
+    def resolve_struct_variable(
+        self,
+        struct_path: str,
+        name: str,
+        parents: Mapping[str, str | None],
+        visible_packages: set[str],
+    ) -> ResolvedMember[VariableDeclaration]:
+        current = struct_path.casefold()
+        key = name.casefold()
+        visited: set[str] = set()
+
+        while True:
+            if current in visited:
+                msg = f"Struct inheritance cycle while resolving {struct_path}.{name}"
+                raise CompilationError(msg)
+
+            visited.add(current)
+            owner_class, _, struct_name = current.rpartition(".")
+            member = self.resolve_struct(owner_class, struct_name, parents)
+            declaration = member.declaration
+
+            for variable in declaration.variables:
+                if variable.name.casefold() == key:
+                    return ResolvedMember(member.owner_class, variable)
+
+            if declaration.parent is None:
+                break
+
+            parent = self.resolve_type(
+                TypeReference(declaration.parent), member.owner_class, visible_packages, parents
+            )
+
+            if parent.category is not TypeCategory.STRUCT:
+                msg = f"Struct {current} has a non-struct parent"
+                raise CompilationError(msg)
+
+            if parent.declaration_path is None:
+                msg = f"Parent struct of {current} has no declaration path"
+                raise ValueError(msg)
+
+            current = parent.declaration_path.casefold()
+
+        msg = f"Unknown field {name!r} on struct {struct_path}"
+        raise CompilationError(msg)

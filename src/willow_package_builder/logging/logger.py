@@ -6,8 +6,13 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, TextIO, overload
 
-from .diagnostics import CompilationError, ConfigError, WarningAction, WarningCode
-
+from .diagnostics import (
+    CompilationError,
+    ConfigError,
+    ObjectDefinitionError,
+    WarningAction,
+    WarningCode,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -83,7 +88,7 @@ class Logger:
 
         try:
             yield
-        except (CompilationError, ConfigError) as error:
+        except (CompilationError, ConfigError, ObjectDefinitionError) as error:
             self._log(f"{type(error).__name__}: {error}", sys.stderr, LogPrefix.ERROR)
             if self.debug:
                 raise

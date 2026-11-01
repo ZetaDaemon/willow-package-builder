@@ -1,14 +1,13 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from willow_package_builder.builder.build_component import BuildComponent
 from willow_package_builder.payloads.class_payload import UClassPayload
 from willow_package_builder.payloads.enum_payload import UEnumPayload
 from willow_package_builder.upackage import FName, ObjectFlags, UObject
 
-from .build_component import BuildComponent
-
 if TYPE_CHECKING:
-    from .references import PackageReferences
+    from willow_package_builder.builder.references import PackageReferences
 
 
 @dataclass

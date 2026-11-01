@@ -1,36 +1,29 @@
 import struct
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import ClassVar, override
+from typing import override
 
-from willow_package_builder.upackage import (
-    FName,
-    ObjectPayload,
-    Package,
-    ReferencePath,
-    serialize_fstring,
-)
+from willow_package_builder.payloads.property_values import EnumValue, PropertyValue
+from willow_package_builder.upackage import FName, ObjectPayload, Package
 
 INDEX_NONE = -1
 PROPERTY_LIST_END = FName("None")
 
 
 @dataclass
-class PropertyOverride(ABC):
+class PropertyOverride:
     name: FName
+    property_type: FName
+    value: PropertyValue
     array_index: int = field(default=0, kw_only=True)
 
-    PROPERTY_TYPE: ClassVar[str]
-
-    @abstractmethod
     def serialize_value(self, package: Package) -> bytes:
         """Convert the stored value into bytes."""
+        return self.value.serialize(package)
 
     def serialize_metadata(self, package: Package) -> bytes:  # pyright: ignore[reportUnusedParameter]  # noqa: ARG002
         """Convert the metadata into bytes.
 
-        Not all properties have metadata so an 'empty' default function is provided,
-        rather than an abstract function like serialize_value.
+        Not all properties have metadata.
         """
         return b""
 
@@ -40,7 +33,7 @@ class PropertyOverride(ABC):
 
         return (
             self.name.serialize(package)
-            + FName(self.PROPERTY_TYPE).serialize(package)
+            + self.property_type.serialize(package)
             + struct.pack("<ii", len(value_data), self.array_index)
             + self.serialize_metadata(package)
             + value_data
@@ -48,58 +41,10 @@ class PropertyOverride(ABC):
 
 
 @dataclass
-class IntPropertyOverride(PropertyOverride):
-    value: int
-
-    PROPERTY_TYPE: ClassVar[str] = "IntProperty"
-
-    @override
-    def serialize_value(self, package: Package) -> bytes:
-        return struct.pack("<i", self.value)
-
-
-@dataclass
-class FloatPropertyOverride(PropertyOverride):
-    value: float
-
-    PROPERTY_TYPE: ClassVar[str] = "FloatProperty"
-
-    @override
-    def serialize_value(self, package: Package) -> bytes:
-        return struct.pack("<f", self.value)
-
-
-@dataclass
-class StringPropertyOverride(PropertyOverride):
-    value: str
-
-    PROPERTY_TYPE: ClassVar[str] = "StrProperty"
-
-    @override
-    def serialize_value(self, package: Package) -> bytes:
-        return serialize_fstring(self.value)
-
-
-@dataclass
-class NamePropertyOverride(PropertyOverride):
-    value: FName
-
-    PROPERTY_TYPE: ClassVar[str] = "NameProperty"
-
-    @override
-    def serialize_value(self, package: Package) -> bytes:
-        return self.value.serialize(package)
-
-
-@dataclass
 class BoolPropertyOverride(PropertyOverride):
-    value: bool
-
-    PROPERTY_TYPE: ClassVar[str] = "BoolProperty"
-
     @override
     def serialize_metadata(self, package: Package) -> bytes:
-        return struct.pack("<?", self.value)
+        return self.value.serialize(package)
 
     @override
     def serialize_value(self, package: Package) -> bytes:
@@ -108,47 +53,27 @@ class BoolPropertyOverride(PropertyOverride):
 
 @dataclass
 class EnumPropertyOverride(PropertyOverride):
-    enum_name: FName
-    value: FName
+    def _enum_value(self) -> EnumValue:
+        if not isinstance(self.value, EnumValue):
+            msg = "EnumPropertyOverride requires an EnumValue"
+            raise TypeError(msg)
 
-    PROPERTY_TYPE: ClassVar[str] = "ByteProperty"
+        return self.value
 
     @override
     def serialize_metadata(self, package: Package) -> bytes:
-        return self.enum_name.serialize(package)
+        return self._enum_value().enum_name.serialize(package)
 
     @override
     def serialize_value(self, package: Package) -> bytes:
-        return self.value.serialize(package)
+        return self._enum_value().member_name.serialize(package)
 
 
 @dataclass
-class ObjectPropertyOverride(PropertyOverride):
-    value: ReferencePath
-
-    PROPERTY_TYPE: ClassVar[str] = "ObjectProperty"
-
+class BytePropertyOverride(PropertyOverride):
     @override
-    def serialize_value(self, package: Package) -> bytes:
-        return self.value.serialize(package)
-
-
-@dataclass
-class ObjectArrayPropertyOverride(PropertyOverride):
-    values: list[ReferencePath]
-
-    PROPERTY_TYPE: ClassVar[str] = "ArrayProperty"
-
-    @override
-    def serialize_value(self, package: Package) -> bytes:
-        return struct.pack("<i", len(self.values)) + b"".join(
-            value.serialize(package) for value in self.values
-        )
-
-
-@dataclass
-class ClassPropertyOverride(ObjectPropertyOverride):
-    PROPERTY_TYPE: ClassVar[str] = "ClassProperty"
+    def serialize_metadata(self, package: Package) -> bytes:
+        return FName("None").serialize(package)
 
 
 @dataclass
@@ -163,3 +88,12 @@ class ObjectInstancePayload(ObjectPayload):
             + b"".join(prop.serialize(package) for prop in self.properties)
             + PROPERTY_LIST_END.serialize(package)
         )
+
+
+@dataclass
+class StructPropertyOverride(PropertyOverride):
+    struct_name: FName
+
+    @override
+    def serialize_metadata(self, package: Package) -> bytes:
+        return self.struct_name.serialize(package)

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from willow_package_builder.builder.build_component import BuildComponent
 from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.declarations import TypeReference, VariableDeclaration
 from willow_package_builder.compiler.syntax.lexer import TokenCategory
@@ -23,10 +24,8 @@ from willow_package_builder.payloads.property_payloads import (
 )
 from willow_package_builder.upackage import FName, ObjectFlags, ReferencePath, UObject
 
-from .build_component import BuildComponent
-
 if TYPE_CHECKING:
-    from .references import PackageReferences
+    from willow_package_builder.builder.references import PackageReferences
 
 
 @dataclass

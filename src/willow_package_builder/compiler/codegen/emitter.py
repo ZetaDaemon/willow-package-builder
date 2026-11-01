@@ -45,7 +45,7 @@ from willow_package_builder.logging import CompilationError
 from willow_package_builder.upackage import FName, ReferencePath, UObject
 
 if TYPE_CHECKING:
-    from willow_package_builder.builder.prepared_function import PreparedFunction
+    from willow_package_builder.builder.classes.prepared_function import PreparedFunction
     from willow_package_builder.compiler.semantics.expression_resolver import ExpressionResolver
     from willow_package_builder.opcode import Opcodes
 

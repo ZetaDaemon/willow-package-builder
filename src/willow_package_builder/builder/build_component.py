@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from willow_package_builder.upackage import Package
 
     from .build_state import PackageBuildState
-    from .exports import ClassExports, StructExports
+    from .classes.exports import ClassExports, StructExports
 
 
 @dataclass

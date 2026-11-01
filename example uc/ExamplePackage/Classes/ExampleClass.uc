@@ -1,6 +1,18 @@
 class ExampleClass extends Object;
 
-var int Value;
+struct BaseData
+{
+    var int Count;
+    var array<int> Numbers;
+};
+
+struct ExtendedData extends BaseData
+{
+    var string Label;
+};
+
+var int IntValue;
+var ExtendedData InheritedData;
 
 function ExampleClass GetOther(ExampleClass Other)
 {
@@ -9,8 +21,8 @@ function ExampleClass GetOther(ExampleClass Other)
 
 function int AddValue(int Amount)
 {
-    Value += Amount;
-    return Value;
+    IntValue += Amount;
+    return IntValue;
 }
 
 

@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from willow_package_builder.package_config import PackageConfig
     from willow_package_builder.upackage import Package
 
-    from .exports import ClassExports, StructExports
+    from .classes.exports import ClassExports, StructExports
 
 
 @dataclass

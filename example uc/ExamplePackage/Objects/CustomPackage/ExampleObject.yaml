@@ -1,8 +1,10 @@
-Name: ExampleObject
 Class: ExamplePackage.ExampleClass
-Value: 15
+IntValue: 15
+InheritedData:
+  Label: "Inherited struct"
+  Count: 7
+  Numbers: [10, 20]
 
 ---
 Name: ChildExampleObject
 Class: ExamplePackage.ExampleClass
-Value: 27

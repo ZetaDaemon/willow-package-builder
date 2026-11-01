@@ -49,3 +49,7 @@ class CompilationError(Exception):
 
 class ConfigError(Exception):
     """An error in the package configuration."""
+
+
+class ObjectDefinitionError(Exception):
+    """An error in the object definition."""

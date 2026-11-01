@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from willow_package_builder.builder.build_component import BuildComponent
 from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.declarations import TypeReference
 from willow_package_builder.compiler.syntax.modifiers import StructModifier
@@ -10,12 +11,12 @@ from willow_package_builder.payloads.class_payload import UClassPayload
 from willow_package_builder.payloads.struct_payload import StructFlags, UScriptStructPayload
 from willow_package_builder.upackage import FName, ObjectFlags, UObject
 
-from .build_component import BuildComponent
 from .exports import StructExports
 
 if TYPE_CHECKING:
+    from willow_package_builder.builder.references import PackageReferences
+
     from .property_builder import PropertyBuilder
-    from .references import PackageReferences
 
 STRUCT_MODIFIER_FLAGS: dict[StructModifier, StructFlags] = {
     StructModifier.NATIVE: StructFlags.NATIVE,

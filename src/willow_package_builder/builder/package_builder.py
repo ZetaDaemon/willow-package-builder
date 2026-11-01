@@ -2,21 +2,23 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from willow_package_builder.games import get_game
+from willow_package_builder.logging import info
 from willow_package_builder.upackage import FName, Package
 
 from .build_state import PackageBuildState
-from .class_builder import ClassBuilder
-from .enum_builder import EnumBuilder
-from .function_builder import FunctionBuilder
-from .property_builder import PropertyBuilder
+from .classes.class_builder import ClassBuilder
+from .classes.enum_builder import EnumBuilder
+from .classes.function_builder import FunctionBuilder
+from .classes.property_builder import PropertyBuilder
+from .classes.struct_builder import StructBuilder
+from .objects.object_builder import ObjectBuilder
 from .references import PackageReferences
-from .struct_builder import StructBuilder
 
 if TYPE_CHECKING:
-    from willow_package_builder.builder.build_context import BuildContext
     from willow_package_builder.package_config import PackageConfig
 
-    from .exports import ClassExports, StructExports
+    from .build_context import BuildContext
+    from .classes.exports import ClassExports, StructExports
 
 
 @dataclass
@@ -37,6 +39,7 @@ class PackageBuilder:
     struct_builder: StructBuilder = field(init=False)
     enums: EnumBuilder = field(init=False)
     class_builder: ClassBuilder = field(init=False)
+    object_builder: ObjectBuilder = field(init=False)
 
     @property
     def package(self) -> Package:
@@ -65,6 +68,7 @@ class PackageBuilder:
         self.struct_builder = StructBuilder(self.state, self.references, self.properties)
         self.enums = EnumBuilder(self.state, self.references)
         self.class_builder = ClassBuilder(self.state, self.references, self.properties)
+        self.object_builder = ObjectBuilder(self.state, self.references)
 
     def manifest(self) -> dict[str, object]:
         """Create the package manifest."""
@@ -77,6 +81,8 @@ class PackageBuilder:
 
     def build(self) -> Package:
         """Build the package."""
+        # Compile classes
+        info("Compiling classes")
         self.class_builder.reserve_classes()
         self.class_builder.link_classes()
         self.struct_builder.reserve_structs()
@@ -86,5 +92,12 @@ class PackageBuilder:
         self.struct_builder.build_struct_fields()
         self.class_builder.build_class_fields()
         self.functions.build_class_functions()
+
+        # Construct objects
+        info("Constructing objects")
+        self.object_builder.read_objects()
+        self.object_builder.reserve_objects()
+        self.object_builder.initialize_payloads()
+        self.object_builder.build_all_properties()
 
         return self.package

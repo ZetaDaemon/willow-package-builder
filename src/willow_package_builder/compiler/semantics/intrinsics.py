@@ -29,6 +29,7 @@ _INTRINSIC_PATHS = (
     "Core.MapProperty",
     "Core.StructProperty",
     "Core.DelegateProperty",
+    "Core.Package",
 )
 
 PROPERTY_CLASS_PATHS = {
