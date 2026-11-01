@@ -21,6 +21,13 @@ from willow_package_builder.compiler.syntax.declarations import (
     VariableDeclaration,
 )
 from willow_package_builder.compiler.syntax.lexer import Lexer, Token, TokenCategory
+from willow_package_builder.compiler.syntax.modifiers import (
+    ClassModifierName,
+    FunctionModifier,
+    ParameterModifier,
+    StructModifier,
+    VariableModifier,
+)
 from willow_package_builder.compiler.syntax.parser import DeclarationParser
 from willow_package_builder.logging import CompilationError, info
 
@@ -30,7 +37,7 @@ if TYPE_CHECKING:
     from willow_package_builder.package_config import PackageConfig
 
 
-CLASS_CACHE_SCHEMA_VERSION = 2
+CLASS_CACHE_SCHEMA_VERSION = 5
 DECLARATION_PARSER_VERSION = 3
 
 
@@ -68,7 +75,17 @@ CACHE_TYPES: dict[str, Callable[..., object]] = {
 }
 
 CACHE_ENUMS: dict[str, type[Enum]] = {
-    cls.__name__: cls for cls in (FunctionCategory, OperatorCategory, TokenCategory)
+    cls.__name__: cls
+    for cls in (
+        FunctionCategory,
+        OperatorCategory,
+        TokenCategory,
+        FunctionModifier,
+        ParameterModifier,
+        ClassModifierName,
+        VariableModifier,
+        StructModifier,
+    )
 }
 
 

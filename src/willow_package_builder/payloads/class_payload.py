@@ -5,7 +5,7 @@ from enum import IntFlag
 from typing import ClassVar, override
 
 from willow_package_builder.bytecode import Bytecode
-from willow_package_builder.game_constants import Bl2Consts
+from willow_package_builder.games import get_game
 from willow_package_builder.upackage import (
     FName,
     ObjectPayload,
@@ -134,8 +134,16 @@ class ClassFlags(IntFlag):
 
     ABSTRACT = 0x00000001
     COMPILED = 0x00000002
+    CONFIG = 0x00000004
+    TRANSIENT = 0x00000008
     PARSED = 0x00000010
+    NATIVE = 0x00000080
+    NO_EXPORT = 0x00000100
+    PLACEABLE = 0x00000200
+    PER_OBJECT_CONFIG = 0x00000400
+    NATIVE_REPLICATION = 0x00000800
     EDIT_INLINE_NEW = 0x00001000
+    COLLAPSE_CATEGORIES = 0x00002000
     PER_OBJECT_LOCALIZED = 0x40000000
 
 
@@ -196,7 +204,7 @@ class UClassPayload(UStatePayload):
             + serialize_names(self.class_groups)
             + serialize_fstring(self.native_class_name)
             + self.dll_bind_name.serialize(package)
-            + struct.pack("<B", Bl2Consts.CLASS_UNKNOWN_BYTE)
+            + struct.pack("<B", get_game().CLASS_UNKNOWN_BYTE)
             + self.default_object.serialize(package)
         )
 
@@ -213,14 +221,25 @@ class UClassPayload(UStatePayload):
 class FunctionFlags(IntFlag):
     """FunctionFlags."""
 
-    NONE = 0
+    NONE = 0x0
 
+    FINAL = 0x00000001
     DEFINED = 0x00000002
+    ITERATOR = 0x00000004
+    LATENT = 0x00000008
+    SINGULAR = 0x00000020
     NET = 0x00000040
+    NET_RELIABLE = 0x00000080
+    SIMULATED = 0x00000100
+    EXEC = 0x00000200
     NATIVE = 0x00000400
     STATIC = 0x00002000
+    PUBLIC = 0x00020000
+    PRIVATE = 0x00040000
     PROTECTED = 0x00080000
+    NET_SERVER = 0x00200000
     HAS_OUT_PARAMS = 0x00400000
+    NET_CLIENT = 0x01000000
 
 
 @dataclass

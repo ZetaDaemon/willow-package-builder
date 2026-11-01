@@ -1,28 +1,11 @@
 from willow_package_builder.compiler.syntax.declarations import TypeReference, VariableDeclaration
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
+from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.logging import CompilationError
 
 from .token_parser import TokenParser
 
 PARAMETERIZED_TYPES = frozenset({"array", "class", "delegate"})
-VARIABLE_MODIFIERS = frozenset(
-    {
-        "native",
-        "const",
-        "transient",
-        "private",
-        "protected",
-        "public",
-        "config",
-        "globalconfig",
-        "localized",
-        "editconst",
-        "editinline",
-        "export",
-        "noexport",
-        "duplicatetransient",
-    }
-)
 
 
 class DeclarationSyntaxParser(TokenParser):
@@ -68,14 +51,14 @@ class DeclarationSyntaxParser(TokenParser):
         self.expect("local" if is_local else "var")
 
         category_tokens = None
-        modifiers: list[str] = []
+        modifiers: list[VariableModifier] = []
 
         if not is_local:
             if self.peek().text == "(":
                 category_tokens = self.parse_parenthesized_tokens()
 
-            while self.peek().text.casefold() in VARIABLE_MODIFIERS:
-                modifiers.append(self.advance().text.casefold())
+            while self.peek().text.casefold() in VariableModifier:
+                modifiers.append(VariableModifier(self.advance().text.casefold()))
 
         type_ref = self.parse_type()
 

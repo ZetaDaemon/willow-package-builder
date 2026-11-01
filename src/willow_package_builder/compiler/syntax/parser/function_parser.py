@@ -10,6 +10,8 @@ from willow_package_builder.compiler.syntax.expressions import (
     FloatExpression,
     IdentifierExpression,
     IntegerExpression,
+    MemberExpression,
+    SelfExpression,
     StringExpression,
     UnaryExpression,
 )
@@ -28,8 +30,7 @@ from willow_package_builder.compiler.syntax.statements import (
     Statement,
     WhileStatement,
 )
-from willow_package_builder.logging import CompilationError
-from willow_package_builder.source_location import SourceLocation
+from willow_package_builder.logging import CompilationError, SourceLocation
 
 from .declaration_syntax_parser import DeclarationSyntaxParser
 
@@ -91,6 +92,9 @@ class FunctionParser(DeclarationSyntaxParser):
 
                 if keyword in ("true", "false"):
                     return BooleanExpression(keyword == "true")
+
+                if keyword == "self":
+                    return SelfExpression()
 
                 return IdentifierExpression(token.text)
 
@@ -335,6 +339,11 @@ class FunctionParser(DeclarationSyntaxParser):
         expression = self.parse_primary_expression()
 
         while True:
+            if self.match("."):
+                name = self.expect_identifier().text
+                expression = MemberExpression(expression, name)
+                continue
+
             if self.peek().text == "(":
                 arguments = self.parse_call_arguments()
                 expression = CallExpression(expression, arguments)

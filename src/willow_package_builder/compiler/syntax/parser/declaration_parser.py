@@ -11,42 +11,15 @@ from willow_package_builder.compiler.syntax.declarations import (
     StructDeclaration,
 )
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
+from willow_package_builder.compiler.syntax.modifiers import (
+    ClassModifierName,
+    FunctionModifier,
+    ParameterModifier,
+    StructModifier,
+)
 from willow_package_builder.logging import CompilationError, WarningCode, warn
 
 from .declaration_syntax_parser import DeclarationSyntaxParser
-
-PARAMETER_MODIFIERS = frozenset({"out", "optional", "coerce", "skip", "const"})
-FUNCTION_MODIFIERS = frozenset(
-    {
-        "native",
-        "static",
-        "final",
-        "simulated",
-        "exec",
-        "latent",
-        "singular",
-        "iterator",
-        "public",
-        "protected",
-        "private",
-        "reliable",
-        "unreliable",
-        "client",
-        "server",
-    }
-)
-STRUCT_MODIFIERS = frozenset(
-    {
-        "native",
-        "export",
-        "noexport",
-        "transient",
-        "atomic",
-        "immutable",
-        "immutablewhencooked",
-        "strictconfig",
-    }
-)
 
 
 class DeclarationParser(DeclarationSyntaxParser):
@@ -90,11 +63,17 @@ class DeclarationParser(DeclarationSyntaxParser):
                 within = self.parse_qualified_name()
                 continue
 
+            try:
+                modifier_name = ClassModifierName(keyword)
+            except ValueError:
+                msg = f"Unrecognised class modifier {keyword}"
+                raise CompilationError(msg) from None
+
             arguments = None
             if self.peek().text == "(":
                 arguments = self.parse_parenthesized_tokens()
 
-            modifiers.append(ClassModifier(keyword, arguments))
+            modifiers.append(ClassModifier(modifier_name, arguments))
 
         return ClassDeclaration(name, parent, is_interface, within, tuple(modifiers))
 
@@ -192,10 +171,10 @@ class DeclarationParser(DeclarationSyntaxParser):
     def parse_struct_declaration(self) -> StructDeclaration:
         self.expect("struct")
 
-        modifiers: list[str] = []
+        modifiers: list[StructModifier] = []
 
-        while self.peek().text.casefold() in STRUCT_MODIFIERS:
-            modifiers.append(self.advance().text.casefold())
+        while self.peek().text.casefold() in StructModifier:
+            modifiers.append(StructModifier(self.advance().text.casefold()))
 
         name = self.expect_identifier().text
 
@@ -240,11 +219,11 @@ class DeclarationParser(DeclarationSyntaxParser):
     def is_operator_start(self) -> bool:
         offset = 0
 
-        while self.peek(offset).text.casefold() in FUNCTION_MODIFIERS:
+        while self.peek(offset).text.casefold() in FunctionModifier:
             modifier = self.peek(offset).text.casefold()
             offset += 1
 
-            if modifier == "native" and self.peek(offset).text == "(":
+            if modifier == FunctionModifier.NATIVE and self.peek(offset).text == "(":
                 offset += 1
 
                 if self.peek(offset).category is not TokenCategory.INTEGER:
@@ -304,10 +283,17 @@ class DeclarationParser(DeclarationSyntaxParser):
             return parameters
 
         while True:
-            modifiers: list[str] = []
+            modifiers: list[ParameterModifier] = []
 
-            while self.peek().text.casefold() in PARAMETER_MODIFIERS:
-                modifiers.append(self.advance().text.casefold())
+            while self.peek().text.casefold() in ParameterModifier:
+                modifier = self.advance().text.casefold()
+                try:
+                    modifier = ParameterModifier(modifier)
+                except ValueError:
+                    msg = f"Unrecognised parameter modifier {modifier}"
+                    raise CompilationError(msg) from None
+
+                modifiers.append(modifier)
 
             type_ref = self.parse_type()
             name = self.expect_identifier().text
@@ -325,14 +311,20 @@ class DeclarationParser(DeclarationSyntaxParser):
             self.expect(",")
 
     def parse_operator_declaration(self, *, include_body_tokens: bool) -> OperatorDeclaration:
-        modifiers: list[str] = []
+        modifiers: list[FunctionModifier] = []
         native_index = None
 
-        while self.peek().text.casefold() in FUNCTION_MODIFIERS:
-            modifier = self.advance().text.casefold()
+        while self.peek().text.casefold() in FunctionModifier:
+            token = self.advance()
+            try:
+                modifier = FunctionModifier(token.text.casefold())
+            except ValueError:
+                msg = f"Unknown operator modifier {token.text!r} at {token.line}:{token.column}"
+                raise CompilationError(msg) from None
+
             modifiers.append(modifier)
 
-            if modifier == "native" and self.match("("):
+            if modifier == FunctionModifier.NATIVE and self.match("("):
                 native_index = self.parse_integer()
                 self.expect(")")
 
@@ -402,14 +394,20 @@ class DeclarationParser(DeclarationSyntaxParser):
         return declaration
 
     def parse_function_header(self) -> FunctionDeclaration:
-        modifiers: list[str] = []
+        modifiers: list[FunctionModifier] = []
         native_index = None
 
-        while self.peek().text.casefold() in FUNCTION_MODIFIERS:
-            modifier = self.advance().text.casefold()
+        while self.peek().text.casefold() in FunctionModifier:
+            token = self.advance()
+            try:
+                modifier = FunctionModifier(token.text.casefold())
+            except ValueError:
+                msg = f"Unknown function modifier {token.text!r} at {token.line}:{token.column}"
+                raise CompilationError(msg) from None
+
             modifiers.append(modifier)
 
-            if modifier == "native" and self.match("("):
+            if modifier == FunctionModifier.NATIVE and self.match("("):
                 native_index = self.parse_integer()
                 self.expect(")")
 
@@ -516,7 +514,7 @@ class DeclarationParser(DeclarationSyntaxParser):
                 )
                 continue
 
-            if keyword in FUNCTION_MODIFIERS or keyword in FunctionCategory:
+            if keyword in FunctionModifier or keyword in FunctionCategory:
                 declaration.functions.append(
                     self.parse_function_declaration(include_body_tokens=include_body_tokens)
                 )

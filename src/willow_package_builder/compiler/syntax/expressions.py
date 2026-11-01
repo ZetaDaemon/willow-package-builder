@@ -53,3 +53,14 @@ class StringExpression(Expression):
 class CallExpression(Expression):
     callee: Expression
     arguments: list[Expression | None]
+
+
+@dataclass
+class MemberExpression(Expression):
+    object: Expression
+    name: str
+
+
+@dataclass
+class SelfExpression(Expression):
+    pass

@@ -4,9 +4,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Self, override
 
+from willow_package_builder.games import get_game
 from willow_package_builder.upackage import FName
 
-from .opcode import ScriptOpcode
+from .opcode import Opcode, Opcodes
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -122,6 +123,8 @@ class IfBlock:
     end: BytecodeLabel = field(default_factory=BytecodeLabel)
     active: bool = True
 
+    _opcodes: Opcodes = field(default_factory=lambda: get_game().OPCODES, init=False, repr=False)
+
     def advance_branch(self) -> None:
         """Close the preceding body and place its false-condition label."""
         if not self.active:
@@ -132,7 +135,7 @@ class IfBlock:
             msg = "Cannot add a branch after else"
             raise ValueError(msg)
 
-        self.bytecode += ScriptOpcode.JUMP
+        self.bytecode += self._opcodes.JUMP
         self.bytecode += BytecodeJump(self.end)
         self.bytecode += self.otherwise
 
@@ -156,13 +159,15 @@ class LoopBlock:
     break_target: BytecodeLabel
     active: bool = True
 
+    _opcodes: Opcodes = field(default_factory=lambda: get_game().OPCODES, init=False, repr=False)
+
     def break_statement(self) -> Bytecode:
         if not self.active:
             msg = "Loop block is no longer active"
             raise RuntimeError(msg)
 
         script = Bytecode()
-        script += ScriptOpcode.JUMP
+        script += self._opcodes.JUMP
         script += BytecodeJump(self.break_target)
         return script
 
@@ -172,7 +177,7 @@ class LoopBlock:
             raise RuntimeError(msg)
 
         script = Bytecode()
-        script += ScriptOpcode.JUMP
+        script += self._opcodes.JUMP
         script += BytecodeJump(self.continue_target)
         return script
 
@@ -183,13 +188,15 @@ class Bytecode:
 
     _label_offsets: dict[BytecodeLabel, int] = field(default_factory=dict, init=False, repr=False)
 
-    def __iadd__(self, other: Bytecode | bytes | BytecodeItem | ScriptOpcode) -> Self:
+    _opcodes: Opcodes = field(default_factory=lambda: get_game().OPCODES, init=False, repr=False)
+
+    def __iadd__(self, other: Bytecode | bytes | BytecodeItem | Opcode) -> Self:
         match other:
             case Bytecode():
                 self.parts.extend(other.parts)
 
-            case ScriptOpcode():
-                self.parts.append(struct.pack("<B", int(other)))
+            case Opcode():
+                self.parts.append(struct.pack("<B", other))
 
             case bytes() | BytecodeItem():
                 self.parts.append(other)
@@ -199,7 +206,7 @@ class Bytecode:
 
         return self
 
-    def __add__(self, other: Bytecode | bytes | BytecodeItem | ScriptOpcode) -> Bytecode:
+    def __add__(self, other: Bytecode | bytes | BytecodeItem | Opcode) -> Bytecode:
         result = Bytecode(self.parts.copy())
         result += other
         return result
@@ -207,20 +214,20 @@ class Bytecode:
     def add_constant(self, value: bool | float | str) -> None:
         match value:
             case bool():
-                self += ScriptOpcode.TRUE if value else ScriptOpcode.FALSE
+                self += self._opcodes.TRUE if value else self._opcodes.FALSE
 
             case int():
                 match value:
                     case 0:
-                        self += ScriptOpcode.INT_ZERO
+                        self += self._opcodes.INT_ZERO
                     case 1:
-                        self += ScriptOpcode.INT_ONE
+                        self += self._opcodes.INT_ONE
                     case _:
-                        self += ScriptOpcode.INT_CONST
+                        self += self._opcodes.INT_CONST
                         self += struct.pack("<i", value)
 
             case float():
-                self += ScriptOpcode.FLOAT_CONST
+                self += self._opcodes.FLOAT_CONST
                 self += struct.pack("<f", value)
 
             case str():
@@ -230,10 +237,10 @@ class Bytecode:
 
                 try:
                     encoded = value.encode("ascii") + b"\0"
-                    opcode = ScriptOpcode.STRING_CONST
+                    opcode = self._opcodes.STRING_CONST
                 except UnicodeEncodeError:
                     encoded = value.encode("utf-16-le") + b"\0\0"
-                    opcode = ScriptOpcode.UNICODE_STRING_CONST
+                    opcode = self._opcodes.UNICODE_STRING_CONST
 
                 self += opcode
                 self += encoded
@@ -274,11 +281,11 @@ class Bytecode:
         )
 
     def add_local_variable(self, reference: ReferencePath) -> None:
-        self += ScriptOpcode.LOCAL_VARIABLE
+        self += self._opcodes.LOCAL_VARIABLE
         self += BytecodeReference(reference)
 
     def add_instance_variable(self, reference: ReferencePath) -> None:
-        self += ScriptOpcode.INSTANCE_VARIABLE
+        self += self._opcodes.INSTANCE_VARIABLE
         self += BytecodeReference(reference)
 
     def begin_native_call(self, native_index: int) -> None:
@@ -296,7 +303,7 @@ class Bytecode:
             self += struct.pack("<BB", FIRST_EXTENDED_NATIVE + high, low)
 
     def end_native_call(self) -> None:
-        self += ScriptOpcode.END_FUNCTION_PARAMS
+        self += self._opcodes.END_FUNCTION_PARAMS
 
     @contextmanager
     def native_function(self, native_index: int) -> Generator[None]:
@@ -309,7 +316,7 @@ class Bytecode:
 
     def begin_if(self, condition: Bytecode) -> BytecodeLabel:
         end = BytecodeLabel()
-        self += ScriptOpcode.JUMP_IF_NOT
+        self += self._opcodes.JUMP_IF_NOT
         self += BytecodeJump(end)
         self += condition
         return end
@@ -335,7 +342,7 @@ class Bytecode:
         loop = LoopBlock(self, start, end)
 
         self += start
-        self += ScriptOpcode.JUMP_IF_NOT
+        self += self._opcodes.JUMP_IF_NOT
         self += BytecodeJump(end)
         self += condition
 
@@ -344,7 +351,7 @@ class Bytecode:
         finally:
             loop.active = False
 
-        self += ScriptOpcode.JUMP
+        self += self._opcodes.JUMP
         self += BytecodeJump(start)
         self += end
 
@@ -360,7 +367,7 @@ class Bytecode:
         self += initializer
 
         self += condition_label
-        self += ScriptOpcode.JUMP_IF_NOT
+        self += self._opcodes.JUMP_IF_NOT
         self += BytecodeJump(end)
         self += condition
 
@@ -372,7 +379,7 @@ class Bytecode:
         self += increment_label
         self += increment
 
-        self += ScriptOpcode.JUMP
+        self += self._opcodes.JUMP
         self += BytecodeJump(condition_label)
         self += end
 
@@ -391,7 +398,7 @@ class Bytecode:
             loop.active = False
 
         self += condition_label
-        self += ScriptOpcode.JUMP_IF_NOT
+        self += self._opcodes.JUMP_IF_NOT
         self += BytecodeJump(start)
         self += condition
         self += end
@@ -401,11 +408,27 @@ class Bytecode:
         origin = BytecodeLabel()
         end = BytecodeLabel()
 
-        self += ScriptOpcode.DEFAULT_PARAMETER_VALUE
+        self += self._opcodes.DEFAULT_PARAMETER_VALUE
         self += BytecodeRelativeJump(origin, end)
         self += origin
 
         yield
 
-        self += ScriptOpcode.END_PARAMETER_VALUE
+        self += self._opcodes.END_PARAMETER_VALUE
+        self += end
+
+    @contextmanager
+    def object_context(self, receiver: Bytecode, result_property: ReferencePath) -> Generator[None]:
+        origin = BytecodeLabel()
+        end = BytecodeLabel()
+
+        self += self._opcodes.CONTEXT
+        self += receiver
+        self += BytecodeRelativeJump(origin, end)
+        self += BytecodeReference(result_property)
+        self += struct.pack("<B", 0)  # Unused fallback type when a property is supplied.
+        self += origin
+
+        yield
+
         self += end

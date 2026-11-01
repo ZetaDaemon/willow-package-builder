@@ -3,7 +3,15 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from willow_package_builder.compiler.syntax.modifiers import (
+        ClassModifierName,
+        ParameterModifier,
+        StructModifier,
+        VariableModifier,
+    )
+
     from .lexer import Token
+    from .modifiers import FunctionModifier
 
 
 class OperatorCategory(StrEnum):
@@ -34,7 +42,7 @@ class EnumDeclaration:
 class StructDeclaration:
     name: str
     parent: str | None = None
-    modifiers: tuple[str, ...] = ()
+    modifiers: tuple[StructModifier, ...] = ()
 
     variables: list[VariableDeclaration] = field(default_factory=list)
     default_tokens: tuple[Token, ...] | None = None
@@ -51,7 +59,7 @@ class VariableDeclaration:
     name: str
     type_ref: TypeReference
     array_dimension: int = 1
-    modifiers: tuple[str, ...] = ()
+    modifiers: tuple[VariableModifier, ...] = ()
     category_tokens: tuple[Token, ...] | None = None
 
 
@@ -59,7 +67,7 @@ class VariableDeclaration:
 class ParameterDeclaration:
     name: str
     type_ref: TypeReference
-    modifiers: tuple[str, ...] = ()
+    modifiers: tuple[ParameterModifier, ...] = ()
     default_tokens: tuple[Token, ...] | None = None
 
 
@@ -71,7 +79,7 @@ class OperatorDeclaration:
     parameters: list[ParameterDeclaration]
     native_index: int | None
     precedence: int | None
-    modifiers: tuple[str, ...]
+    modifiers: tuple[FunctionModifier, ...]
 
     has_body: bool = False
     body_tokens: list[Token] | None = None
@@ -84,7 +92,7 @@ class FunctionDeclaration:
     parameters: list[ParameterDeclaration]
 
     func_category: FunctionCategory = FunctionCategory.FUNCTION
-    modifiers: tuple[str, ...] = ()
+    modifiers: tuple[FunctionModifier, ...] = ()
     native_index: int | None = None
 
     has_body: bool = False
@@ -93,7 +101,7 @@ class FunctionDeclaration:
 
 @dataclass
 class ClassModifier:
-    name: str
+    name: ClassModifierName
     arguments: tuple[Token, ...] | None = None
 
 

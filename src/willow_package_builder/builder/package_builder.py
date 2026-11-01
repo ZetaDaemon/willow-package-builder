@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from willow_package_builder.game_constants import Bl2Consts
-from willow_package_builder.upackage import FName, Package, PackageFormat
+from willow_package_builder.games import get_game
+from willow_package_builder.upackage import FName, Package
 
 from .build_state import PackageBuildState
 from .class_builder import ClassBuilder
@@ -13,7 +13,7 @@ from .references import PackageReferences
 from .struct_builder import StructBuilder
 
 if TYPE_CHECKING:
-    from willow_package_builder.compiler.build_context import BuildContext
+    from willow_package_builder.builder.build_context import BuildContext
     from willow_package_builder.package_config import PackageConfig
 
     from .exports import ClassExports, StructExports
@@ -55,16 +55,8 @@ class PackageBuilder:
 
     def __post_init__(self) -> None:
         """Post init."""
-        package = Package(
-            FName(self.config.name),
-            PackageFormat(
-                Bl2Consts.PACKAGE_VERSION,
-                Bl2Consts.LICENSE_VERSION,
-                Bl2Consts.ENGINE_VERSION,
-                Bl2Consts.COOKER_VERSION,
-            ),
-            Bl2Consts.PACKAGE_FLAGS,
-        )
+        game = get_game()
+        package = Package(FName(self.config.name), game.package_format(), game.PACKAGE_FLAGS)
 
         self.state = PackageBuildState(self.context, self.config, package)
         self.references = PackageReferences(self.state)

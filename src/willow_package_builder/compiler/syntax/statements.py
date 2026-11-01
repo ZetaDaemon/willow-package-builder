@@ -3,7 +3,7 @@ from dataclasses import KW_ONLY, dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from willow_package_builder.source_location import SourceLocation
+    from willow_package_builder.logging import SourceLocation
 
     from .declarations import VariableDeclaration
     from .expressions import Expression

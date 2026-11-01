@@ -1,13 +1,13 @@
 import json
 from pathlib import Path
 
-from willow_package_builder.compiler.builder.package_builder import PackageBuilder
 from willow_package_builder.compiler.cache.cache import load_or_parse_class
 from willow_package_builder.compiler.semantics.references import ReferenceDatabase
-from willow_package_builder.logging import CompilationError, Logger, info
 from willow_package_builder.package_config import collect_build_packages, load_package_graph
 
-from .build_context import BuildContext
+from .builder.build_context import BuildContext
+from .builder.package_builder import PackageBuilder
+from .logging import CompilationError, Logger, info
 
 __all__ = ["build_package"]
 

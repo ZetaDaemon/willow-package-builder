@@ -1,12 +1,23 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from willow_package_builder.compiler.syntax.declarations import (
+    ParameterDeclaration,
+    VariableDeclaration,
+)
 from willow_package_builder.compiler.syntax.expressions import (
     BinaryExpression,
     CallExpression,
     Expression,
     IdentifierExpression,
+    MemberExpression,
+    SelfExpression,
     UnaryExpression,
+)
+from willow_package_builder.compiler.syntax.modifiers import (
+    FunctionModifier,
+    ParameterModifier,
+    VariableModifier,
 )
 from willow_package_builder.compiler.syntax.statements import (
     AssignmentStatement,
@@ -36,15 +47,55 @@ class FunctionBodyValidator:
     resolver: ExpressionResolver
 
     def require_writable(self, expression: Expression) -> None:
-        if not isinstance(expression, IdentifierExpression):
-            msg = "Assignment destination must be a writable variable"
+        match expression:
+            case IdentifierExpression():
+                symbol = self.resolver.scope.resolve_variable(expression.name)
+                declaration = symbol.declaration
+                owner = symbol.owner_class
+
+            case MemberExpression():
+                self.validate_expression(expression)
+                member = self.resolver.resolve_member(expression)
+                declaration = member.declaration
+                owner = member.owner_class
+
+            case _:
+                msg = "Assignment destination must be a writable variable"
+                raise CompilationError(msg)
+
+        match declaration:
+            case ParameterDeclaration():
+                is_const = ParameterModifier.CONST in declaration.modifiers
+
+            case VariableDeclaration():
+                is_const = VariableModifier.CONST in declaration.modifiers
+
+        if is_const:
+            msg = f"Cannot assign to const variable {owner}.{declaration.name}"
             raise CompilationError(msg)
 
-        symbol = self.resolver.scope.resolve_variable(expression.name)
-
-        if "const" in symbol.declaration.modifiers:
-            msg = f"Cannot assign to const variable {expression.name!r}"
+        if (
+            VariableModifier.PRIVATE_WRITE in declaration.modifiers
+            and owner.casefold() != self.resolver.scope.class_path.casefold()
+        ):
+            msg = f"Cannot modify privatewrite variable {owner}.{declaration.name}"
             raise CompilationError(msg)
+
+        if (
+            isinstance(declaration, VariableDeclaration)
+            and VariableModifier.PROTECTED_WRITE in declaration.modifiers
+        ):
+            current_class = self.resolver.scope.class_path
+            allowed = any(
+                ancestor.casefold() == owner.casefold()
+                for ancestor, _ in self.resolver.context.references.iter_class_hierarchy(
+                    current_class, self.resolver.context.parents
+                )
+            )
+
+            if not allowed:
+                msg = f"Cannot modify protectedwrite variable {owner}.{declaration.name}"
+                raise CompilationError(msg)
 
     def validate_expression(self, expression: Expression) -> ResolvedType:
         match expression:
@@ -52,10 +103,13 @@ class FunctionBodyValidator:
                 symbol = self.resolver.scope.resolve_variable(expression.name)
 
                 if (
-                    "static" in self.resolver.scope.function.modifiers
+                    FunctionModifier.STATIC in self.resolver.scope.function.modifiers
                     and symbol.category is VariableCategory.INSTANCE
                 ):
-                    msg = f"Static function cannot directly access instance variable {expression.name!r}"
+                    msg = (
+                        "Static function cannot directly access "
+                        f"instance variable {expression.name!r}"
+                    )
                     raise CompilationError(msg)
 
             case BinaryExpression():
@@ -69,7 +123,7 @@ class FunctionBodyValidator:
                     (expression.left, expression.right),
                     strict=True,
                 ):
-                    if "out" in parameter.modifiers:
+                    if ParameterModifier.OUT in parameter.modifiers:
                         self.require_writable(argument)
 
             case UnaryExpression():
@@ -78,11 +132,30 @@ class FunctionBodyValidator:
                 operator = self.resolver.resolve_unary_operator(expression)
                 parameter = operator.declaration.parameters[0]
 
-                if "out" in parameter.modifiers:
+                if ParameterModifier.OUT in parameter.modifiers:
                     self.require_writable(expression.operand)
 
             case CallExpression():
                 self.validate_call(expression)
+
+            case MemberExpression():
+                self.validate_expression(expression.object)
+                member = self.resolver.resolve_member(expression)
+
+                if (
+                    VariableModifier.PRIVATE in member.declaration.modifiers
+                    and member.owner_class.casefold() != self.resolver.scope.class_path.casefold()
+                ):
+                    msg = (
+                        f"Cannot access private variable "
+                        f"{member.owner_class}.{member.declaration.name}"
+                    )
+                    raise CompilationError(msg)
+
+            case SelfExpression():
+                if FunctionModifier.STATIC in self.resolver.scope.function.modifiers:
+                    msg = "Cannot use self in a static function"
+                    raise CompilationError(msg)
 
             case _:
                 pass
@@ -239,7 +312,10 @@ class FunctionBodyValidator:
                 msg = "Expression has no effect"
                 raise CompilationError(msg)
 
-        if not any("out" in parameter.modifiers for parameter in operator.declaration.parameters):
+        if not any(
+            ParameterModifier.OUT in parameter.modifiers
+            for parameter in operator.declaration.parameters
+        ):
             msg = "Expression has no effect"
             raise CompilationError(msg)
 
@@ -249,12 +325,23 @@ class FunctionBodyValidator:
         scope = self.resolver.scope
         path = f"{member.owner_class}.{function.name}"
 
-        if "static" in scope.function.modifiers and "static" not in function.modifiers:
-            msg = f"Static function cannot directly call instance function {path}"
-            raise CompilationError(msg)
+        match expression.callee:
+            case MemberExpression():
+                self.validate_expression(expression.callee.object)
+
+            case IdentifierExpression():
+                if (
+                    FunctionModifier.STATIC in scope.function.modifiers
+                    and FunctionModifier.STATIC not in function.modifiers
+                ):
+                    msg = f"Static function cannot directly call instance function {path}"
+                    raise CompilationError(msg)
+
+            case _:
+                pass
 
         if (
-            "private" in function.modifiers
+            FunctionModifier.PRIVATE in function.modifiers
             and member.owner_class.casefold() != scope.class_path.casefold()
         ):
             msg = f"Cannot access private function {path}"
@@ -269,7 +356,7 @@ class FunctionBodyValidator:
 
         missing = parameters[len(arguments) :]
 
-        if any("optional" not in parameter.modifiers for parameter in missing):
+        if any(ParameterModifier.OPTIONAL not in parameter.modifiers for parameter in missing):
             msg = f"Missing required arguments for {path}"
             raise CompilationError(msg)
 
@@ -277,7 +364,7 @@ class FunctionBodyValidator:
 
         for parameter, argument in zip(parameters[: len(arguments)], arguments, strict=True):
             if argument is None:
-                if "optional" not in parameter.modifiers:
+                if ParameterModifier.OPTIONAL not in parameter.modifiers:
                     msg = f"Required parameter {parameter.name!r} of {path} cannot be omitted"
                     raise CompilationError(msg)
 
@@ -287,8 +374,8 @@ class FunctionBodyValidator:
                 parameter.type_ref, member.owner_class
             )
 
-            if "out" in parameter.modifiers:
-                if "const" in parameter.modifiers:
+            if ParameterModifier.OUT in parameter.modifiers:
+                if ParameterModifier.CONST in parameter.modifiers:
                     msg = f"Const-out arguments for {path} are not implemented yet"
                     raise NotImplementedError(msg)
 
@@ -304,7 +391,7 @@ class FunctionBodyValidator:
             elif argument_type != parameter_type:
                 if (
                     argument_type.category in numeric and parameter_type.category in numeric
-                ) or "coerce" in parameter.modifiers:
+                ) or ParameterModifier.COERCE in parameter.modifiers:
                     msg = (
                         f"Argument conversion for {parameter.name!r} "
                         f"of {path} is not implemented yet"

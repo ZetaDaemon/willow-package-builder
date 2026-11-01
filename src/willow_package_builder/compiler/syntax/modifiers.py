@@ -1,0 +1,107 @@
+from enum import StrEnum
+
+
+class FunctionModifier(StrEnum):
+    # Implementation and dispatch
+    NATIVE = "native"
+    STATIC = "static"
+    FINAL = "final"
+
+    # Access
+    PRIVATE = "private"
+    PROTECTED = "protected"
+    PUBLIC = "public"
+
+    # Execution
+    EXEC = "exec"
+    ITERATOR = "iterator"
+    LATENT = "latent"
+    SINGULAR = "singular"
+    SIMULATED = "simulated"
+
+    # Networking
+    CLIENT = "client"
+    SERVER = "server"
+    RELIABLE = "reliable"
+    UNRELIABLE = "unreliable"
+
+
+class ParameterModifier(StrEnum):
+    OUT = "out"
+    OPTIONAL = "optional"
+    COERCE = "coerce"
+    SKIP = "skip"
+    CONST = "const"
+
+
+class ClassModifierName(StrEnum):
+    # Implementation
+    ABSTRACT = "abstract"
+    NATIVE = "native"
+    NATIVE_REPLICATION = "nativereplication"
+    NO_EXPORT = "noexport"
+    FORCE_SCRIPT_ORDER = "forcescriptorder"
+    IMPLEMENTS = "implements"
+
+    # Persistence and configuration
+    TRANSIENT = "transient"
+    NO_TRANSIENT = "notransient"
+    CONFIG = "config"
+    PER_OBJECT_CONFIG = "perobjectconfig"
+    PER_OBJECT_LOCALIZED = "perobjectlocalized"
+
+    # Construction and placement
+    EDIT_INLINE_NEW = "editinlinenew"
+    NOT_EDIT_INLINE_NEW = "noteditinlinenew"
+    DEFAULT_TO_INSTANCED = "defaulttoinstanced"
+    PLACEABLE = "placeable"
+    NOT_PLACEABLE = "notplaceable"
+
+    # Editor organisation
+    CLASS_GROUP = "classgroup"
+    HIDE_CATEGORIES = "hidecategories"
+    SHOW_CATEGORIES = "showcategories"
+    COLLAPSE_CATEGORIES = "collapsecategories"
+    DONT_COLLAPSE_CATEGORIES = "dontcollapsecategories"
+    AUTO_EXPAND_CATEGORIES = "autoexpandcategories"
+    AUTO_COLLAPSE_CATEGORIES = "autocollapsecategories"
+    DONT_AUTO_COLLAPSE_CATEGORIES = "dontautocollapsecategories"
+    DONT_SORT_CATEGORIES = "dontsortcategories"
+
+
+class VariableModifier(StrEnum):
+    # Implementation
+    NATIVE = "native"
+    CONST = "const"
+
+    # Access
+    PRIVATE = "private"
+    PROTECTED = "protected"
+    PUBLIC = "public"
+    PRIVATE_WRITE = "privatewrite"
+    PROTECTED_WRITE = "protectedwrite"
+
+    # Persistence
+    TRANSIENT = "transient"
+    DUPLICATE_TRANSIENT = "duplicatetransient"
+    CONFIG = "config"
+    GLOBAL_CONFIG = "globalconfig"
+    LOCALIZED = "localized"
+
+    # Editor and export
+    EDIT_CONST = "editconst"
+    EDIT_INLINE = "editinline"
+    EXPORT = "export"
+    NO_EXPORT = "noexport"
+
+
+class StructModifier(StrEnum):
+    NATIVE = "native"
+    EXPORT = "export"
+    NO_EXPORT = "noexport"
+    TRANSIENT = "transient"
+    ATOMIC = "atomic"
+    IMMUTABLE = "immutable"
+    STRICT_CONFIG = "strictconfig"
+    IMMUTABLE_WHEN_COOKED = "immutablewhencooked"
+    ATOMIC_WHEN_COOKED = "atomicwhencooked"

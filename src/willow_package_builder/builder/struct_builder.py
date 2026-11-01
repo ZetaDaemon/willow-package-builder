@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.declarations import TypeReference
+from willow_package_builder.compiler.syntax.modifiers import StructModifier
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import UClassPayload
@@ -16,6 +17,18 @@ if TYPE_CHECKING:
     from .property_builder import PropertyBuilder
     from .references import PackageReferences
 
+STRUCT_MODIFIER_FLAGS: dict[StructModifier, StructFlags] = {
+    StructModifier.NATIVE: StructFlags.NATIVE,
+    StructModifier.EXPORT: StructFlags.EXPORT,
+    StructModifier.NO_EXPORT: StructFlags.NONE,
+    StructModifier.TRANSIENT: StructFlags.TRANSIENT,
+    StructModifier.ATOMIC: StructFlags.ATOMIC,
+    StructModifier.IMMUTABLE: StructFlags.IMMUTABLE,
+    StructModifier.STRICT_CONFIG: StructFlags.STRICT_CONFIG,
+    StructModifier.IMMUTABLE_WHEN_COOKED: StructFlags.IMMUTABLE_WHEN_COOKED,
+    StructModifier.ATOMIC_WHEN_COOKED: StructFlags.ATOMIC_WHEN_COOKED,
+}
+
 
 @dataclass
 class StructBuilder(BuildComponent):
@@ -25,14 +38,15 @@ class StructBuilder(BuildComponent):
     def reserve_structs(self) -> None:
         struct_class = self.references.class_object_reference("Core.ScriptStruct")
 
-        supported_flags = {
-            "export": StructFlags.EXPORT,
-            "transient": StructFlags.TRANSIENT,
-            "atomic": StructFlags.ATOMIC,
-            "immutable": StructFlags.IMMUTABLE,
-            "strictconfig": StructFlags.STRICT_CONFIG,
-            "immutablewhencooked": StructFlags.IMMUTABLE_WHEN_COOKED,
-            "atomicwhencooked": StructFlags.ATOMIC_WHEN_COOKED,
+        supported_modifiers = {
+            StructModifier.EXPORT,
+            StructModifier.TRANSIENT,
+            StructModifier.ATOMIC,
+            StructModifier.IMMUTABLE,
+            StructModifier.STRICT_CONFIG,
+            StructModifier.IMMUTABLE_WHEN_COOKED,
+            StructModifier.ATOMIC_WHEN_COOKED,
+            StructModifier.NO_EXPORT,
         }
 
         for class_path, exports in self.classes.items():
@@ -45,21 +59,20 @@ class StructBuilder(BuildComponent):
 
                 flags = StructFlags.NONE
 
+                if StructModifier.NATIVE in declaration.modifiers:
+                    msg = f"Cannot compile native struct {path}"
+                    raise CompilationError(msg)
+
                 for modifier in declaration.modifiers:
-                    if modifier == "noexport":
-                        continue
-
-                    flag = supported_flags.get(modifier)
-
-                    if flag is None:
+                    if modifier not in supported_modifiers:
                         msg = f"Unsupported struct modifier {modifier!r} on {path}"
                         raise NotImplementedError(msg)
 
-                    flags |= flag
+                    flags |= STRUCT_MODIFIER_FLAGS[modifier]
 
                 if declaration.default_tokens:
                     msg = f"Struct defaults are not supported yet: {path}"
-                    raise CompilationError(msg)
+                    raise NotImplementedError(msg)
 
                 obj = UObject(
                     FName(declaration.name),

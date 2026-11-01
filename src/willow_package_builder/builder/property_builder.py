@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.declarations import TypeReference, VariableDeclaration
 from willow_package_builder.compiler.syntax.lexer import TokenCategory
+from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.property_payloads import (
@@ -189,11 +190,11 @@ class PropertyBuilder(BuildComponent):
         flags = PropertyFlags.NONE
 
         for modifier in declaration.modifiers:
-            if modifier == "const":
+            if modifier == VariableModifier.CONST:
                 flags |= PropertyFlags.CONST
             else:
                 msg = f"Unsupported field modifier {modifier!r} on {path}"
-                raise CompilationError(msg)
+                raise NotImplementedError(msg)
 
         category = FName("None")
         tokens = declaration.category_tokens

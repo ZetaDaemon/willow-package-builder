@@ -1,1 +1,1 @@
-from willow_package_builder.compiler.build import build_package as build_package
+from willow_package_builder.build import build_package as build_package

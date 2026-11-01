@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from willow_package_builder.compiler.builder.exports import ClassExports
+from willow_package_builder.builder.exports import ClassExports
+from willow_package_builder.compiler.syntax.modifiers import ClassModifierName
 from willow_package_builder.logging import CompilationError, WarningCode, info, warn
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import ClassFlags, StateFlags, UClassPayload
@@ -13,6 +14,30 @@ from .build_component import BuildComponent
 if TYPE_CHECKING:
     from .property_builder import PropertyBuilder
     from .references import PackageReferences
+
+CLASS_MODIFIER_FLAGS: dict[ClassModifierName, ClassFlags] = {
+    # Implementation
+    ClassModifierName.ABSTRACT: ClassFlags.ABSTRACT,
+    ClassModifierName.NATIVE: ClassFlags.NATIVE,
+    ClassModifierName.NATIVE_REPLICATION: ClassFlags.NATIVE_REPLICATION,
+    ClassModifierName.NO_EXPORT: ClassFlags.NO_EXPORT,
+    # Persistence and configuration
+    ClassModifierName.TRANSIENT: ClassFlags.TRANSIENT,
+    ClassModifierName.CONFIG: ClassFlags.CONFIG,
+    ClassModifierName.PER_OBJECT_CONFIG: ClassFlags.PER_OBJECT_CONFIG,
+    ClassModifierName.PER_OBJECT_LOCALIZED: ClassFlags.PER_OBJECT_LOCALIZED,
+    # Construction and placement
+    ClassModifierName.EDIT_INLINE_NEW: ClassFlags.EDIT_INLINE_NEW,
+    ClassModifierName.PLACEABLE: ClassFlags.PLACEABLE,
+    # Editor organisation
+    ClassModifierName.COLLAPSE_CATEGORIES: ClassFlags.COLLAPSE_CATEGORIES,
+}
+CLASS_MODIFIER_CLEAR_FLAGS: dict[ClassModifierName, ClassFlags] = {
+    ClassModifierName.NO_TRANSIENT: ClassFlags.TRANSIENT,
+    ClassModifierName.NOT_EDIT_INLINE_NEW: ClassFlags.EDIT_INLINE_NEW,
+    ClassModifierName.NOT_PLACEABLE: ClassFlags.PLACEABLE,
+    ClassModifierName.DONT_COLLAPSE_CATEGORIES: ClassFlags.COLLAPSE_CATEGORIES,
+}
 
 
 @dataclass
@@ -80,10 +105,10 @@ class ClassBuilder(BuildComponent):
         return "core.object"
 
     def link_classes(self) -> None:
-        supported_flags = {
-            "abstract": ClassFlags.ABSTRACT,
-            "editinlinenew": ClassFlags.EDIT_INLINE_NEW,
-            "perobjectlocalized": ClassFlags.PER_OBJECT_LOCALIZED,
+        supported_modifiers = {
+            ClassModifierName.ABSTRACT,
+            ClassModifierName.EDIT_INLINE_NEW,
+            ClassModifierName.PER_OBJECT_LOCALIZED,
         }
 
         for class_path, exports in self.classes.items():
@@ -96,16 +121,26 @@ class ClassBuilder(BuildComponent):
             flags = ClassFlags.COMPILED | ClassFlags.PARSED
 
             for modifier in exports.declaration.modifiers:
-                flag = supported_flags.get(modifier.name.casefold())
+                modifier_name = modifier.name
 
-                if flag is None:
-                    msg = (
-                        f"Class modifier {modifier.name!r} on {class_path} "
-                        "is not supported by the package builder yet"
-                    )
+                if modifier_name == ClassModifierName.NATIVE:
+                    msg = f"Cannot compile native class {class_path}"
                     raise CompilationError(msg)
 
-                flags |= flag
+                if modifier_name not in supported_modifiers:
+                    msg = (
+                        f"Class modifier {modifier_name!r} on {class_path} "
+                        "is not supported by the package builder yet"
+                    )
+                    raise NotImplementedError(msg)
+
+                if modifier_name in CLASS_MODIFIER_FLAGS:
+                    flags |= CLASS_MODIFIER_FLAGS[modifier_name]
+                elif modifier_name in CLASS_MODIFIER_CLEAR_FLAGS:
+                    flags &= ~CLASS_MODIFIER_CLEAR_FLAGS[modifier_name]
+                else:
+                    msg = f"Class modifier {modifier_name!r} on {class_path} has no implementation."
+                    raise NotImplementedError(msg)
 
             parent_reference = self.references.class_object_reference(parent)
 

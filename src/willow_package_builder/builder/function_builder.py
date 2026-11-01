@@ -10,6 +10,7 @@ from willow_package_builder.compiler.syntax.declarations import (
     FunctionCategory,
     FunctionDeclaration,
 )
+from willow_package_builder.compiler.syntax.modifiers import FunctionModifier, ParameterModifier
 from willow_package_builder.compiler.syntax.parser import FunctionParser
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.package_config import collect_visible_packages
@@ -25,11 +26,33 @@ from .build_component import BuildComponent
 from .prepared_function import PreparedFunction
 
 if TYPE_CHECKING:
-    from willow_package_builder.compiler.builder.exports import ClassExports
+    from willow_package_builder.builder.exports import ClassExports
     from willow_package_builder.compiler.syntax.expressions import Expression
 
     from .property_builder import PropertyBuilder
     from .references import PackageReferences
+
+FUNCTION_MODIFIER_FLAGS: dict[FunctionModifier, FunctionFlags] = {
+    # Implementation and dispatch
+    FunctionModifier.NATIVE: FunctionFlags.NATIVE,
+    FunctionModifier.STATIC: FunctionFlags.STATIC,
+    FunctionModifier.FINAL: FunctionFlags.FINAL,
+    # Access
+    FunctionModifier.PRIVATE: FunctionFlags.PRIVATE,
+    FunctionModifier.PROTECTED: FunctionFlags.PROTECTED,
+    FunctionModifier.PUBLIC: FunctionFlags.PUBLIC,
+    # Execution
+    FunctionModifier.EXEC: FunctionFlags.EXEC,
+    FunctionModifier.ITERATOR: FunctionFlags.ITERATOR,
+    FunctionModifier.LATENT: FunctionFlags.LATENT,
+    FunctionModifier.SINGULAR: FunctionFlags.SINGULAR,
+    FunctionModifier.SIMULATED: FunctionFlags.SIMULATED,
+    # Networking
+    FunctionModifier.CLIENT: FunctionFlags.NET | FunctionFlags.NET_CLIENT,
+    FunctionModifier.SERVER: FunctionFlags.NET | FunctionFlags.NET_SERVER,
+    FunctionModifier.RELIABLE: FunctionFlags.NET_RELIABLE,
+    FunctionModifier.UNRELIABLE: FunctionFlags.NONE,
+}
 
 
 @dataclass
@@ -47,7 +70,7 @@ class FunctionBuilder(BuildComponent):
                 defaults.append(None)
                 continue
 
-            if "optional" not in parameter.modifiers:
+            if ParameterModifier.OPTIONAL not in parameter.modifiers:
                 msg = f"Non-optional parameter {parameter.name!r} cannot have a default"
                 raise CompilationError(msg)
 
@@ -69,13 +92,16 @@ class FunctionBuilder(BuildComponent):
 
             for modifier in parameter.modifiers:
                 match modifier:
-                    case "out":
+                    case ParameterModifier.OUT:
                         parameter_flags |= PropertyFlags.OUT_PARAM
                         function_payload.function_flags |= FunctionFlags.HAS_OUT_PARAMS
-                    case "const":
+
+                    case ParameterModifier.CONST:
                         parameter_flags |= PropertyFlags.CONST
-                    case "optional":
+
+                    case ParameterModifier.OPTIONAL:
                         parameter_flags |= PropertyFlags.OPTIONAL_PARAM
+
                     case _:
                         msg = f"Unsupported parameter modifier {modifier!r}"
                         raise NotImplementedError(msg)
@@ -95,7 +121,7 @@ class FunctionBuilder(BuildComponent):
         class_object_reference: ReferencePath,
     ) -> PreparedFunction:
         function_class = self.references.class_object_reference("Core.Function")
-        supported_flags = {"static": FunctionFlags.STATIC, "protected": FunctionFlags.PROTECTED}
+        supported_modifiers = {FunctionModifier.STATIC, FunctionModifier.PROTECTED}
 
         if function.func_category is not FunctionCategory.FUNCTION:
             msg = f"Function category {function.func_category} is not supported yet"
@@ -103,12 +129,16 @@ class FunctionBuilder(BuildComponent):
 
         flags = FunctionFlags.DEFINED
 
-        for modifier in function.modifiers:
-            flag = supported_flags.get(modifier)
+        if FunctionModifier.NATIVE in function.modifiers:
+            msg = f"Cannot compile native function {function.name}"
+            raise CompilationError(msg)
 
-            if flag is None:
+        for modifier in function.modifiers:
+            if modifier not in supported_modifiers:
                 msg = f"Unsupported function modifier {modifier!r} on {function.name}"
                 raise NotImplementedError(msg)
+
+            flag = FUNCTION_MODIFIER_FLAGS[modifier]
 
             flags |= flag
 
@@ -159,6 +189,7 @@ class FunctionBuilder(BuildComponent):
             TypeCategory.BOOL,
             TypeCategory.FLOAT,
             TypeCategory.STRING,
+            TypeCategory.OBJECT,
         ):
             msg = f"Function return type is not supported yet: {return_type!r}"
             raise NotImplementedError(msg)

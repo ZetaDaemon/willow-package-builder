@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Literal
 from willow_package_builder.compiler.syntax.declarations import (
     FunctionDeclaration,
     OperatorCategory,
+    VariableDeclaration,
 )
 from willow_package_builder.compiler.syntax.expressions import (
     BinaryExpression,
@@ -13,6 +14,8 @@ from willow_package_builder.compiler.syntax.expressions import (
     FloatExpression,
     IdentifierExpression,
     IntegerExpression,
+    MemberExpression,
+    SelfExpression,
     StringExpression,
     UnaryExpression,
 )
@@ -22,7 +25,7 @@ from willow_package_builder.package_config import collect_visible_packages
 from .types import ResolvedType, TypeCategory
 
 if TYPE_CHECKING:
-    from willow_package_builder.compiler.build_context import BuildContext
+    from willow_package_builder.builder.build_context import BuildContext
     from willow_package_builder.compiler.syntax.declarations import (
         OperatorDeclaration,
         TypeReference,
@@ -73,6 +76,15 @@ class ExpressionResolver:
             case IntegerExpression():
                 return ResolvedType(TypeCategory.INT)
 
+            case BooleanExpression():
+                return ResolvedType(TypeCategory.BOOL)
+
+            case FloatExpression():
+                return ResolvedType(TypeCategory.FLOAT)
+
+            case StringExpression():
+                return ResolvedType(TypeCategory.STRING)
+
             case IdentifierExpression():
                 symbol = self.scope.resolve_variable(expression.name)
                 return self.resolve_declared_type(symbol.declaration.type_ref, symbol.owner_class)
@@ -91,21 +103,20 @@ class ExpressionResolver:
                     operator.declaration.return_type, operator.owner_class
                 )
 
-            case BooleanExpression():
-                return ResolvedType(TypeCategory.BOOL)
-
-            case FloatExpression():
-                return ResolvedType(TypeCategory.FLOAT)
-
-            case StringExpression():
-                return ResolvedType(TypeCategory.STRING)
-
             case CallExpression():
                 function = self.resolve_call(expression)
 
                 return self.resolve_declared_type(
                     function.declaration.return_type, function.owner_class
                 )
+
+            case MemberExpression():
+                member = self.resolve_member(expression)
+
+                return self.resolve_declared_type(member.declaration.type_ref, member.owner_class)
+
+            case SelfExpression():
+                return ResolvedType(TypeCategory.OBJECT, self.scope.class_path)
 
             case _:
                 msg = f"Unsupported expression type: {type(expression).__name__}"
@@ -198,6 +209,36 @@ class ExpressionResolver:
                     self.scope.class_path, expression.callee.name, self.context.parents
                 )
 
+            case MemberExpression():
+                receiver = self.type_of(expression.callee.object)
+
+                if receiver.category is not TypeCategory.OBJECT:
+                    msg = f"Function calls on {receiver.category.value} are not implemented yet"
+                    raise NotImplementedError(msg)
+
+                if receiver.declaration_path is None:
+                    msg = "Object type has no declaring class"
+                    raise ValueError(msg)
+
+                return self.context.references.resolve_function(
+                    receiver.declaration_path, expression.callee.name, self.context.parents
+                )
+
             case _:
                 msg = "This function-call target is not implemented yet"
                 raise NotImplementedError(msg)
+
+    def resolve_member(self, expression: MemberExpression) -> ResolvedMember[VariableDeclaration]:
+        receiver = self.type_of(expression.object)
+
+        if receiver.category is not TypeCategory.OBJECT:
+            msg = f"Member access for {receiver.category.value} is not implemented yet"
+            raise NotImplementedError(msg)
+
+        if receiver.declaration_path is None:
+            msg = "Object type has no declaring class"
+            raise ValueError(msg)
+
+        return self.context.references.resolve_variable(
+            receiver.declaration_path, expression.name, self.context.parents
+        )
