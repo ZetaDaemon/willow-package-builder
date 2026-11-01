@@ -1,0 +1,8 @@
+Name: ExampleObject
+Class: ExamplePackage.ExampleClass
+Value: 15
+
+---
+Name: ChildExampleObject
+Class: ExamplePackage.ExampleClass
+Value: 27
