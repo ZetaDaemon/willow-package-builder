@@ -507,6 +507,15 @@ class DeclarationParser(DeclarationSyntaxParser):
                 declaration.variables.extend(self.parse_variable_declaration())
                 continue
 
+            if keyword == "defaultproperties":
+                if declaration.default_tokens is not None:
+                    msg = f"Class {declaration.name!r} has multiple default blocks"
+                    raise CompilationError(msg)
+
+                self.advance()
+                declaration.default_tokens = self.parse_braced_tokens()
+                continue
+
             # Check operators before functions: both can begin with native.
             if self.is_operator_start():
                 declaration.operators.append(

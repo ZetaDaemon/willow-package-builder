@@ -92,6 +92,7 @@ class PackageBuilder:
         self.struct_builder.build_struct_fields()
         self.class_builder.build_class_fields()
         self.functions.build_class_functions()
+        self.class_builder.build_class_defaults()
 
         # Construct objects
         info("Constructing objects")

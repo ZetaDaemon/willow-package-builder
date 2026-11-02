@@ -120,3 +120,5 @@ class ClassDeclaration:
     variables: list[VariableDeclaration] = field(default_factory=list)
     functions: list[FunctionDeclaration] = field(default_factory=list)
     operators: list[OperatorDeclaration] = field(default_factory=list)
+
+    default_tokens: tuple[Token, ...] | None = None

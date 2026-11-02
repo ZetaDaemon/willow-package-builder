@@ -79,8 +79,8 @@ class DeclarationSyntaxParser(TokenParser):
                 base = 16 if size.text.lower().startswith("0x") else 10
                 array_dimension = int(size.text, base)
 
-                if array_dimension < 1:
-                    msg = "Array dimension must be positive"
+                if array_dimension <= 1:
+                    msg = "Fixed array dimension must be greater than one"
                     raise CompilationError(msg)
 
                 self.expect("]")

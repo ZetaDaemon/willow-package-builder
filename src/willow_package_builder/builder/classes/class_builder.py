@@ -2,7 +2,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from willow_package_builder.builder.build_component import BuildComponent
+from willow_package_builder.builder.classes.default_builder import build_scalar_default_override
+from willow_package_builder.compiler.semantics.defaults_resolver import DefaultsResolver
 from willow_package_builder.compiler.syntax.modifiers import ClassModifierName
+from willow_package_builder.compiler.syntax.parser.defaults_parser import DefaultsParser
 from willow_package_builder.logging import CompilationError, WarningCode, info, warn
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import ClassFlags, StateFlags, UClassPayload
@@ -174,3 +177,34 @@ class ClassBuilder(BuildComponent):
                     exports.class_object, variable, class_path, payload.children
                 )
                 payload.children = obj.reference()
+
+    def build_class_defaults(self) -> None:
+        visible = collect_visible_packages(self.config, self.context.packages)
+        resolver = DefaultsResolver(self.context.references, self.context.parents, visible)
+
+        for class_path, exports in self.classes.items():
+            tokens = exports.declaration.default_tokens
+
+            if tokens is None:
+                continue
+
+            payload = exports.default_object.payload
+
+            if not isinstance(payload, ObjectInstancePayload):
+                msg = f"CDO has no object instance payload: {class_path}"
+                raise ValueError(msg)  # noqa: TRY004
+
+            assignments = DefaultsParser.from_default_tokens(tokens).parse_defaults()
+
+            for assignment in assignments:
+                target = resolver.resolve_target(class_path, assignment)
+
+                if target.array_index is not None or target.declaration.array_dimension != 1:
+                    msg = "CDO array default serialization is not implemented"
+                    raise NotImplementedError(msg)
+
+                value = resolver.resolve_scalar_value(assignment, target.resolved_type)
+                override = build_scalar_default_override(
+                    FName(target.declaration.name), target.resolved_type, value
+                )
+                payload.properties.append(override)
