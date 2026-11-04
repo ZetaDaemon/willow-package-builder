@@ -29,7 +29,23 @@ from willow_package_builder.compiler.syntax.modifiers import (
     VariableModifier,
 )
 from willow_package_builder.compiler.syntax.parser import DeclarationParser
-from willow_package_builder.logging import CompilationError, info
+from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
+from willow_package_builder.logging import CompilationError, SourceLocation, info
+from willow_package_builder.properties.values import (
+    ArrayValue,
+    BoolValue,
+    EmptyValue,
+    EnumValue,
+    FloatValue,
+    IdentifierValue,
+    IntValue,
+    NameValue,
+    NullValue,
+    ObjectValue,
+    StringValue,
+    StructValue,
+)
+from willow_package_builder.upackage import FName, Name
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,8 +53,8 @@ if TYPE_CHECKING:
     from willow_package_builder.package_config import PackageConfig
 
 
-CLASS_CACHE_SCHEMA_VERSION = 5
-DECLARATION_PARSER_VERSION = 3
+CLASS_CACHE_SCHEMA_VERSION = 9
+DECLARATION_PARSER_VERSION = 6
 
 
 @dataclass
@@ -71,6 +87,22 @@ CACHE_TYPES: dict[str, Callable[..., object]] = {
         TypeReference,
         VariableDeclaration,
         Token,
+        IntValue,
+        FloatValue,
+        BoolValue,
+        StringValue,
+        NullValue,
+        NameValue,
+        IdentifierValue,
+        ObjectValue,
+        ArrayValue,
+        StructValue,
+        EmptyValue,
+        EnumValue,
+        SourceLocation,
+        FName,
+        Name,
+        IndexedArrayDefaults,
     )
 }
 
@@ -94,6 +126,9 @@ def encode_cache_value(value: object) -> object:
     if isinstance(value, Enum):
         return {"$enum": type(value).__name__, "name": value.name}
 
+    if isinstance(value, Name):
+        return {"$type": "Name", "fields": {"name": str(value)}}
+
     if is_dataclass(value) and not isinstance(value, type):
         return {
             "$type": type(value).__name__,
@@ -107,6 +142,13 @@ def encode_cache_value(value: object) -> object:
 
     if isinstance(value, list):
         return [encode_cache_value(item) for item in value]
+
+    if isinstance(value, dict):
+        return {
+            "$dict": [
+                [encode_cache_value(key), encode_cache_value(item)] for key, item in value.items()
+            ]
+        }
 
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -130,6 +172,24 @@ def decode_cache_value(value: object) -> object:
             return [decode_cache_value(item) for item in value]
 
         case dict():
+            if "$dict" in value:
+                pairs = value["$dict"]
+
+                if not isinstance(pairs, list):
+                    msg = "Cached dictionary must contain a list of pairs"
+                    raise ValueError(msg)
+
+                result: dict[object, object] = {}
+
+                for pair in pairs:
+                    if not isinstance(pair, list) or len(pair) != 2:
+                        msg = "Invalid cached dictionary entry"
+                        raise ValueError(msg)
+
+                    key = decode_cache_value(pair[0])
+                    result[key] = decode_cache_value(pair[1])
+
+                return result
             if "$tuple" in value:
                 items = value["$tuple"]
 

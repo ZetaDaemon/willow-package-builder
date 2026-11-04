@@ -1,19 +1,23 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from willow_package_builder.builder.build_component import BuildComponent
-from willow_package_builder.compiler.semantics.types import TypeCategory
-from willow_package_builder.compiler.syntax.declarations import TypeReference
+from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
+from willow_package_builder.compiler.syntax.declarations import StructDeclaration, TypeReference
 from willow_package_builder.compiler.syntax.modifiers import StructModifier
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import UClassPayload
 from willow_package_builder.payloads.struct_payload import StructFlags, UScriptStructPayload
+from willow_package_builder.properties.construction import initial_scalar_value
+from willow_package_builder.properties.merge import merge_values
+from willow_package_builder.properties.values import ArrayValue, StructValue, Value
 from willow_package_builder.upackage import FName, ObjectFlags, UObject
 
-from .exports import StructExports
+from .exports import StructExport
 
 if TYPE_CHECKING:
+    from willow_package_builder.builder.classes.enum_builder import EnumBuilder
     from willow_package_builder.builder.references import PackageReferences
 
     from .property_builder import PropertyBuilder
@@ -35,6 +39,9 @@ STRUCT_MODIFIER_FLAGS: dict[StructModifier, StructFlags] = {
 class StructBuilder(BuildComponent):
     references: PackageReferences
     properties: PropertyBuilder
+    enums: EnumBuilder
+
+    _constructing_structs: set[str] = field(default_factory=set, init=False, repr=False)
 
     def reserve_structs(self) -> None:
         struct_class = self.references.class_object_reference("Core.ScriptStruct")
@@ -71,20 +78,21 @@ class StructBuilder(BuildComponent):
 
                     flags |= STRUCT_MODIFIER_FLAGS[modifier]
 
-                if declaration.default_tokens:
-                    msg = f"Struct defaults are not supported yet: {path}"
-                    raise NotImplementedError(msg)
-
                 obj = UObject(
                     FName(declaration.name),
                     ObjectFlags.DEFAULT_EXPORT,
                     exports.class_object.reference(),
                     struct_class,
-                    payload=UScriptStructPayload(struct_flags=flags),
+                    payload=UScriptStructPayload(
+                        struct_path=path,
+                        context=self.context,
+                        struct_flags=flags,
+                        defaults=self.make_struct(path).values,
+                    ),
                 )
 
                 self.package.add_export(obj)
-                self.structs[path] = StructExports(class_path, declaration, obj)
+                self.structs[path] = StructExport(class_path, declaration, obj)
 
     def link_structs(self) -> None:
         visible = collect_visible_packages(self.config, self.context.packages)
@@ -223,3 +231,81 @@ class StructBuilder(BuildComponent):
 
         for path in self.structs:
             visit(path)
+
+    def initial_value(self, resolved_type: ResolvedType) -> Value:
+        match resolved_type.category:
+            case TypeCategory.STRUCT:
+                path = resolved_type.declaration_path
+
+                if path is None:
+                    msg = "Struct type has no declaration path"
+                    raise ValueError(msg)
+
+                return self.make_struct(path)
+
+            case TypeCategory.ENUM:
+                return self.enums.initial_value(resolved_type)
+
+            case _:
+                return initial_scalar_value(resolved_type)
+
+    def make_struct(
+        self,
+        struct_path: str,
+        values: dict[FName, Value] | None = None,
+        existing: StructValue | None = None,
+    ) -> StructValue:
+        """Construct a struct from its defaults and typed overrides."""
+        key = struct_path.casefold()
+
+        if key in self._constructing_structs:
+            msg = f"Recursive struct construction at {struct_path}"
+            raise CompilationError(msg)
+
+        self._constructing_structs.add(key)
+
+        try:
+            result: dict[FName, Value] = {}
+
+            for owner, declaration in self.struct_hierarchy(struct_path):
+                package_name = owner.partition(".")[0]
+                config = next(
+                    config
+                    for config in self.context.packages
+                    if config.name.casefold() == package_name.casefold()
+                )
+                visible = collect_visible_packages(config, self.context.packages)
+
+                for variable in declaration.variables:
+                    name = FName(variable.name)
+
+                    if name in result:
+                        continue
+
+                    resolved = self.context.references.resolve_type(
+                        variable.type_ref, owner, visible, self.context.parents
+                    )
+
+                    if variable.array_dimension == 1:
+                        result[name] = self.initial_value(resolved)
+                    else:
+                        result[name] = ArrayValue(
+                            [self.initial_value(resolved) for _ in range(variable.array_dimension)]
+                        )
+
+                result = merge_values(result, declaration.defaults)
+
+            if existing is not None:
+                result = merge_values(result, existing.values)
+
+            if values is not None:
+                result = merge_values(result, values)
+
+            return StructValue(result, struct_path=struct_path)
+        finally:
+            self._constructing_structs.remove(key)
+
+    def struct_hierarchy(self, struct_path: str) -> list[tuple[str, StructDeclaration]]:
+        return self.context.references.struct_hierarchy(
+            struct_path, self.context.parents, self.context.packages
+        )

@@ -17,6 +17,7 @@ from willow_package_builder.compiler.syntax.modifiers import (
     ParameterModifier,
     StructModifier,
 )
+from willow_package_builder.compiler.syntax.parser.defaults_parser import DefaultsParser
 from willow_package_builder.logging import CompilationError, WarningCode, warn
 
 from .declaration_syntax_parser import DeclarationSyntaxParser
@@ -208,6 +209,9 @@ class DeclarationParser(DeclarationSyntaxParser):
 
                 self.advance()
                 declaration.default_tokens = self.parse_braced_tokens()
+                declaration.parsed_defaults = DefaultsParser.from_default_tokens(
+                    declaration.default_tokens
+                ).parse_defaults()
                 continue
 
             msg = f"Unsupported struct member {token.text!r} at {token.line}:{token.column}"
@@ -514,6 +518,9 @@ class DeclarationParser(DeclarationSyntaxParser):
 
                 self.advance()
                 declaration.default_tokens = self.parse_braced_tokens()
+                declaration.parsed_defaults = DefaultsParser.from_default_tokens(
+                    declaration.default_tokens
+                ).parse_defaults()
                 continue
 
             # Check operators before functions: both can begin with native.

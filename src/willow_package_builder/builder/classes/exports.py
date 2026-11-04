@@ -10,14 +10,14 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class ClassExports:
+class ClassExport:
     declaration: ClassDeclaration
     class_object: UObject
     default_object: UObject
 
 
 @dataclass
-class StructExports:
+class StructExport:
     owner_class: str
     declaration: StructDeclaration
     struct_object: UObject

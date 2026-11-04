@@ -1,8 +1,12 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from willow_package_builder.builder.defaults_builder import DefaultsBuilder
+from willow_package_builder.builder.value_builder import ValueBuilder
 from willow_package_builder.games import get_game
 from willow_package_builder.logging import info
+from willow_package_builder.objects.declarations import ObjectDeclaration
+from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.upackage import FName, Package
 
 from .build_state import PackageBuildState
@@ -15,10 +19,12 @@ from .objects.object_builder import ObjectBuilder
 from .references import PackageReferences
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from willow_package_builder.builder.classes.exports import ClassExport, StructExport
     from willow_package_builder.package_config import PackageConfig
 
     from .build_context import BuildContext
-    from .classes.exports import ClassExports, StructExports
 
 
 @dataclass
@@ -38,8 +44,10 @@ class PackageBuilder:
     functions: FunctionBuilder = field(init=False)
     struct_builder: StructBuilder = field(init=False)
     enums: EnumBuilder = field(init=False)
-    class_builder: ClassBuilder = field(init=False)
+    values: ValueBuilder = field(init=False)
+    defaults: DefaultsBuilder = field(init=False)
     object_builder: ObjectBuilder = field(init=False)
+    class_builder: ClassBuilder = field(init=False)
 
     @property
     def package(self) -> Package:
@@ -47,17 +55,16 @@ class PackageBuilder:
         return self.state.package
 
     @property
-    def classes(self) -> dict[str, ClassExports]:
+    def classes(self) -> dict[str, ClassExport]:
         """Access classes from state."""
         return self.state.classes
 
     @property
-    def structs(self) -> dict[str, StructExports]:
+    def structs(self) -> dict[str, StructExport]:
         """Access structs from state."""
         return self.state.structs
 
-    def __post_init__(self) -> None:
-        """Post init."""
+    def __post_init__(self) -> None:  # noqa: D105
         game = get_game()
         package = Package(FName(self.config.name), game.package_format(), game.PACKAGE_FLAGS)
 
@@ -65,10 +72,20 @@ class PackageBuilder:
         self.references = PackageReferences(self.state)
         self.properties = PropertyBuilder(self.state, self.references)
         self.functions = FunctionBuilder(self.state, self.references, self.properties)
-        self.struct_builder = StructBuilder(self.state, self.references, self.properties)
         self.enums = EnumBuilder(self.state, self.references)
-        self.class_builder = ClassBuilder(self.state, self.references, self.properties)
-        self.object_builder = ObjectBuilder(self.state, self.references)
+        self.struct_builder = StructBuilder(
+            self.state, self.references, self.properties, self.enums
+        )
+        self.values = ValueBuilder(self.state, self.enums, self.struct_builder)
+        self.object_builder = ObjectBuilder(
+            self.state, self.references, self.struct_builder, self.values
+        )
+        self.defaults = DefaultsBuilder(
+            self.state, self.values, self.struct_builder, self.object_builder
+        )
+        self.class_builder = ClassBuilder(
+            self.state, self.references, self.properties, self.object_builder
+        )
 
     def manifest(self) -> dict[str, object]:
         """Create the package manifest."""
@@ -79,10 +96,31 @@ class PackageBuilder:
             ]
         }
 
-    def build(self) -> Package:
-        """Build the package."""
-        # Compile classes
-        info("Compiling classes")
+    def load_classes(
+        self,
+        class_names: Iterable[str],
+        class_properties: Iterable[tuple[str, dict[str, object]]] = (),
+    ) -> None:
+        """Load declarations, property dependencies, and typed default records."""
+        requests = tuple(class_names)
+        property_sets = tuple(class_properties)
+        names = tuple(dict.fromkeys((*requests, *(name for name, _ in property_sets))))
+        visible = collect_visible_packages(self.config, self.context.packages)
+
+        self.context.loader.load_classes(names, self.config.name, visible)
+
+        for name, properties in property_sets:
+            path, _ = self.context.references.resolve_class(name, self.config.name, visible)
+            self.context.loader.load_property_dependencies(path, properties, self.config.name)
+
+        self.context.refresh_class_hierarchy()
+
+        for name in names:
+            path, _ = self.context.references.resolve_class(name, self.config.name, visible)
+            self.defaults.build_class_defaults(path)
+
+    def compile_classes(self) -> None:
+        """Create class definitions, CDOs, fields, and function bytecode exports."""
         self.class_builder.reserve_classes()
         self.class_builder.link_classes()
         self.struct_builder.reserve_structs()
@@ -92,13 +130,30 @@ class PackageBuilder:
         self.struct_builder.build_struct_fields()
         self.class_builder.build_class_fields()
         self.functions.build_class_functions()
-        self.class_builder.build_class_defaults()
 
-        # Construct objects
-        info("Constructing objects")
+    def build(self) -> Package:
+        """Build custom classes, then load references and construct objects."""
+        info(f"Preparing package {self.config.name}")
+        self.load_classes(self.context.loader.class_names(self.config.name))
+
+        info("Compiling classes")
+        self.compile_classes()
+
+        info("Reading objects")
         self.object_builder.read_objects()
-        self.object_builder.reserve_objects()
-        self.object_builder.initialize_payloads()
+        declarations = [
+            declaration
+            for declaration in self.object_builder.declarations
+            if isinstance(declaration, ObjectDeclaration)
+        ]
+
+        self.load_classes(
+            (declaration.class_name for declaration in declarations),
+            ((declaration.class_name, declaration.properties) for declaration in declarations),
+        )
+
+        info("Constructing objects")
+        self.object_builder.construct_objects()
         self.object_builder.build_all_properties()
 
         return self.package

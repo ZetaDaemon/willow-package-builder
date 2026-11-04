@@ -6,7 +6,7 @@ from willow_package_builder.compiler.semantics.defaults_resolver import (
     ResolvedEnumValue,
     ResolvedStructValue,
 )
-from willow_package_builder.compiler.semantics.references import ReferenceDatabase
+from willow_package_builder.compiler.semantics.reference_database import ReferenceDatabase
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.declarations import (
     ClassDeclaration,

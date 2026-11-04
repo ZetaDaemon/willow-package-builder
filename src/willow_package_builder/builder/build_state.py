@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from willow_package_builder.package_config import PackageConfig
     from willow_package_builder.upackage import Package
 
-    from .classes.exports import ClassExports, StructExports
+    from .classes.exports import ClassExport, StructExport
 
 
 @dataclass
@@ -15,5 +15,5 @@ class PackageBuildState:
     config: PackageConfig
     package: Package
 
-    classes: dict[str, ClassExports] = field(default_factory=dict)
-    structs: dict[str, StructExports] = field(default_factory=dict)
+    classes: dict[str, ClassExport] = field(default_factory=dict)
+    structs: dict[str, StructExport] = field(default_factory=dict)

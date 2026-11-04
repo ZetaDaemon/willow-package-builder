@@ -1,9 +1,4 @@
 Class: ExamplePackage.ExampleClass
-Value: 0
-Scale: 0
-Enabled: False
-Label: ""
-
 ---
 Name: ChildExampleObject
-Class: ExamplePackage.ExampleClass
+Class: ExamplePackage.ExampleChild

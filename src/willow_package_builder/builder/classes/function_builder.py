@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from willow_package_builder.builder.references import PackageReferences
     from willow_package_builder.compiler.syntax.expressions import Expression
 
-    from .exports import ClassExports
+    from .exports import ClassExport
     from .property_builder import PropertyBuilder
 
 FUNCTION_MODIFIER_FLAGS: dict[FunctionModifier, FunctionFlags] = {
@@ -258,7 +258,7 @@ class FunctionBuilder(BuildComponent):
         return prepared_function
 
     def _prepare_class_functions(
-        self, class_path: str, exports: ClassExports
+        self, class_path: str, exports: ClassExport
     ) -> list[PreparedFunction]:
 
         class_payload = exports.class_object.payload

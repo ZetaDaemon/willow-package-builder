@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -64,15 +65,26 @@ class ReferenceDatabase:
             operator_key = operator.name.casefold()
             self.operators.setdefault(operator_key, []).append(operator)
 
-    def resolve_class(
-        self, name: str, current_package: str, visible_packages: set[str]
-    ) -> tuple[str, ClassDeclaration]:
+    def resolve_class_path(
+        self,
+        name: str,
+        current_package: str,
+        visible_packages: set[str],
+        additional_paths: Iterable[str] = (),
+        *,
+        include_intrinsics: bool = False,
+    ) -> str:
+        """Resolve a class name to its qualified path."""
         allowed_packages = {
             current_package.casefold(),
             *(package.casefold() for package in visible_packages),
         }
+        available = set(self.classes)
+        available.update(path.casefold() for path in additional_paths)
 
-        # Explicitly qualified name.
+        if include_intrinsics:
+            available.update(self.intrinsics)
+
         if "." in name:
             key = name.casefold()
             package_name = key.partition(".")[0]
@@ -81,40 +93,52 @@ class ReferenceDatabase:
                 msg = f"Package {package_name!r} is not available to {current_package}"
                 raise CompilationError(msg)
 
-            declaration = self.classes.get(key)
-
-            if declaration is None:
+            if key not in available:
                 msg = f"Unknown class: {name}"
                 raise CompilationError(msg)
 
-            return key, declaration
+            return key
 
-        # Prefer a class declared in the current package.
         local_key = f"{current_package}.{name}".casefold()
-        local = self.classes.get(local_key)
 
-        if local is not None:
-            return local_key, local
+        if local_key in available:
+            return local_key
 
-        matches: list[tuple[str, ClassDeclaration]] = []
-
-        for package_name in sorted(allowed_packages):
-            key = f"{package_name}.{name}".casefold()
-            declaration = self.classes.get(key)
-
-            if declaration is not None:
-                matches.append((key, declaration))
+        matches = [
+            key
+            for package_name in sorted(allowed_packages)
+            if (key := f"{package_name}.{name}".casefold()) in available
+        ]
 
         if not matches:
             msg = f"Unknown class: {name}"
             raise CompilationError(msg)
 
         if len(matches) > 1:
-            candidates = ", ".join(path for path, _ in matches)
+            candidates = ", ".join(matches)
             msg = f"Ambiguous class {name!r}; use a qualified name: {candidates}"
             raise CompilationError(msg)
 
         return matches[0]
+
+    def parent_class_name(self, class_path: str, declaration: ClassDeclaration) -> str | None:
+        """Return the explicit or implicit parent class name."""
+        if declaration.parent is not None:
+            return declaration.parent
+
+        if declaration.is_interface:
+            if class_path.casefold() == "core.interface":
+                return "Core.Object"
+
+            return "Core.Interface"
+
+        return None
+
+    def resolve_class(
+        self, name: str, current_package: str, visible_packages: set[str]
+    ) -> tuple[str, ClassDeclaration]:
+        path = self.resolve_class_path(name, current_package, visible_packages)
+        return path, self.classes[path]
 
     def resolve_parent_classes(self, packages: tuple[PackageConfig, ...]) -> dict[str, str | None]:
         configs = {config.name.casefold(): config for config in packages}
@@ -129,10 +153,7 @@ class ReferenceDatabase:
             package_key = class_path.partition(".")[0]
             config = configs[package_key]
 
-            parent_name = declaration.parent
-
-            if parent_name is None and declaration.is_interface:
-                parent_name = "Core.Object" if class_path == "core.interface" else "Core.Interface"
+            parent_name = self.parent_class_name(class_path, declaration)
 
             if parent_name is None:
                 parents[class_path] = None
@@ -501,3 +522,84 @@ class ReferenceDatabase:
 
         msg = f"Unknown field {name!r} on struct {struct_path}"
         raise CompilationError(msg)
+
+    def struct_hierarchy(
+        self,
+        struct_path: str,
+        parents: Mapping[str, str | None],
+        packages: tuple[PackageConfig, ...],
+    ) -> list[tuple[str, StructDeclaration]]:
+        """Return parent-to-child declarations and their owning classes."""
+        hierarchy: list[tuple[str, StructDeclaration]] = []
+        visited: set[str] = set()
+        current = struct_path
+
+        while True:
+            key = current.casefold()
+
+            if key in visited:
+                msg = f"Struct inheritance cycle at {current}"
+                raise CompilationError(msg)
+
+            visited.add(key)
+
+            owner_class, _, struct_name = current.rpartition(".")
+            member = self.resolve_struct(owner_class, struct_name, parents)
+            declaration = member.declaration
+            hierarchy.append((member.owner_class, declaration))
+
+            if declaration.parent is None:
+                break
+
+            package_name = member.owner_class.partition(".")[0]
+            config = next(
+                config for config in packages if config.name.casefold() == package_name.casefold()
+            )
+            visible = collect_visible_packages(config, packages)
+
+            parent = self.resolve_type(
+                TypeReference(declaration.parent), member.owner_class, visible, parents
+            )
+
+            if parent.category is not TypeCategory.STRUCT:
+                msg = f"Struct {current} has a non-struct parent"
+                raise CompilationError(msg)
+
+            if parent.declaration_path is None:
+                msg = f"Parent struct of {current} has no declaration path"
+                raise ValueError(msg)
+
+            current = parent.declaration_path
+
+        hierarchy.reverse()
+        return hierarchy
+
+    def is_subclass(
+        self, class_path: str, base_path: str, parents: Mapping[str, str | None]
+    ) -> bool:
+        """Check whether a class is the given base class or extends it."""
+        base = base_path.casefold()
+        self.lookup_class(base)
+
+        current: str | None = class_path.casefold()
+        visited: set[str] = set()
+
+        while current is not None:
+            key = current.casefold()
+
+            if key in visited:
+                msg = f"Inheritance cycle while checking {class_path}: {current}"
+                raise CompilationError(msg)
+
+            visited.add(key)
+            definition = self.lookup_class(key)
+
+            if key == base:
+                return True
+
+            if isinstance(definition, IntrinsicDefinition):
+                current = definition.parent
+            else:
+                current = parents[key]
+
+        return False

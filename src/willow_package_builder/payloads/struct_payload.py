@@ -3,12 +3,14 @@ from dataclasses import dataclass, field
 from enum import IntFlag
 from typing import TYPE_CHECKING, override
 
+from willow_package_builder.properties.value_serializer import ValueSerializer
 from willow_package_builder.upackage import FName, Package
 
 from .class_payload import UStructPayload
 
 if TYPE_CHECKING:
-    from .instance_payload import PropertyOverride
+    from willow_package_builder.builder.build_context import BuildContext
+    from willow_package_builder.properties.values import Value
 
 
 class StructFlags(IntFlag):
@@ -29,17 +31,21 @@ class StructFlags(IntFlag):
 class UScriptStructPayload(UStructPayload):
     """A script-defined struct and its default values."""
 
+    struct_path: str = field(kw_only=True)
+    context: BuildContext = field(kw_only=True, repr=False)
+
     net_index: int = -1
     struct_flags: StructFlags = StructFlags.NONE
-    defaults: list[PropertyOverride] = field(default_factory=list)
+    defaults: dict[FName, Value] = field(default_factory=dict)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
+        serializer = ValueSerializer(package, self.context)
+
         return (
             super().serialize_body(package)
             + struct.pack("<I", int(self.struct_flags))
-            + b"".join(prop.serialize(package) for prop in self.defaults)
-            + FName("None").serialize(package)
+            + serializer.serialize_struct_fields(self.struct_path, self.defaults)
         )
 
     @override

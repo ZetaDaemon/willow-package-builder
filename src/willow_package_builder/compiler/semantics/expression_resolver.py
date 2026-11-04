@@ -31,7 +31,7 @@ if TYPE_CHECKING:
         TypeReference,
     )
 
-    from .references import ResolvedMember
+    from .reference_database import ResolvedMember
     from .scope import FunctionScope
 
 

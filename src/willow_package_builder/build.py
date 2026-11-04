@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from willow_package_builder.compiler.cache.cache import load_or_parse_class
-from willow_package_builder.compiler.semantics.references import ReferenceDatabase
+from willow_package_builder.compiler.class_loader import ClassLoader
+from willow_package_builder.compiler.semantics.reference_database import ReferenceDatabase
 from willow_package_builder.package_config import collect_build_packages, load_package_graph
 
 from .builder.build_context import BuildContext
@@ -18,23 +18,9 @@ def prepare_build(target_directory: Path) -> BuildContext:
     packages = load_package_graph(target_directory)
     build_packages = collect_build_packages(target_directory, packages)
     references = ReferenceDatabase()
+    loader = ClassLoader(packages, build_packages, references)
 
-    for config in packages:
-        if config.directory in build_packages:
-            info(f"Preparing package {config.name}")
-        else:
-            info(f"Loading reference package {config.name}")
-        for source_path in config.source_files():
-            cached = load_or_parse_class(
-                config, source_path, include_body_tokens=config.directory in build_packages
-            )
-
-            references.add_class(config.name, cached.declaration)
-
-    parents = references.resolve_parent_classes(packages)
-    class_order = references.inheritance_order(parents)
-
-    return BuildContext(packages, build_packages, references, parents, class_order)
+    return BuildContext(packages, build_packages, references, loader)
 
 
 def build_package(

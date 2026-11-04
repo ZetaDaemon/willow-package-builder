@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from willow_package_builder.upackage import Package
 
     from .build_state import PackageBuildState
-    from .classes.exports import ClassExports, StructExports
+    from .classes.exports import ClassExport, StructExport
 
 
 @dataclass
@@ -33,11 +33,11 @@ class BuildComponent(ABC):
         return self.state.package
 
     @property
-    def classes(self) -> dict[str, ClassExports]:
+    def classes(self) -> dict[str, ClassExport]:
         """Access classes from state."""
         return self.state.classes
 
     @property
-    def structs(self) -> dict[str, StructExports]:
+    def structs(self) -> dict[str, StructExport]:
         """Access structs from state."""
         return self.state.structs

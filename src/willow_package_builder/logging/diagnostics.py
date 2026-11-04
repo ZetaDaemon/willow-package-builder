@@ -53,3 +53,7 @@ class ConfigError(Exception):
 
 class ObjectDefinitionError(Exception):
     """An error in the object definition."""
+
+
+class ValueBuildError(Exception):
+    """Supplied property data cannot be converted to its declared type."""

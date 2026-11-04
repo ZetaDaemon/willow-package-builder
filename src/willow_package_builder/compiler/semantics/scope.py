@@ -13,7 +13,7 @@ if TYPE_CHECKING:
         VariableDeclaration,
     )
 
-    from .references import ReferenceDatabase
+    from .reference_database import ReferenceDatabase
 
 
 class VariableCategory(StrEnum):

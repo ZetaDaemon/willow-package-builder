@@ -357,7 +357,7 @@ class Package:
 
     name: FName
     format: PackageFormat
-    flags: int
+    flags: PackageFlags
 
     guid: UUID = field(default_factory=uuid4)
 
@@ -582,6 +582,28 @@ class Package:
             + dependency_data
             + b"".join(payloads)
         )
+
+    def ensure_import(
+        self, name: str, outer: ReferencePath, class_package: str, class_name: str
+    ) -> ReferencePath:
+        """Register an import or reuse its existing definition."""
+        obj = ExternalReference(FName(name), FName(class_package), FName(class_name), outer)
+        reference = obj.reference()
+
+        try:
+            existing = self.lookup_object_by_path(reference)
+        except KeyError:
+            return self.add_import(obj)
+
+        if (
+            not isinstance(existing, ExternalReference)
+            or existing.class_package != obj.class_package
+            or existing.class_name != obj.class_name
+        ):
+            msg = f"Conflicting import definition for {reference}"
+            raise ValueError(msg)
+
+        return reference
 
 
 def serialize_fstring(value: str | ReferencePath | Name) -> bytes:

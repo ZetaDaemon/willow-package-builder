@@ -2,6 +2,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from willow_package_builder.properties.values import Value
+from willow_package_builder.upackage import FName
+
 if TYPE_CHECKING:
     from willow_package_builder.compiler.syntax.modifiers import (
         ClassModifierName,
@@ -36,16 +39,6 @@ class ConstantDeclaration:
 class EnumDeclaration:
     name: str
     members: tuple[str, ...]
-
-
-@dataclass
-class StructDeclaration:
-    name: str
-    parent: str | None = None
-    modifiers: tuple[StructModifier, ...] = ()
-
-    variables: list[VariableDeclaration] = field(default_factory=list)
-    default_tokens: tuple[Token, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +99,18 @@ class ClassModifier:
 
 
 @dataclass
+class StructDeclaration:
+    name: str
+    parent: str | None = None
+    modifiers: tuple[StructModifier, ...] = ()
+
+    variables: list[VariableDeclaration] = field(default_factory=list)
+    default_tokens: tuple[Token, ...] | None = None
+    parsed_defaults: dict[str, object] = field(default_factory=dict)
+    defaults: dict[FName, Value] = field(default_factory=dict)
+
+
+@dataclass
 class ClassDeclaration:
     name: str
     parent: str | None
@@ -122,3 +127,5 @@ class ClassDeclaration:
     operators: list[OperatorDeclaration] = field(default_factory=list)
 
     default_tokens: tuple[Token, ...] | None = None
+    parsed_defaults: dict[str, object] = field(default_factory=dict)
+    defaults: dict[FName, Value] = field(default_factory=dict)

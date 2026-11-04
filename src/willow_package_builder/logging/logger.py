@@ -10,6 +10,7 @@ from .diagnostics import (
     CompilationError,
     ConfigError,
     ObjectDefinitionError,
+    ValueBuildError,
     WarningAction,
     WarningCode,
 )
@@ -88,7 +89,7 @@ class Logger:
 
         try:
             yield
-        except (CompilationError, ConfigError, ObjectDefinitionError) as error:
+        except (CompilationError, ConfigError, ObjectDefinitionError, ValueBuildError) as error:
             self._log(f"{type(error).__name__}: {error}", sys.stderr, LogPrefix.ERROR)
             if self.debug:
                 raise

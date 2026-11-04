@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from willow_package_builder.compiler.semantics.intrinsics import IntrinsicDefinition
 from willow_package_builder.logging import CompilationError
-from willow_package_builder.upackage import ExternalReference, FName, ReferencePath
+from willow_package_builder.upackage import FName, ReferencePath
 
 from .build_component import BuildComponent
 
@@ -12,23 +12,7 @@ class PackageReferences(BuildComponent):
     def ensure_import(
         self, name: str, outer: ReferencePath, class_package: str, class_name: str
     ) -> ReferencePath:
-        obj = ExternalReference(FName(name), FName(class_package), FName(class_name), outer)
-        reference = obj.reference()
-
-        try:
-            existing = self.package.lookup_object_by_path(reference)
-        except KeyError:
-            return self.package.add_import(obj)
-
-        if (
-            not isinstance(existing, ExternalReference)
-            or existing.class_package != obj.class_package
-            or existing.class_name != obj.class_name
-        ):
-            msg = f"Conflicting import definition for {reference}"
-            raise ValueError(msg)
-
-        return reference
+        return self.package.ensure_import(name, outer, class_package, class_name)
 
     def class_object_reference(
         self, class_path: str, *, default_object: bool = False
