@@ -32,6 +32,7 @@ class ParameterModifier(StrEnum):
     COERCE = "coerce"
     SKIP = "skip"
     CONST = "const"
+    INIT = "init"
 
 
 class ClassModifierName(StrEnum):
@@ -73,6 +74,7 @@ class VariableModifier(StrEnum):
     # Implementation
     NATIVE = "native"
     CONST = "const"
+    INIT = "init"
 
     # Access
     PRIVATE = "private"
@@ -93,6 +95,28 @@ class VariableModifier(StrEnum):
     EDIT_INLINE = "editinline"
     EXPORT = "export"
     NO_EXPORT = "noexport"
+    EDITOR_ONLY = "editoronly"
+
+    # Networking
+    REP_NOTIFY = "repnotify"
+    REP_RETRY = "repretry"
+
+    # Interpolation
+    INTERP = "interp"
+
+    # Unsorted
+    INPUT = "input"
+    DEPRECATED = "deprecated"
+    NO_IMPORT = "noimport"
+    NO_CLEAR = "noclear"
+    NON_TRANSACTIONAL = "nontransactional"
+    SERIALIZE_TEXT = "serializetext"
+    DATA_BINDING = "databinding"
+    EDIT_FIXED_SIZE = "editfixedsize"
+    EDIT_HIDE = "edithide"
+    EDIT_TEXT_BOX = "edittextbox"
+    CROSS_LEVEL_PASSIVE = "crosslevelpassive"
+    CROSS_LEVEL_ACTIVE = "crosslevelactive"
 
 
 class StructModifier(StrEnum):
@@ -105,3 +129,8 @@ class StructModifier(StrEnum):
     STRICT_CONFIG = "strictconfig"
     IMMUTABLE_WHEN_COOKED = "immutablewhencooked"
     ATOMIC_WHEN_COOKED = "atomicwhencooked"
+
+
+class StateModifier(StrEnum):
+    AUTO = "auto"
+    SIMULATED = "simulated"

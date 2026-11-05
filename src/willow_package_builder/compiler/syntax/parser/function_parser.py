@@ -280,6 +280,7 @@ class FunctionParser(DeclarationSyntaxParser):
         function_locals = self.parse_local_declarations()
 
         for declaration in function_locals:
+            resolver.resolve_local_array_dimension(declaration)
             resolver.scope.add_local(declaration)
 
         statements: list[Statement] = []

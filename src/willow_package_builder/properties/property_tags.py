@@ -1,7 +1,5 @@
 from enum import StrEnum
 
-from willow_package_builder.compiler.semantics.types import TypeCategory
-
 
 class PropertyTag(StrEnum):
     INT = "IntProperty"
@@ -13,3 +11,4 @@ class PropertyTag(StrEnum):
     OBJECT = "ObjectProperty"
     ARRAY = "ArrayProperty"
     STRUCT = "StructProperty"
+    DELEGATE = "DelegateProperty"

@@ -37,6 +37,7 @@ _INTRINSIC_PARENTS: dict[str, str] = {
     "Core.MapProperty": "Core.Property",
     "Core.StructProperty": "Core.Property",
     "Core.DelegateProperty": "Core.Property",
+    "Engine.StaticMesh": "Core.Object",
 }
 
 PROPERTY_CLASS_PATHS = {

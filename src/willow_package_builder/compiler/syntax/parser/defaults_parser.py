@@ -72,6 +72,7 @@ class DefaultsParser(TokenParser):
             self.expect("]")
 
         self.expect("=")
+
         return DefaultOperation(token.text, self.parse_value(), array_index, location)
 
     def _parse_struct_value(self) -> dict[str, object]:
@@ -111,7 +112,10 @@ class DefaultsParser(TokenParser):
                 self.advance()
                 return float(token.text)
 
-            case TokenCategory.STRING | TokenCategory.NAME:
+            case TokenCategory.STRING:
+                return self.parse_string_value()
+
+            case TokenCategory.NAME:
                 self.advance()
                 value = token.text[1:-1]
                 if "\\" in value:
@@ -149,10 +153,26 @@ class DefaultsParser(TokenParser):
                 msg = f"Expected a default value, got {token.text!r}"
                 raise CompilationError(msg, location)
 
-    def parse_defaults(self) -> dict[str, object]:
+    def parse_defaults(
+        self, *, skip_object_definitions: bool = False, allow_dump_fixups: bool = False
+    ) -> dict[str, object]:
         values: dict[str, object] = {}
+
         while self.peek().category is not TokenCategory.EOF:
+            if self.peek().text.casefold() == "begin" and self.peek(1).text.casefold() == "object":
+                if not skip_object_definitions:
+                    token = self.peek()
+                    msg = (
+                        "Default object definitions are not implemented "
+                        f"at {token.line}:{token.column}"
+                    )
+                    raise NotImplementedError(msg)
+
+                self.skip_object_definition()
+                continue
+
             self._apply_operation(values, self.parse_operation())
+
         return values
 
     @classmethod
@@ -193,3 +213,80 @@ class DefaultsParser(TokenParser):
             if self.match(")"):
                 return elements
             self.expect(",")
+
+    def skip_object_definition(self) -> None:
+        opening = self.peek()
+        self.expect("begin")
+        self.expect("object")
+        depth = 1
+
+        while depth:
+            token = self.peek()
+
+            if token.category is TokenCategory.EOF:
+                msg = "Unterminated default object definition"
+                raise CompilationError(msg, SourceLocation(opening.line, opening.column))
+
+            if (
+                token.category is TokenCategory.IDENTIFIER
+                and self.peek(1).text.casefold() == "object"
+            ):
+                keyword = token.text.casefold()
+
+                if keyword in ("begin", "end"):
+                    self.advance()
+                    self.advance()
+                    depth += 1 if keyword == "begin" else -1
+                    continue
+
+            self.advance()
+
+    def parse_string_value(self) -> str:
+        token = self.advance()
+        value = token.text[1:-1]
+        result: list[str] = []
+        index = 0
+
+        while index < len(value):
+            character = value[index]
+
+            if character != "\\":
+                result.append(character)
+                index += 1
+                continue
+
+            location = SourceLocation(token.line, token.column + index + 1)
+            index += 1
+
+            if index == len(value):
+                msg = "Unterminated default string escape"
+                raise CompilationError(msg, location)
+
+            escaped = value[index]
+
+            match escaped:
+                case "n":
+                    result.append("\n")
+
+                case "r":
+                    result.append("\r")
+
+                case "\\" | '"':
+                    result.append(escaped)
+
+                case _:
+                    digits = value[index : index + 2]
+
+                    if len(digits) != 2 or any(c not in "0123456789abcdefABCDEF" for c in digits):
+                        msg = (
+                            f"Default string escape decoding for {escaped!r} "
+                            f"is not implemented at {location}"
+                        )
+                        raise NotImplementedError(msg)
+
+                    result.append(chr(int(digits, 16)))
+                    index += 1
+
+            index += 1
+
+        return "".join(result)

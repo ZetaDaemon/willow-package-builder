@@ -27,6 +27,33 @@ from willow_package_builder.upackage import FName, ObjectFlags, ReferencePath, U
 if TYPE_CHECKING:
     from willow_package_builder.builder.references import PackageReferences
 
+VARIABLE_MODIFIER_FLAGS: dict[VariableModifier, PropertyFlags] = {
+    VariableModifier.CONST: PropertyFlags.CONST,
+    VariableModifier.EDIT_CONST: PropertyFlags.EDIT_CONST,
+    VariableModifier.INIT: PropertyFlags.ALWAYS_INIT,
+    VariableModifier.NO_EXPORT: PropertyFlags.NO_EXPORT,
+    VariableModifier.DUPLICATE_TRANSIENT: PropertyFlags.DUPLICATE_TRANSIENT,
+    VariableModifier.PRIVATE_WRITE: PropertyFlags.PRIVATE_WRITE,
+    VariableModifier.PROTECTED_WRITE: PropertyFlags.PROTECTED_WRITE,
+    VariableModifier.PUBLIC: PropertyFlags.NONE,
+    VariableModifier.PRIVATE: PropertyFlags.NONE,
+    VariableModifier.PROTECTED: PropertyFlags.NONE,
+    VariableModifier.INTERP: PropertyFlags.INTERP | PropertyFlags.EDIT,
+    VariableModifier.EDIT_INLINE: PropertyFlags.EDIT_INLINE,
+    VariableModifier.EXPORT: PropertyFlags.EXPORT_OBJECT,
+}
+
+SUPPORTED_VARIABLE_MODIFIERS = frozenset(
+    {key for key in VARIABLE_MODIFIER_FLAGS if key != VariableModifier.EXPORT}
+)
+
+ARRAY_INNER_FLAGS = (
+    PropertyFlags.EXPORT_OBJECT
+    | PropertyFlags.ALWAYS_INIT
+    | PropertyFlags.EDIT_CONST
+    | PropertyFlags.EDIT_INLINE
+)
+
 
 @dataclass
 class PropertyBuilder(BuildComponent):
@@ -77,6 +104,8 @@ class PropertyBuilder(BuildComponent):
         flags: PropertyFlags,
         array_dimension: int = 1,
     ) -> UObject:
+        path = owner.reference() + FName(name)
+        flags |= self.variable_modifier_flags(type_ref.modifiers, path)
         resolved = self.context.references.resolve_type(
             type_ref,
             class_path,
@@ -156,6 +185,14 @@ class PropertyBuilder(BuildComponent):
                 msg = f"Property {owner.reference()}.{name} requires unsupported type {resolved!r}"
                 raise NotImplementedError(msg)
 
+        instancing_flags = PropertyFlags.EDIT_INLINE | PropertyFlags.EXPORT_OBJECT
+
+        if (
+            isinstance(payload, UObjectPropertyPayload)
+            and flags & instancing_flags == instancing_flags
+        ):
+            flags |= PropertyFlags.NEED_CTOR_LINK
+
         payload.array_dimension = array_dimension
         payload.property_flags = flags
 
@@ -164,7 +201,7 @@ class PropertyBuilder(BuildComponent):
 
         obj = UObject(
             FName(name),
-            ObjectFlags.DEFAULT_EXPORT,
+            ObjectFlags.PUBLIC_EXPORT,
             owner.reference(),
             property_class,
             payload=payload,
@@ -173,7 +210,7 @@ class PropertyBuilder(BuildComponent):
         self.package.add_export(obj)
         if isinstance(payload, UArrayPropertyPayload):
             inner = self.create_property(
-                obj, name, type_ref.arguments[0], class_path, PropertyFlags.NONE
+                obj, name, type_ref.arguments[0], class_path, flags & ARRAY_INNER_FLAGS
             )
             payload.inner = inner.reference()
         return obj
@@ -186,14 +223,7 @@ class PropertyBuilder(BuildComponent):
         next_field: ReferencePath,
     ) -> UObject:
         path = owner.reference() + FName(declaration.name)
-        flags = PropertyFlags.NONE
-
-        for modifier in declaration.modifiers:
-            if modifier == VariableModifier.CONST:
-                flags |= PropertyFlags.CONST
-            else:
-                msg = f"Unsupported field modifier {modifier!r} on {path}"
-                raise NotImplementedError(msg)
+        flags = self.variable_modifier_flags(declaration.modifiers, path)
 
         category = FName("None")
         tokens = declaration.category_tokens
@@ -216,6 +246,11 @@ class PropertyBuilder(BuildComponent):
             flags,
             declaration.array_dimension,
         )
+        if VariableModifier.PRIVATE in declaration.modifiers:
+            obj.flags &= ~ObjectFlags.PUBLIC
+
+        if VariableModifier.PROTECTED in declaration.modifiers:
+            obj.flags |= ObjectFlags.PUBLIC | ObjectFlags.PROTECTED
 
         if not isinstance(obj.payload, UPropertyPayload):
             msg = f"Field has an invalid payload: {path}"
@@ -223,4 +258,65 @@ class PropertyBuilder(BuildComponent):
 
         obj.payload.category = category
         obj.payload.next_field = next_field
+        obj.payload.array_enum = self.array_enum_reference(declaration, class_path)
         return obj
+
+    def variable_modifier_flags(
+        self, modifiers: tuple[VariableModifier, ...], path: ReferencePath
+    ) -> PropertyFlags:
+        incompatible_pairs = (
+            (VariableModifier.PRIVATE, VariableModifier.PROTECTED),
+            (VariableModifier.PRIVATE, VariableModifier.PRIVATE_WRITE),
+            (VariableModifier.PROTECTED, VariableModifier.PRIVATE_WRITE),
+            (VariableModifier.PROTECTED, VariableModifier.PROTECTED_WRITE),
+            (VariableModifier.PRIVATE_WRITE, VariableModifier.PROTECTED_WRITE),
+        )
+
+        flags = PropertyFlags.NONE
+
+        if VariableModifier.PRIVATE in modifiers and VariableModifier.PROTECTED in modifiers:
+            msg = f"Property {path} cannot be both private and protected"
+            raise CompilationError(msg)
+
+        for first, second in incompatible_pairs:
+            if first in modifiers and second in modifiers:
+                msg = f"Property {path} cannot combine {first.value!r} and {second.value!r}"
+                raise CompilationError(msg)
+
+        for modifier in modifiers:
+            if modifier not in SUPPORTED_VARIABLE_MODIFIERS:
+                msg = f"Variable modifier {modifier.value!r} is not implemented"
+                raise NotImplementedError(msg)
+
+            if modifier is VariableModifier.NATIVE:
+                msg = f"Cannot compile native property {path}"
+                raise CompilationError(msg)
+
+            flags |= VARIABLE_MODIFIER_FLAGS[modifier]
+
+        return flags
+
+    def array_enum_reference(
+        self, declaration: VariableDeclaration, class_path: str
+    ) -> ReferencePath:
+        name = declaration.array_dimension_name
+
+        if name is None:
+            return ReferencePath()
+
+        resolved = self.context.references.resolve_type(
+            TypeReference(name),
+            class_path,
+            collect_visible_packages(self.config, self.context.packages),
+            self.context.parents,
+        )
+
+        if resolved.category is not TypeCategory.ENUM:
+            msg = f"Array dimension {name!r} does not resolve to an enum"
+            raise NotImplementedError(msg)
+
+        if resolved.declaration_path is None:
+            msg = "Array dimension enum has no declaration path"
+            raise ValueError(msg)
+
+        return self.references.enum_reference(resolved.declaration_path)

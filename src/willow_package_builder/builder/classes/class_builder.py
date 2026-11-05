@@ -77,29 +77,9 @@ class ClassBuilder(BuildComponent):
             self.classes[class_path] = ClassExport(declaration, class_object, default_object)
 
     def resolve_within_class(self, class_path: str) -> str:
-        current: str | None = class_path.casefold()
-
-        while current is not None:
-            declaration = self.context.references.classes[current]
-
-            if declaration.within is not None:
-                package_key = current.partition(".")[0]
-                config = next(
-                    config
-                    for config in self.context.packages
-                    if config.name.casefold() == package_key
-                )
-
-                resolved, _ = self.context.references.resolve_class(
-                    declaration.within,
-                    config.name,
-                    collect_visible_packages(config, self.context.packages),
-                )
-                return resolved
-
-            current = self.context.parents[current]
-
-        return "core.object"
+        return self.context.references.resolve_within_class(
+            class_path, self.context.parents, self.context.packages
+        )
 
     def link_classes(self) -> None:
         supported_modifiers = {

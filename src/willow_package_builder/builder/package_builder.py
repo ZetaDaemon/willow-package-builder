@@ -5,7 +5,7 @@ from willow_package_builder.builder.defaults_builder import DefaultsBuilder
 from willow_package_builder.builder.value_builder import ValueBuilder
 from willow_package_builder.games import get_game
 from willow_package_builder.logging import info
-from willow_package_builder.objects.declarations import ObjectDeclaration
+from willow_package_builder.objects.declarations import ObjectDeclaration, ObjectFlag
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.upackage import FName, Package
 
@@ -93,29 +93,20 @@ class PackageBuilder:
             "classes": [
                 f"{self.config.name}.{exports.class_object.reference()}"
                 for exports in self.classes.values()
-            ]
+            ],
+            "keep_alive": [
+                str(obj.reference())
+                for declaration, obj in self.object_builder.exports.items()
+                if isinstance(declaration, ObjectDeclaration)
+                and ObjectFlag.KEEP_ALIVE in declaration.flags
+            ],
         }
 
-    def load_classes(
-        self,
-        class_names: Iterable[str],
-        class_properties: Iterable[tuple[str, dict[str, object]]] = (),
-    ) -> None:
-        """Load declarations, property dependencies, and typed default records."""
-        requests = tuple(class_names)
-        property_sets = tuple(class_properties)
-        names = tuple(dict.fromkeys((*requests, *(name for name, _ in property_sets))))
+    def prepare_class_defaults(self, class_names: Iterable[str]) -> None:
+        """Build default records for classes needed by this package."""
         visible = collect_visible_packages(self.config, self.context.packages)
 
-        self.context.loader.load_classes(names, self.config.name, visible)
-
-        for name, properties in property_sets:
-            path, _ = self.context.references.resolve_class(name, self.config.name, visible)
-            self.context.loader.load_property_dependencies(path, properties, self.config.name)
-
-        self.context.refresh_class_hierarchy()
-
-        for name in names:
+        for name in dict.fromkeys(class_names):
             path, _ = self.context.references.resolve_class(name, self.config.name, visible)
             self.defaults.build_class_defaults(path)
 
@@ -134,7 +125,7 @@ class PackageBuilder:
     def build(self) -> Package:
         """Build custom classes, then load references and construct objects."""
         info(f"Preparing package {self.config.name}")
-        self.load_classes(self.context.loader.class_names(self.config.name))
+        self.prepare_class_defaults(self.context.loader.class_names(self.config.name))
 
         info("Compiling classes")
         self.compile_classes()
@@ -147,10 +138,7 @@ class PackageBuilder:
             if isinstance(declaration, ObjectDeclaration)
         ]
 
-        self.load_classes(
-            (declaration.class_name for declaration in declarations),
-            ((declaration.class_name, declaration.properties) for declaration in declarations),
-        )
+        self.prepare_class_defaults(declaration.class_name for declaration in declarations)
 
         info("Constructing objects")
         self.object_builder.construct_objects()

@@ -33,7 +33,7 @@ from willow_package_builder.compiler.syntax.statements import (
     Statement,
     WhileStatement,
 )
-from willow_package_builder.logging import CompilationError
+from willow_package_builder.logging import CompilationError, declaration_context
 
 from .scope import VariableCategory
 from .types import ResolvedType, TypeCategory
@@ -101,6 +101,7 @@ class FunctionBodyValidator:
         match expression:
             case IdentifierExpression():
                 symbol = self.resolver.scope.resolve_variable(expression.name)
+                self.validate_variable_access(symbol.declaration, symbol.owner_class)
 
                 if (
                     FunctionModifier.STATIC in self.resolver.scope.function.modifiers
@@ -142,15 +143,7 @@ class FunctionBodyValidator:
                 self.validate_expression(expression.object)
                 member = self.resolver.resolve_member(expression)
 
-                if (
-                    VariableModifier.PRIVATE in member.declaration.modifiers
-                    and member.owner_class.casefold() != self.resolver.scope.class_path.casefold()
-                ):
-                    msg = (
-                        f"Cannot access private variable "
-                        f"{member.owner_class}.{member.declaration.name}"
-                    )
-                    raise CompilationError(msg)
+                self.validate_variable_access(member.declaration, member.owner_class)
 
             case SelfExpression():
                 if FunctionModifier.STATIC in self.resolver.scope.function.modifiers:
@@ -268,32 +261,33 @@ class FunctionBodyValidator:
                 raise TypeError(msg)
 
     def validate_statement(self, statement: Statement, return_type: ResolvedType) -> None:
-        try:
-            self._validate_statement(statement, return_type)
-        except CompilationError as error:
-            if error.location is not None or statement.location is None:
-                raise
+        scope = self.resolver.scope
+        owner = self.resolver.context.references.display_class_path(scope.class_path)
+        path = f"{owner}.{scope.function.name}"
 
-            msg = str(error)
-            raise CompilationError(msg, statement.location) from error
+        with declaration_context(path, statement.location):
+            self._validate_statement(statement, return_type)
 
     def validate(self, body: FunctionBody) -> None:
         scope = self.resolver.scope
+        references = self.resolver.context.references
+        owner = references.display_class_path(scope.class_path)
+        function_path = f"{owner}.{scope.function.name}"
 
-        # Resolve declared types even if these variables are unused.
-        for declaration in (*scope.function.parameters, *body.function_locals):
-            self.resolver.resolve_declared_type(declaration.type_ref, scope.class_path)
+        with declaration_context(function_path, scope.function.location):
+            # Resolve declared types even when the variables are unused.
+            for declaration in (*scope.function.parameters, *body.function_locals):
+                path = f"{function_path}.{declaration.name}"
 
-        return_type = self.resolver.resolve_declared_type(
-            scope.function.return_type, scope.class_path
-        )
+                with declaration_context(path, declaration.location):
+                    self.resolver.resolve_declared_type(declaration.type_ref, scope.class_path)
 
-        try:
+            return_type = self.resolver.resolve_declared_type(
+                scope.function.return_type, scope.class_path
+            )
+
             for statement in body.statements:
                 self.validate_statement(statement, return_type)
-        except CompilationError as error:
-            msg = f"{scope.class_path}.{scope.function.name} {error}"
-            raise CompilationError(msg) from error
 
     def validate_command_expression(self, expression: Expression) -> None:
         self.validate_expression(expression)
@@ -422,3 +416,47 @@ class FunctionBodyValidator:
                     "default argument conversions are not implemented yet"
                 )
                 raise NotImplementedError(msg)
+
+    def validate_variable_access(
+        self, declaration: ParameterDeclaration | VariableDeclaration, owner: str
+    ) -> None:
+        if not isinstance(declaration, VariableDeclaration):
+            return
+
+        current = self.resolver.scope.class_path
+
+        if (
+            VariableModifier.PRIVATE in declaration.modifiers
+            and current.casefold() != owner.casefold()
+        ):
+            msg = f"Cannot access private variable {owner}.{declaration.name}"
+            raise CompilationError(msg)
+
+        if VariableModifier.PROTECTED in declaration.modifiers and not self.can_access_protected(
+            owner
+        ):
+            msg = f"Cannot access protected variable {owner}.{declaration.name}"
+            raise CompilationError(msg)
+
+    def can_access_protected(self, owner: str) -> bool:
+        references = self.resolver.context.references
+        parents = self.resolver.context.parents
+        packages = self.resolver.context.packages
+        current = self.resolver.scope.class_path
+        visited: set[str] = set()
+
+        while current.casefold() != "core.object":
+            key = current.casefold()
+
+            if key in visited:
+                msg = f"Circular within hierarchy at {current}"
+                raise CompilationError(msg)
+
+            visited.add(key)
+
+            if references.is_subclass(current, owner, parents):
+                return True
+
+            current = references.resolve_within_class(current, parents, packages)
+
+        return references.is_subclass(current, owner, parents)

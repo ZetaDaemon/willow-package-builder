@@ -15,6 +15,64 @@ from willow_package_builder.upackage import (
 )
 
 
+# fmt: off
+class StateFlags(IntFlag):
+    """StateFlags."""
+
+    NONE = 0
+    AUTO = 0x2
+
+
+class ClassFlags(IntFlag):
+    """ClassFlags."""
+
+    NONE                 = 0x0
+
+    ABSTRACT             = 0x1
+    COMPILED             = 0x2
+    CONFIG               = 0x4
+    TRANSIENT            = 0x8
+    PARSED               = 0x10
+    NATIVE               = 0x80
+    NO_EXPORT            = 0x100
+    PLACEABLE            = 0x200
+    PER_OBJECT_CONFIG    = 0x400
+    NATIVE_REPLICATION   = 0x800
+    EDIT_INLINE_NEW      = 0x1000
+    COLLAPSE_CATEGORIES  = 0x2000
+    HAS_INSTANCED_PROPS  = 0x200000
+    PER_OBJECT_LOCALIZED = 0x40000000
+
+
+
+
+class FunctionFlags(IntFlag):
+    """FunctionFlags."""
+
+    NONE = 0x0
+
+    FINAL = 0x1
+    DEFINED = 0x2
+    ITERATOR = 0x4
+    LATENT = 0x8
+    SINGULAR = 0x20
+    NET = 0x40
+    NET_RELIABLE = 0x80
+    SIMULATED = 0x100
+    EXEC = 0x200
+    NATIVE = 0x400
+    STATIC = 0x2000
+    PUBLIC = 0x20000
+    PRIVATE = 0x40000
+    PROTECTED = 0x80000
+    NET_SERVER = 0x200000
+    HAS_OUT_PARAMS = 0x400000
+    NET_CLIENT = 0x1000000
+
+
+# fmt: on
+
+
 @dataclass
 class UFieldPayload(ObjectPayload, ABC):
     """Shared payload data for fields."""
@@ -87,13 +145,6 @@ class UStructPayload(UFieldPayload, ABC):
         )
 
 
-class StateFlags(IntFlag):
-    """StateFlags."""
-
-    NONE = 0
-    AUTO = 0x0002
-
-
 @dataclass
 class UStatePayload(UStructPayload, ABC):
     """Abstract shared payload data for states."""
@@ -125,26 +176,6 @@ class UStatePayload(UStructPayload, ABC):
             )
             + functions
         )
-
-
-class ClassFlags(IntFlag):
-    """ClassFlags."""
-
-    NONE = 0
-
-    ABSTRACT = 0x00000001
-    COMPILED = 0x00000002
-    CONFIG = 0x00000004
-    TRANSIENT = 0x00000008
-    PARSED = 0x00000010
-    NATIVE = 0x00000080
-    NO_EXPORT = 0x00000100
-    PLACEABLE = 0x00000200
-    PER_OBJECT_CONFIG = 0x00000400
-    NATIVE_REPLICATION = 0x00000800
-    EDIT_INLINE_NEW = 0x00001000
-    COLLAPSE_CATEGORIES = 0x00002000
-    PER_OBJECT_LOCALIZED = 0x40000000
 
 
 @dataclass
@@ -216,30 +247,6 @@ class UClassPayload(UStatePayload):
             raise ValueError(msg)
 
         return struct.pack("<i", self.net_index) + self.serialize_body(package)
-
-
-class FunctionFlags(IntFlag):
-    """FunctionFlags."""
-
-    NONE = 0x0
-
-    FINAL = 0x00000001
-    DEFINED = 0x00000002
-    ITERATOR = 0x00000004
-    LATENT = 0x00000008
-    SINGULAR = 0x00000020
-    NET = 0x00000040
-    NET_RELIABLE = 0x00000080
-    SIMULATED = 0x00000100
-    EXEC = 0x00000200
-    NATIVE = 0x00000400
-    STATIC = 0x00002000
-    PUBLIC = 0x00020000
-    PRIVATE = 0x00040000
-    PROTECTED = 0x00080000
-    NET_SERVER = 0x00200000
-    HAS_OUT_PARAMS = 0x00400000
-    NET_CLIENT = 0x01000000
 
 
 @dataclass

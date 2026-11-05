@@ -15,10 +15,11 @@ from willow_package_builder.compiler.syntax.modifiers import (
     ClassModifierName,
     FunctionModifier,
     ParameterModifier,
+    StateModifier,
     StructModifier,
 )
 from willow_package_builder.compiler.syntax.parser.defaults_parser import DefaultsParser
-from willow_package_builder.logging import CompilationError, WarningCode, warn
+from willow_package_builder.logging import CompilationError, SourceLocation, WarningCode, warn
 
 from .declaration_syntax_parser import DeclarationSyntaxParser
 
@@ -76,7 +77,14 @@ class DeclarationParser(DeclarationSyntaxParser):
 
             modifiers.append(ClassModifier(modifier_name, arguments))
 
-        return ClassDeclaration(name, parent, is_interface, within, tuple(modifiers))
+        return ClassDeclaration(
+            name,
+            parent,
+            is_interface,
+            within,
+            tuple(modifiers),
+            location=SourceLocation(token.line, token.column),
+        )
 
     def parse_constant_declaration(self) -> ConstantDeclaration:
         self.expect("const")
@@ -119,7 +127,9 @@ class DeclarationParser(DeclarationSyntaxParser):
 
         return ConstantDeclaration(name, tuple(value_tokens))
 
-    def parse_enum_declaration(self, *, warn_explicit_sentinel: bool = True) -> EnumDeclaration:
+    def parse_enum_declaration(
+        self, *, warn_explicit_sentinel: bool = True, allow_duplicate_members: bool = False
+    ) -> EnumDeclaration:
         self.expect("enum")
         name = self.expect_identifier().text
         opening = self.expect("{")
@@ -137,7 +147,7 @@ class DeclarationParser(DeclarationSyntaxParser):
             member = self.expect_identifier()
             key = member.text.casefold()
 
-            if key in seen:
+            if key in seen and not allow_duplicate_members:
                 msg = f"Duplicate enum member {member.text!r} at {member.line}:{member.column}"
                 raise CompilationError(msg)
 
@@ -169,8 +179,8 @@ class DeclarationParser(DeclarationSyntaxParser):
 
         return EnumDeclaration(name, tuple(members))
 
-    def parse_struct_declaration(self) -> StructDeclaration:
-        self.expect("struct")
+    def parse_struct_declaration(self, *, reference_only: bool = False) -> StructDeclaration:
+        start = self.expect("struct")
 
         modifiers: list[StructModifier] = []
 
@@ -183,7 +193,9 @@ class DeclarationParser(DeclarationSyntaxParser):
         if self.match("extends"):
             parent = self.parse_qualified_name()
 
-        declaration = StructDeclaration(name, parent, tuple(modifiers))
+        declaration = StructDeclaration(
+            name, parent, tuple(modifiers), location=SourceLocation(start.line, start.column)
+        )
 
         opening = self.expect("{")
 
@@ -209,9 +221,7 @@ class DeclarationParser(DeclarationSyntaxParser):
 
                 self.advance()
                 declaration.default_tokens = self.parse_braced_tokens()
-                declaration.parsed_defaults = DefaultsParser.from_default_tokens(
-                    declaration.default_tokens
-                ).parse_defaults()
+                self.parse_declared_defaults(declaration, reference_only=reference_only)
                 continue
 
             msg = f"Unsupported struct member {token.text!r} at {token.line}:{token.column}"
@@ -300,13 +310,24 @@ class DeclarationParser(DeclarationSyntaxParser):
                 modifiers.append(modifier)
 
             type_ref = self.parse_type()
-            name = self.expect_identifier().text
+            name_token = self.expect_identifier()
+            name = name_token.text
+            array_dimension, array_dimension_name = self.parse_array_dimension()
+
             default_tokens = None
             if self.match("="):
                 default_tokens = self.parse_parameter_default()
 
             parameters.append(
-                ParameterDeclaration(name, type_ref, tuple(modifiers), default_tokens)
+                ParameterDeclaration(
+                    name,
+                    type_ref,
+                    tuple(modifiers),
+                    default_tokens,
+                    array_dimension,
+                    array_dimension_name,
+                    location=SourceLocation(name_token.line, name_token.column),
+                )
             )
 
             if self.match(")"):
@@ -317,6 +338,7 @@ class DeclarationParser(DeclarationSyntaxParser):
     def parse_operator_declaration(self, *, include_body_tokens: bool) -> OperatorDeclaration:
         modifiers: list[FunctionModifier] = []
         native_index = None
+        start = self.peek()
 
         while self.peek().text.casefold() in FunctionModifier:
             token = self.advance()
@@ -362,7 +384,14 @@ class DeclarationParser(DeclarationSyntaxParser):
             raise CompilationError(msg)
 
         declaration = OperatorDeclaration(
-            name, category, return_type, parameters, native_index, precedence, tuple(modifiers)
+            name,
+            category,
+            return_type,
+            parameters,
+            native_index,
+            precedence,
+            tuple(modifiers),
+            location=SourceLocation(start.line, start.column),
         )
 
         if self.match(";"):
@@ -400,6 +429,8 @@ class DeclarationParser(DeclarationSyntaxParser):
     def parse_function_header(self) -> FunctionDeclaration:
         modifiers: list[FunctionModifier] = []
         native_index = None
+
+        start = self.peek()
 
         while self.peek().text.casefold() in FunctionModifier:
             token = self.advance()
@@ -442,7 +473,13 @@ class DeclarationParser(DeclarationSyntaxParser):
         parameters = self.parse_parameters()
 
         return FunctionDeclaration(
-            name, return_type, parameters, category, tuple(modifiers), native_index
+            name,
+            return_type,
+            parameters,
+            category,
+            tuple(modifiers),
+            native_index,
+            location=SourceLocation(start.line, start.column),
         )
 
     def parse_function_declaration(self, *, include_body_tokens: bool) -> FunctionDeclaration:
@@ -499,12 +536,17 @@ class DeclarationParser(DeclarationSyntaxParser):
 
             if keyword == "enum":
                 declaration.enums.append(
-                    self.parse_enum_declaration(warn_explicit_sentinel=include_body_tokens)
+                    self.parse_enum_declaration(
+                        warn_explicit_sentinel=include_body_tokens,
+                        allow_duplicate_members=not include_body_tokens,
+                    )
                 )
                 continue
 
             if keyword == "struct":
-                declaration.structs.append(self.parse_struct_declaration())
+                declaration.structs.append(
+                    self.parse_struct_declaration(reference_only=not include_body_tokens)
+                )
                 continue
 
             if keyword == "var":
@@ -518,9 +560,30 @@ class DeclarationParser(DeclarationSyntaxParser):
 
                 self.advance()
                 declaration.default_tokens = self.parse_braced_tokens()
-                declaration.parsed_defaults = DefaultsParser.from_default_tokens(
-                    declaration.default_tokens
-                ).parse_defaults()
+                self.parse_declared_defaults(declaration, reference_only=not include_body_tokens)
+                continue
+
+            if keyword == "replication":
+                if include_body_tokens:
+                    msg = (
+                        f"Replication blocks are not implemented in "
+                        f"{declaration.name} at {token.line}:{token.column}"
+                    )
+                    raise NotImplementedError(msg)
+
+                self.advance()
+                self.parse_braced_tokens()
+                continue
+
+            if self.is_state_start():
+                if include_body_tokens:
+                    msg = (
+                        f"State compilation is not implemented in "
+                        f"{declaration.name} at {token.line}:{token.column}"
+                    )
+                    raise NotImplementedError(msg)
+
+                self.skip_state_declaration()
                 continue
 
             # Check operators before functions: both can begin with native.
@@ -540,3 +603,50 @@ class DeclarationParser(DeclarationSyntaxParser):
             raise CompilationError(msg)
 
         return declaration
+
+    def is_state_start(self) -> bool:
+        offset = 0
+
+        while self.peek(offset).text.casefold() in StateModifier:
+            offset += 1
+
+        return self.peek(offset).text.casefold() == "state"
+
+    def skip_state_declaration(self) -> None:
+        while self.peek().text.casefold() in StateModifier:
+            self.advance()
+
+        self.expect("state")
+
+        if self.peek().text == "(":
+            self.parse_parenthesized_tokens()
+
+        self.expect_identifier()
+
+        if self.match("extends"):
+            self.expect_identifier()
+
+        self.parse_braced_tokens()
+
+    def parse_declared_defaults(
+        self, declaration: ClassDeclaration | StructDeclaration, *, reference_only: bool
+    ) -> None:
+        tokens = declaration.default_tokens
+
+        if tokens is None:
+            msg = "Default tokens have not been captured"
+            raise ValueError(msg)
+
+        parser = DefaultsParser.from_default_tokens(tokens)
+
+        try:
+            parsed = parser.parse_defaults(skip_object_definitions=reference_only)
+        except CompilationError as error:
+            if not reference_only:
+                raise
+
+            declaration.parsed_defaults = {}
+            declaration.default_parse_error = str(error)
+        else:
+            declaration.parsed_defaults = parsed
+            declaration.default_parse_error = None

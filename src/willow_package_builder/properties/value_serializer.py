@@ -9,6 +9,7 @@ from willow_package_builder.compiler.semantics.intrinsics import (
 )
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.modifiers import StructModifier, VariableModifier
+from willow_package_builder.logging import ObjectDefinitionError
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.properties.property_tags import PropertyTag
 
@@ -16,6 +17,7 @@ from .values import (
     ArrayValue,
     BoolValue,
     ByteValue,
+    DelegateValue,
     EnumValue,
     FloatValue,
     IntValue,
@@ -52,6 +54,7 @@ PROPERTY_TAG_NAMES: dict[TypeCategory, PropertyTag] = {
     TypeCategory.CLASS: PropertyTag.OBJECT,
     TypeCategory.ARRAY: PropertyTag.ARRAY,
     TypeCategory.STRUCT: PropertyTag.STRUCT,
+    TypeCategory.DELEGATE: PropertyTag.DELEGATE,
 }
 
 
@@ -148,7 +151,11 @@ class ValueSerializer:
                     msg = f"Struct property {name} has no struct type"
                     raise ValueError(msg)
 
-                struct_name = FName(value.struct_path.rsplit(".", 1)[-1])
+                owner_class, _, lookup_name = value.struct_path.rpartition(".")
+                member = self.context.references.resolve_struct(
+                    owner_class, lookup_name, self.context.parents
+                )
+                struct_name = FName(member.declaration.name)
                 metadata = struct_name.serialize(self.package)
                 data = self.serialize_value(value, resolved_type)
 
@@ -205,10 +212,6 @@ class ValueSerializer:
         binary = False
 
         for _, declaration in hierarchy:
-            if StructModifier.NATIVE in declaration.modifiers:
-                msg = f"Native struct serialization is not implemented: {path}"
-                raise NotImplementedError(msg)
-
             binary |= requires_binary_struct(declaration, self.package.flags)
 
         if binary:
@@ -321,8 +324,10 @@ class ValueSerializer:
             self.validate_object_reference(value, target, resolved_type)
             return target.reference().serialize(self.package)
 
-        msg = f"Object reference target is not registered: {value.path}"
-        raise ValueError(msg)
+        reference = self.import_external_object(value)
+        target = self.package.lookup_object_by_path(reference)
+        self.validate_object_reference(value, target, resolved_type)
+        return reference.serialize(self.package)
 
     def serialize_value(self, value: Value, resolved_type: ResolvedType) -> bytes:
         """Serialize raw value data without a property tag."""
@@ -363,6 +368,9 @@ class ValueSerializer:
 
             case ObjectValue():
                 return self.serialize_object_reference(value, resolved_type)
+
+            case DelegateValue(target=target, function_name=function_name):
+                return target.serialize(self.package) + function_name.serialize(self.package)
 
             case _:
                 msg = f"Raw serialization for {type(value).__name__} is not implemented"
@@ -420,3 +428,62 @@ class ValueSerializer:
                 f"which does not extend annotation {annotation}"
             )
             raise ValueError(msg)
+
+    def import_external_object(self, value: ObjectValue) -> ReferencePath:
+        """Import an external object, assuming unknown nested outers are Objects."""
+        path = value.path.replace(":", ".")
+        segments = path.split(".")
+
+        if len(segments) < 2 or any(not segment for segment in segments):
+            msg = f"External object reference requires a full path: {value.path}"
+            raise ValueError(msg)
+
+        package_name, *nested_names, object_name = segments
+
+        package_reference = ReferencePath(package_name)
+
+        try:
+            existing_package = self.package.lookup_object_by_path(package_reference)
+        except KeyError:
+            existing_package = None
+
+        if isinstance(existing_package, UObject):
+            msg = (
+                f"Unknown object reference {value.path!r}; "
+                f"package {package_name!r} is defined in this build"
+            )
+            raise ObjectDefinitionError(msg)
+
+        outer = self.package.ensure_import(package_name, ReferencePath(), "Core", "Package")
+
+        for name in nested_names:
+            reference = outer + FName(name)
+
+            try:
+                existing = self.package.lookup_object_by_path(reference)
+            except KeyError:
+                outer = self.package.ensure_import(name, outer, "Core", "Object")
+            else:
+                # Preserve class information for already registered outers.
+                outer = existing.reference()
+
+        package_key, separator, _ = value.class_name.partition(".")
+
+        if not separator:
+            msg = f"External reference class is not qualified: {value.class_name}"
+            raise ValueError(msg)
+
+        definition = self.context.references.lookup_class(value.class_name)
+
+        if isinstance(definition, IntrinsicDefinition):
+            class_package, _, class_name = definition.path.partition(".")
+        else:
+            config = next(
+                config
+                for config in self.context.packages
+                if config.name.casefold() == package_key.casefold()
+            )
+            class_package = config.name
+            class_name = definition.name
+
+        return self.package.ensure_import(object_name, outer, class_package, class_name)

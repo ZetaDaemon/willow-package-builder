@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from willow_package_builder.logging import SourceLocation
 from willow_package_builder.properties.values import Value
 from willow_package_builder.upackage import FName
 
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
 
     from .lexer import Token
     from .modifiers import FunctionModifier
+
+MAX_FIXED_ARRAY_DIMENSION = 2048
 
 
 class OperatorCategory(StrEnum):
@@ -45,6 +48,7 @@ class EnumDeclaration:
 class TypeReference:
     name: str
     arguments: tuple[TypeReference, ...] = ()
+    modifiers: tuple[VariableModifier, ...] = ()
 
 
 @dataclass
@@ -54,6 +58,9 @@ class VariableDeclaration:
     array_dimension: int = 1
     modifiers: tuple[VariableModifier, ...] = ()
     category_tokens: tuple[Token, ...] | None = None
+    array_dimension_name: str | None = field(default=None)
+
+    location: SourceLocation | None = field(default=None, compare=False, repr=False, kw_only=True)
 
 
 @dataclass
@@ -62,6 +69,10 @@ class ParameterDeclaration:
     type_ref: TypeReference
     modifiers: tuple[ParameterModifier, ...] = ()
     default_tokens: tuple[Token, ...] | None = None
+    array_dimension: int = 1
+    array_dimension_name: str | None = field(default=None)
+
+    location: SourceLocation | None = field(default=None, compare=False, repr=False, kw_only=True)
 
 
 @dataclass
@@ -77,6 +88,8 @@ class OperatorDeclaration:
     has_body: bool = False
     body_tokens: list[Token] | None = None
 
+    location: SourceLocation | None = field(default=None, compare=False, repr=False, kw_only=True)
+
 
 @dataclass
 class FunctionDeclaration:
@@ -90,6 +103,8 @@ class FunctionDeclaration:
 
     has_body: bool = False
     body_tokens: list[Token] | None = None
+
+    location: SourceLocation | None = field(default=None, compare=False, repr=False, kw_only=True)
 
 
 @dataclass
@@ -108,6 +123,9 @@ class StructDeclaration:
     default_tokens: tuple[Token, ...] | None = None
     parsed_defaults: dict[str, object] = field(default_factory=dict)
     defaults: dict[FName, Value] = field(default_factory=dict)
+
+    default_parse_error: str | None = None
+    location: SourceLocation | None = field(default=None, compare=False, repr=False, kw_only=True)
 
 
 @dataclass
@@ -129,3 +147,6 @@ class ClassDeclaration:
     default_tokens: tuple[Token, ...] | None = None
     parsed_defaults: dict[str, object] = field(default_factory=dict)
     defaults: dict[FName, Value] = field(default_factory=dict)
+
+    default_parse_error: str | None = None
+    location: SourceLocation | None = field(default=None, compare=False, repr=False, kw_only=True)

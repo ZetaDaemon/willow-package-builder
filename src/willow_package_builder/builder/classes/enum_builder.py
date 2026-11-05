@@ -35,7 +35,7 @@ class EnumBuilder(BuildComponent):
 
                 obj = UObject(
                     FName(declaration.name),
-                    ObjectFlags.DEFAULT_EXPORT,
+                    ObjectFlags.PUBLIC_EXPORT,
                     exports.class_object.reference(),
                     enum_class,
                     payload=payload,
@@ -74,15 +74,39 @@ class EnumBuilder(BuildComponent):
                     msg = f"Expected enum {canonical_path}, got {value.enum_name}"
                     raise ValueError(msg)
 
-                member_name = str(value.member_name)
+                if not 0 <= value.index < len(declaration.members):
+                    msg = f"Invalid index {value.index} for enum {canonical_path}"
+                    raise ValueError(msg)
+
+                member = declaration.members[value.index]
+
+                if FName(member) != value.member_name:
+                    msg = f"Enum member does not match index {value.index} in {canonical_path}"
+                    raise ValueError(msg)
+
+                return EnumValue(FName(declaration.name), FName(member), value.index)
 
             case _:
                 msg = f"Expected a member of {canonical_path}, got {type(value).__name__}"
                 raise ValueError(msg)
 
-        for index, member in enumerate(declaration.members):
-            if member.casefold() == member_name.casefold():
-                return EnumValue(FName(declaration.name), FName(member), index)
+        matches = [
+            (index, member)
+            for index, member in enumerate(declaration.members)
+            if member.casefold() == member_name.casefold()
+        ]
+
+        if len(matches) > 1:
+            indices = ", ".join(str(index) for index, _ in matches)
+            msg = (
+                f"Ambiguous member {member_name!r} of enum {canonical_path}; "
+                f"it occurs at indices {indices}"
+            )
+            raise ValueError(msg)
+
+        if matches:
+            index, member = matches[0]
+            return EnumValue(FName(declaration.name), FName(member), index)
 
         msg = f"Unknown member {member_name!r} of enum {canonical_path}"
         raise ValueError(msg)

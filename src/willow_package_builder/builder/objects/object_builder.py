@@ -7,7 +7,11 @@ from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.logging import ValueBuildError, info
 from willow_package_builder.logging.diagnostics import ObjectDefinitionError
-from willow_package_builder.objects.declarations import FolderDeclaration, ObjectDeclaration
+from willow_package_builder.objects.declarations import (
+    FolderDeclaration,
+    ObjectDeclaration,
+    ObjectFlag,
+)
 from willow_package_builder.objects.reader import walk_objects_directory
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.instance_payload import ObjectInstancePayload
@@ -42,6 +46,11 @@ class ObjectBuilder(BuildComponent):
             return
 
         self.declarations = walk_objects_directory(directory)
+        for declaration in self.declarations:
+            if isinstance(declaration, ObjectDeclaration) and isinstance(
+                declaration.outer, FolderDeclaration
+            ):
+                declaration.flags |= {ObjectFlag.PUBLIC, ObjectFlag.KEEP_ALIVE}
 
     def construct_objects(self) -> None:
         visible = collect_visible_packages(self.config, self.context.packages)
@@ -53,9 +62,11 @@ class ObjectBuilder(BuildComponent):
                 outer = self.exports[declaration.outer].reference()
 
             export_flags = ExportFlags.NONE
+            flags = ObjectFlags.DEFAULT_EXPORT
 
             match declaration:
                 case FolderDeclaration():
+                    flags |= ObjectFlags.PUBLIC
                     class_path = "Core.Package"
                     object_class = self.references.class_object_reference(class_path)
                     archetype = ReferencePath()
@@ -64,6 +75,9 @@ class ObjectBuilder(BuildComponent):
                         export_flags = ExportFlags.FORCED_EXPORT
 
                 case ObjectDeclaration():
+                    if ObjectFlag.PUBLIC in declaration.flags:
+                        flags |= ObjectFlags.PUBLIC
+
                     if declaration.outer is None:
                         msg = (
                             f"{declaration.source}, document {declaration.document}: "
@@ -85,14 +99,15 @@ class ObjectBuilder(BuildComponent):
                 object_class,
                 FName(declaration.name),
                 outer,
-                ObjectFlags.DEFAULT_EXPORT,
+                flags,
                 archetype,
                 export_flags,
             )
             self.exports[declaration] = obj
 
             if isinstance(declaration, ObjectDeclaration):
-                info(f"Building object {obj.object_class}'{obj.reference()}'")
+                class_name = str(obj.object_class).rsplit(".", 1)[-1]
+                info(f"Building object {class_name}'{obj.reference()}'")
 
     def property_default_value(self, class_path: str, name: FName) -> Value:
         member = self.context.references.resolve_variable(

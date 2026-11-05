@@ -3,8 +3,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from willow_package_builder.compiler.syntax.declarations import (
+    MAX_FIXED_ARRAY_DIMENSION,
     ClassDeclaration,
     EnumDeclaration,
+    FunctionCategory,
     FunctionDeclaration,
     OperatorCategory,
     OperatorDeclaration,
@@ -12,7 +14,11 @@ from willow_package_builder.compiler.syntax.declarations import (
     TypeReference,
     VariableDeclaration,
 )
-from willow_package_builder.logging import CompilationError
+from willow_package_builder.logging import (
+    CompilationError,
+    UnknownPropertyError,
+    declaration_context,
+)
 from willow_package_builder.package_config import PackageConfig, collect_visible_packages
 
 from .intrinsics import INTRINSICS, PROPERTY_CLASS_PATHS, IntrinsicDefinition
@@ -46,6 +52,12 @@ class ReferenceDatabase:
     operators: dict[str, list[OperatorDeclaration]] = field(default_factory=dict)
     intrinsics: dict[str, IntrinsicDefinition] = field(default_factory=lambda: dict(INTRINSICS))
 
+    _class_paths: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _parent_cache: dict[str, str | None] | None = field(default=None, init=False, repr=False)
+    _parent_cache_packages: tuple[PackageConfig, ...] | None = field(
+        default=None, init=False, repr=False
+    )
+
     def add_class(self, package_name: str, declaration: ClassDeclaration) -> None:
         path = f"{package_name}.{declaration.name}"
         key = path.casefold()
@@ -60,6 +72,9 @@ class ReferenceDatabase:
                 raise CompilationError(msg)
 
         self.classes[key] = declaration
+        self._class_paths[key] = path
+        self._parent_cache = None
+        self._parent_cache_packages = None
 
         for operator in declaration.operators:
             operator_key = operator.name.casefold()
@@ -141,29 +156,35 @@ class ReferenceDatabase:
         return path, self.classes[path]
 
     def resolve_parent_classes(self, packages: tuple[PackageConfig, ...]) -> dict[str, str | None]:
-        configs = {config.name.casefold(): config for config in packages}
+        if self._parent_cache is not None and self._parent_cache_packages == packages:
+            return self._parent_cache.copy()
 
+        configs = {config.name.casefold(): config for config in packages}
         visibility = {
             name: collect_visible_packages(config, packages) for name, config in configs.items()
         }
-
         parents: dict[str, str | None] = {}
 
         for class_path, declaration in self.classes.items():
             package_key = class_path.partition(".")[0]
             config = configs[package_key]
-
             parent_name = self.parent_class_name(class_path, declaration)
 
             if parent_name is None:
                 parents[class_path] = None
                 continue
 
-            parent_path, _ = self.resolve_class(parent_name, config.name, visibility[package_key])
+            display_path = self.display_class_path(class_path)
 
-            parents[class_path] = parent_path
+            with declaration_context(display_path, declaration.location):
+                parent_path, _ = self.resolve_class(
+                    parent_name, config.name, visibility[package_key]
+                )
+                parents[class_path] = parent_path
 
-        return parents
+        self._parent_cache = parents
+        self._parent_cache_packages = packages
+        return parents.copy()
 
     def inheritance_order(self, parents: Mapping[str, str | None]) -> tuple[str, ...]:
         ordered: list[str] = []
@@ -239,8 +260,9 @@ class ReferenceDatabase:
                 if variable.name.casefold() == key:
                     return ResolvedMember(owner, variable)
 
-        msg = f"Unknown variable {name!r} on {class_path}"
-        raise CompilationError(msg)
+        display_path = self.display_class_path(class_path)
+        msg = f"Unknown variable {name!r} on {display_path}"
+        raise UnknownPropertyError(msg)
 
     def resolve_function(
         self, class_path: str, name: str, parents: Mapping[str, str | None]
@@ -268,6 +290,39 @@ class ReferenceDatabase:
             return ResolvedType(TypeCategory.VOID)
 
         name = type_ref.name.casefold()
+
+        if name == "delegate":
+            if len(type_ref.arguments) != 1:
+                msg = "delegate requires exactly one signature"
+                raise CompilationError(msg)
+
+            signature = type_ref.arguments[0]
+
+            if signature.arguments or signature.modifiers:
+                msg = "Delegate signature must be a function name"
+                raise CompilationError(msg)
+
+            owner_name, separator, function_name = signature.name.rpartition(".")
+
+            if separator:
+                owner_path, _ = self.resolve_class(owner_name, current_package, visible_packages)
+            else:
+                owner_path = current_class
+                function_name = signature.name
+
+            member = self.resolve_function(owner_path, function_name, parents)
+
+            if member.declaration.func_category is not FunctionCategory.DELEGATE:
+                owner = self.display_class_path(member.owner_class)
+                msg = f"{owner}.{member.declaration.name} is not a delegate declaration"
+                raise CompilationError(msg)
+
+            path = f"{member.owner_class}.{member.declaration.name}".casefold()
+            return ResolvedType(TypeCategory.DELEGATE, path)
+
+        if name == "map":
+            msg = "Native map type resolution is not implemented"
+            raise NotImplementedError(msg)
 
         if name == "array":
             if len(type_ref.arguments) != 1:
@@ -311,7 +366,14 @@ class ReferenceDatabase:
             if member_type is not None:
                 return member_type
 
-        elif name not in self.classes:
+            member_type = self.find_visible_member_type(
+                type_ref.name, current_package, visible_packages
+            )
+
+            if member_type is not None:
+                return member_type
+
+        elif name not in self.classes and name not in self.intrinsics:
             # Examples: Object.Vector or Core.Object.Vector.
             owner_name, _, member_name = type_ref.name.rpartition(".")
 
@@ -325,7 +387,9 @@ class ReferenceDatabase:
 
             return member_type
 
-        class_path, _ = self.resolve_class(type_ref.name, current_package, visible_packages)
+        class_path = self.resolve_class_path(
+            type_ref.name, current_package, visible_packages, include_intrinsics=True
+        )
 
         return ResolvedType(TypeCategory.OBJECT, class_path)
 
@@ -434,7 +498,7 @@ class ReferenceDatabase:
         path = PROPERTY_CLASS_PATHS.get(resolved.category)
 
         if path is None:
-            msg = f"Type {resolved!r} cannot be represented as a property"
+            msg = f"Type {resolved} cannot be represented as a property"
             raise CompilationError(msg)
 
         return self.intrinsics[path.casefold()]
@@ -520,8 +584,9 @@ class ReferenceDatabase:
 
             current = parent.declaration_path.casefold()
 
-        msg = f"Unknown field {name!r} on struct {struct_path}"
-        raise CompilationError(msg)
+        display_path = self.display_type_path(struct_path, parents)
+        msg = f"Unknown field {name!r} on struct {display_path}"
+        raise UnknownPropertyError(msg)
 
     def struct_hierarchy(
         self,
@@ -603,3 +668,156 @@ class ReferenceDatabase:
                 current = parents[key]
 
         return False
+
+    def resolve_within_class(
+        self, class_path: str, parents: Mapping[str, str | None], packages: Iterable[PackageConfig]
+    ) -> str:
+        configs = {config.name.casefold(): config for config in packages}
+        package_list = tuple(configs.values())
+
+        for owner, declaration in self.iter_class_hierarchy(class_path, parents):
+            if declaration.within is None:
+                continue
+
+            config = configs[owner.partition(".")[0].casefold()]
+            visible = collect_visible_packages(config, package_list)
+
+            return self.resolve_class_path(
+                declaration.within, config.name, visible, include_intrinsics=True
+            )
+
+        return "core.object"
+
+    def find_visible_member_type(
+        self, name: str, current_package: str, visible_packages: set[str]
+    ) -> ResolvedType | None:
+        key = name.casefold()
+        package_key = current_package.casefold()
+        allowed = {package_key, *(p.casefold() for p in visible_packages)}
+        candidates: list[ResolvedType] = []
+
+        for owner, declaration in self.classes.items():
+            if owner.partition(".")[0].casefold() not in allowed:
+                continue
+
+            candidates.extend(
+                [
+                    ResolvedType(TypeCategory.STRUCT, f"{owner}.{struct.name}".casefold())
+                    for struct in declaration.structs
+                    if struct.name.casefold() == key
+                ]
+            )
+
+            candidates.extend(
+                [
+                    ResolvedType(TypeCategory.ENUM, f"{owner}.{enum.name}".casefold())
+                    for enum in declaration.enums
+                    if enum.name.casefold() == key
+                ]
+            )
+
+        local = [
+            candidate
+            for candidate in candidates
+            if candidate.declaration_path is not None
+            and candidate.declaration_path.partition(".")[0] == package_key
+        ]
+        candidates = local or candidates
+
+        if len(candidates) > 1:
+            paths = ", ".join(str(candidate.declaration_path) for candidate in candidates)
+            msg = f"Ambiguous struct or enum {name!r}: {paths}"
+            raise CompilationError(msg)
+
+        return candidates[0] if candidates else None
+
+    def display_class_path(self, class_path: str) -> str:
+        key = class_path.casefold()
+
+        if key in self._class_paths:
+            return self._class_paths[key]
+
+        intrinsic = self.intrinsics.get(key)
+
+        if intrinsic is not None:
+            return intrinsic.path
+
+        return class_path
+
+    def display_type_path(self, path: str, parents: Mapping[str, str | None]) -> str:
+        """Format a class, struct, or enum path using declaration spelling."""
+        key = path.casefold()
+
+        if key in self.classes or key in self.intrinsics:
+            return self.display_class_path(path)
+
+        owner, separator, member_name = path.rpartition(".")
+
+        if not separator:
+            return path
+
+        current: str | None = owner.casefold()
+        visited: set[str] = set()
+
+        while current is not None and current not in visited:
+            visited.add(current)
+            declaration = self.classes.get(current)
+
+            if declaration is None:
+                break
+
+            for member in (*declaration.structs, *declaration.enums):
+                if member.name.casefold() == member_name.casefold():
+                    return f"{self.display_class_path(current)}.{member.name}"
+
+            current = parents.get(current)
+
+            if current is not None:
+                current = current.casefold()
+
+        return f"{self.display_class_path(owner)}.{member_name}"
+
+    def display_type(self, resolved: ResolvedType, parents: Mapping[str, str | None]) -> str:
+        """Format a resolved type for diagnostics."""
+        if resolved.declaration_path is not None:
+            name = self.display_type_path(resolved.declaration_path, parents)
+        else:
+            name = resolved.category.value
+
+        if resolved.arguments:
+            arguments = ", ".join(
+                self.display_type(argument, parents) for argument in resolved.arguments
+            )
+            return f"{name}<{arguments}>"
+
+        return name
+
+    def resolve_array_dimension(
+        self,
+        name: str,
+        current_class: str,
+        visible_packages: set[str],
+        parents: Mapping[str, str | None],
+    ) -> int:
+        resolved = self.resolve_type(TypeReference(name), current_class, visible_packages, parents)
+
+        if resolved.category is not TypeCategory.ENUM:
+            msg = f"Resolving non-enum array dimension {name!r} is not implemented"
+            raise NotImplementedError(msg)
+
+        if resolved.declaration_path is None:
+            msg = "Resolved array dimension enum has no declaration path"
+            raise ValueError(msg)
+
+        owner, _, enum_name = resolved.declaration_path.rpartition(".")
+        member = self.resolve_enum(owner, enum_name, parents)
+        dimension = len(member.declaration.members)
+
+        if not 1 < dimension <= MAX_FIXED_ARRAY_DIMENSION:
+            msg = (
+                f"Array dimension {name!r} resolves to {dimension}; "
+                f"expected 2 through {MAX_FIXED_ARRAY_DIMENSION}"
+            )
+            raise CompilationError(msg)
+
+        return dimension

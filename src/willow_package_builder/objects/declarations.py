@@ -1,5 +1,13 @@
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
+
+
+class ObjectFlag(StrEnum):
+    """Optional flags supported by object definitions."""
+
+    PUBLIC = "PUBLIC"
+    KEEP_ALIVE = "KEEP_ALIVE"
 
 
 @dataclass(eq=False)
@@ -19,3 +27,4 @@ class ObjectDeclaration:
     source: Path
     document: int
     children: list[FolderDeclaration | ObjectDeclaration] = field(default_factory=list)
+    flags: frozenset[ObjectFlag] = field(default_factory=frozenset)

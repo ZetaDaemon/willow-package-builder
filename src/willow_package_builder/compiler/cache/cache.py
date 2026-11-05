@@ -6,6 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from willow_package_builder.compiler.source import decode_source
 from willow_package_builder.compiler.syntax.declarations import (
     ClassDeclaration,
     ClassModifier,
@@ -34,6 +35,7 @@ from willow_package_builder.logging import CompilationError, SourceLocation, inf
 from willow_package_builder.properties.values import (
     ArrayValue,
     BoolValue,
+    DelegateValue,
     EmptyValue,
     EnumValue,
     FloatValue,
@@ -45,7 +47,7 @@ from willow_package_builder.properties.values import (
     StringValue,
     StructValue,
 )
-from willow_package_builder.upackage import FName, Name
+from willow_package_builder.upackage import FName, Name, ReferencePath
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,8 +55,8 @@ if TYPE_CHECKING:
     from willow_package_builder.package_config import PackageConfig
 
 
-CLASS_CACHE_SCHEMA_VERSION = 9
-DECLARATION_PARSER_VERSION = 6
+CLASS_CACHE_SCHEMA_VERSION = 15
+DECLARATION_PARSER_VERSION = 13
 
 
 @dataclass
@@ -103,6 +105,8 @@ CACHE_TYPES: dict[str, Callable[..., object]] = {
         FName,
         Name,
         IndexedArrayDefaults,
+        DelegateValue,
+        ReferencePath,
     )
 }
 
@@ -297,15 +301,16 @@ def load_or_parse_class(
         info(f"Parsing class {config.name}.{source_path.stem}")
     else:
         info(f"Parsing reference class {config.name}.{source_path.stem}")
-    source = source_bytes.decode("utf-8-sig")
+    source = decode_source(source_bytes, source_path)
 
     try:
         declaration = DeclarationParser(Lexer(source).tokenize()).parse_class_declaration(
             include_body_tokens=include_body_tokens
         )
-    except CompilationError as exc:
-        msg = f"{source_path}: {exc}"
-        raise CompilationError(msg) from exc
+    except CompilationError as error:
+        if error.context is None:
+            error.context = str(source_path)
+        raise
 
     cached = CachedClass(
         config.name,

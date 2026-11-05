@@ -15,6 +15,7 @@ class TypeCategory(StrEnum):
     CLASS = "class"
     STRUCT = "struct"
     ENUM = "enum"
+    DELEGATE = "delegate"
 
 
 @dataclass(frozen=True)

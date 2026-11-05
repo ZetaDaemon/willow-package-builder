@@ -76,3 +76,9 @@ class EnumValue(Value):
     enum_name: FName
     member_name: FName
     index: int
+
+
+@dataclass
+class DelegateValue(Value):
+    target: ReferencePath = field(default_factory=ReferencePath)
+    function_name: FName = field(default_factory=lambda: FName("None"))

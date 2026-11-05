@@ -8,7 +8,7 @@ from yaml.nodes import MappingNode
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.logging.diagnostics import ObjectDefinitionError
 
-from .declarations import FolderDeclaration, ObjectDeclaration
+from .declarations import FolderDeclaration, ObjectDeclaration, ObjectFlag
 
 
 class ObjectLoader(yaml.SafeLoader):
@@ -42,6 +42,25 @@ def object_path(declaration: ObjectDeclaration | FolderDeclaration) -> str:
     return ".".join(reversed(parts))
 
 
+def parse_object_flags(value: object, context: str) -> frozenset[ObjectFlag]:
+    """Parse the supported object flags."""
+    if not isinstance(value, list):
+        msg = f"{context}: Flags must be a list"
+        raise ObjectDefinitionError(msg)
+
+    flags: set[ObjectFlag] = set()
+
+    for item in value:
+        if not isinstance(item, str) or item not in ObjectFlag:
+            supported = ", ".join(flag.value for flag in ObjectFlag)
+            msg = f"{context}: Unknown object flag {item!r}; supported flags: {supported}"
+            raise ObjectDefinitionError(msg)
+
+        flags.add(ObjectFlag(item))
+
+    return frozenset(flags)
+
+
 def read_object_file(
     source: Path, root: ObjectDeclaration | FolderDeclaration | None
 ) -> list[ObjectDeclaration]:
@@ -64,7 +83,7 @@ def read_object_file(
 
                     name = source.stem
                 else:
-                    name = data.get("Name")
+                    name = data.pop("Name", None)
 
                 if not isinstance(name, str) or not name.strip() or "." in name or ":" in name:
                     msg = (
@@ -73,7 +92,7 @@ def read_object_file(
                     )
                     raise ObjectDefinitionError(msg)
 
-                class_name = data.get("Class")
+                class_name = data.pop("Class", None)
                 if not isinstance(class_name, str) or not class_name.strip():
                     msg = f"{context}: Class must be a nonempty string"
                     raise ObjectDefinitionError(msg)
@@ -90,7 +109,7 @@ def read_object_file(
                     outer = primary
 
                     if "Outer" in data:
-                        outer_name = data["Outer"]
+                        outer_name = data.pop("Outer")
 
                         if (
                             not isinstance(outer_name, str)
@@ -146,14 +165,12 @@ def read_object_file(
                     )
                     raise ObjectDefinitionError(msg)
 
-                properties = {
-                    key: value
-                    for key, value in data.items()
-                    if key not in ("Name", "Class", "Outer")
-                }
+                flags = parse_object_flags(data.pop("Flags", []), context)
+
+                properties = data
 
                 declaration = ObjectDeclaration(
-                    name, class_name, outer, properties, source, document
+                    name, class_name, outer, properties, source, document, flags=flags
                 )
 
                 registered[key] = declaration

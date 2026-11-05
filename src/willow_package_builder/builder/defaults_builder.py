@@ -5,8 +5,17 @@ from willow_package_builder.builder.build_component import BuildComponent
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
-from willow_package_builder.logging import CompilationError, ValueBuildError
+from willow_package_builder.logging import (
+    CompilationError,
+    UnknownPropertyError,
+    ValueBuildError,
+    WarningCode,
+    warn,
+)
 from willow_package_builder.package_config import collect_visible_packages
+from willow_package_builder.properties.merge import merge_values
+from willow_package_builder.properties.values import Value
+from willow_package_builder.upackage import FName
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.classes.struct_builder import StructBuilder
@@ -103,21 +112,12 @@ class DefaultsBuilder(BuildComponent):
                 resolved = values.resolve_field_type(variable, member.owner_class)
                 self._prepare_type(resolved)
 
-            visible = collect_visible_packages(values.config, self.context.packages)
-            for supplied_name, raw_value in declaration.parsed_defaults.items():
-                field_member = self.context.references.resolve_struct_variable(
-                    path, supplied_name, self.context.parents, visible
-                )
-                resolved = values.resolve_field_type(
-                    field_member.declaration, field_member.owner_class
-                )
-                self._prepare_field_type(field_member.declaration, resolved, raw_value)
-
             declaration.defaults = {}
+
             if declaration.parsed_defaults:
                 existing = self.struct.make_struct(path)
-                declaration.defaults = values.build_struct_values(
-                    f"Struct defaults {path}", path, declaration.parsed_defaults, existing.values
+                declaration.defaults = self._build_default_assignments(
+                    path, declaration.parsed_defaults, values, existing.values, is_struct=True
                 )
 
             self._completed.add(path)
@@ -151,18 +151,12 @@ class DefaultsBuilder(BuildComponent):
                 resolved = values.resolve_field_type(variable, path)
                 self._prepare_type(resolved)
 
-            for supplied_name, raw_value in declaration.parsed_defaults.items():
-                member = self.context.references.resolve_variable(
-                    path, supplied_name, self.context.parents
-                )
-                resolved = values.resolve_field_type(member.declaration, member.owner_class)
-                self._prepare_field_type(member.declaration, resolved, raw_value)
-
             declaration.defaults = {}
+
             if declaration.parsed_defaults:
                 existing = self.objects.class_default_values(path)
-                declaration.defaults = values.build_class_values(
-                    f"Class defaults {path}", path, declaration.parsed_defaults, existing
+                declaration.defaults = self._build_default_assignments(
+                    path, declaration.parsed_defaults, values, existing, is_struct=False
                 )
 
             self._completed.add(path)
@@ -197,3 +191,55 @@ class DefaultsBuilder(BuildComponent):
                 self._prepare_type(resolved, element)
         else:
             self._prepare_type(resolved, raw_value)
+
+    def _build_default_assignments(
+        self,
+        path: str,
+        properties: dict[str, object],
+        values: ValueBuilder,
+        existing: dict[FName, Value],
+        *,
+        is_struct: bool,
+    ) -> dict[FName, Value]:
+        result: dict[FName, Value] = {}
+        visible = collect_visible_packages(values.config, self.context.packages)
+        display_path = self.context.references.display_type_path(path, self.context.parents)
+        reference_only = values.config.directory not in self.context.build_packages
+
+        for supplied_name, raw_value in properties.items():
+            try:
+                if is_struct:
+                    member = self.context.references.resolve_struct_variable(
+                        path, supplied_name, self.context.parents, visible
+                    )
+                else:
+                    member = self.context.references.resolve_variable(
+                        path, supplied_name, self.context.parents
+                    )
+
+                resolved = values.resolve_field_type(member.declaration, member.owner_class)
+                self._prepare_field_type(member.declaration, resolved, raw_value)
+
+                supplied = {supplied_name: raw_value}
+
+                if is_struct:
+                    built = values.build_struct_values(
+                        f"Struct defaults {display_path}", path, supplied, existing
+                    )
+                else:
+                    built = values.build_class_values(
+                        f"Class defaults {display_path}", path, supplied, existing
+                    )
+
+            except (ValueBuildError, UnknownPropertyError) as error:
+                if not reference_only:
+                    raise
+
+                msg = f"{display_path}: Skipped default for {supplied_name!r}: {error}"
+                warn(WarningCode.INVALID_REFERENCE_DEFAULT, msg)
+                continue
+
+            result.update(built)
+            existing = merge_values(existing, built)
+
+        return result

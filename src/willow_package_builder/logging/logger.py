@@ -2,18 +2,11 @@ import sys
 import traceback
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, TextIO, overload
 
-from .diagnostics import (
-    CompilationError,
-    ConfigError,
-    ObjectDefinitionError,
-    ValueBuildError,
-    WarningAction,
-    WarningCode,
-)
+from .diagnostics import CompilationError, PackageBuilderError, WarningAction, WarningCode
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -29,7 +22,11 @@ class LogPrefix(StrEnum):
 @dataclass
 class Logger:
     log_file: Path
+
+    _: KW_ONLY
+
     debug: bool = False
+    silent_console: bool = False
 
     warning_actions: dict[WarningCode, WarningAction] = field(default_factory=dict)
 
@@ -49,7 +46,8 @@ class Logger:
                 print(f"{prefix} {line}", file=file)
 
     def _log(self, message: str, console_out: TextIO, file_prefix: LogPrefix) -> None:
-        print(message, file=console_out)
+        if not self.silent_console:
+            print(message, file=console_out)
         self._log_to_file(message, file_prefix)
 
     @overload
@@ -89,7 +87,7 @@ class Logger:
 
         try:
             yield
-        except (CompilationError, ConfigError, ObjectDefinitionError, ValueBuildError) as error:
+        except PackageBuilderError as error:
             self._log(f"{type(error).__name__}: {error}", sys.stderr, LogPrefix.ERROR)
             if self.debug:
                 raise

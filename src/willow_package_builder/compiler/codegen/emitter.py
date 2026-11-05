@@ -41,7 +41,7 @@ from willow_package_builder.compiler.syntax.statements import (
     WhileStatement,
 )
 from willow_package_builder.games import get_game
-from willow_package_builder.logging import CompilationError
+from willow_package_builder.logging import CompilationError, declaration_context
 from willow_package_builder.upackage import FName, ReferencePath, UObject
 
 if TYPE_CHECKING:
@@ -475,7 +475,7 @@ class FunctionEmitter:
 
         return script
 
-    def emit_statement(self, statement: Statement) -> Bytecode:
+    def _emit_statement(self, statement: Statement) -> Bytecode:
         """Convert a statement into bytecode."""
         match statement:
             case EmptyStatement():
@@ -511,6 +511,14 @@ class FunctionEmitter:
             case _:
                 msg = f"Unsupported statement type: {type(statement).__name__}"
                 raise TypeError(msg)
+
+    def emit_statement(self, statement: Statement) -> Bytecode:
+        scope = self.resolver.scope
+        owner = self.resolver.context.references.display_class_path(scope.class_path)
+        path = f"{owner}.{scope.function.name}"
+
+        with declaration_context(path, statement.location):
+            return self._emit_statement(statement)
 
     def emit_body(self, function: PreparedFunction) -> Bytecode:
         body = function.body

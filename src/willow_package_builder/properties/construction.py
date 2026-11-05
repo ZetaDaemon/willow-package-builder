@@ -3,6 +3,7 @@ from willow_package_builder.properties.values import (
     ArrayValue,
     BoolValue,
     ByteValue,
+    DelegateValue,
     FloatValue,
     IntValue,
     NameValue,
@@ -37,6 +38,10 @@ def initial_scalar_value(resolved_type: ResolvedType) -> Value:
 
         case TypeCategory.ARRAY:
             return ArrayValue()
+
+        case TypeCategory.DELEGATE:
+            return DelegateValue()
+
         case _:
             msg = f"Initial values for {resolved_type.category.value} are not implemented"
             raise NotImplementedError(msg)

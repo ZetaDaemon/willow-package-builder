@@ -1,5 +1,7 @@
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from time import perf_counter
 
 from willow_package_builder.compiler.class_loader import ClassLoader
 from willow_package_builder.compiler.semantics.reference_database import ReferenceDatabase
@@ -7,7 +9,7 @@ from willow_package_builder.package_config import collect_build_packages, load_p
 
 from .builder.build_context import BuildContext
 from .builder.package_builder import PackageBuilder
-from .logging import CompilationError, Logger, info
+from .logging import CompilationError, Logger, WarningAction, WarningCode, info
 
 __all__ = ["build_package"]
 
@@ -20,11 +22,29 @@ def prepare_build(target_directory: Path) -> BuildContext:
     references = ReferenceDatabase()
     loader = ClassLoader(packages, build_packages, references)
 
-    return BuildContext(packages, build_packages, references, loader)
+    loader.load_declarations()
+
+    context = BuildContext(packages, build_packages, references, loader)
+
+    info("Resolving class hierarchy")
+    start = perf_counter()
+    context.refresh_class_hierarchy()
+    info(
+        f"Resolved hierarchy for {len(context.class_order)} classes "
+        f"in {perf_counter() - start:.3f}s"
+    )
+
+    loader.resolve_dimensions(context.class_order)
+
+    return context
 
 
 def build_package(
-    target_directory: str | Path, output_directory: str | Path | None = None, debug: bool = False
+    target_directory: str | Path,
+    output_directory: str | Path | None = None,
+    debug: bool = False,
+    silent_console: bool = False,
+    warning_actions: Mapping[WarningCode, WarningAction] | None = None,
 ) -> tuple[Path, ...]:
     """Build the target package and its required packages."""
     target_directory = Path(target_directory).resolve()
@@ -32,7 +52,12 @@ def build_package(
         target_directory.parent if output_directory is None else Path(output_directory).resolve()
     )
 
-    logger = Logger(output_directory / "willow-package-builder.log", debug)
+    logger = Logger(
+        target_directory.parent / "willow-package-builder.log",
+        debug=debug,
+        silent_console=silent_console,
+        warning_actions={} if warning_actions is None else dict(warning_actions),
+    )
 
     with logger.catch_errors_and_warnings():
         context = prepare_build(target_directory)

@@ -13,7 +13,7 @@ from willow_package_builder.compiler.syntax.declarations import (
 )
 from willow_package_builder.compiler.syntax.modifiers import FunctionModifier, ParameterModifier
 from willow_package_builder.compiler.syntax.parser import FunctionParser
-from willow_package_builder.logging import CompilationError
+from willow_package_builder.logging import CompilationError, declaration_context
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import (
     FunctionFlags,
@@ -64,18 +64,22 @@ class FunctionBuilder(BuildComponent):
         self, function: FunctionDeclaration, resolver: ExpressionResolver
     ) -> list[Expression | None]:
         defaults: list[Expression | None] = []
+        owner = self.context.references.display_class_path(resolver.scope.class_path)
 
         for parameter in function.parameters:
             if parameter.default_tokens is None:
                 defaults.append(None)
                 continue
 
-            if ParameterModifier.OPTIONAL not in parameter.modifiers:
-                msg = f"Non-optional parameter {parameter.name!r} cannot have a default"
-                raise CompilationError(msg)
+            path = f"{owner}.{function.name}.{parameter.name}"
 
-            parser = FunctionParser.from_tokens(parameter.default_tokens, resolver)
-            defaults.append(parser.parse_default_expression())
+            with declaration_context(path, parameter.location):
+                if ParameterModifier.OPTIONAL not in parameter.modifiers:
+                    msg = "Non-optional parameter cannot have a default"
+                    raise CompilationError(msg)
+
+                parser = FunctionParser.from_tokens(parameter.default_tokens, resolver)
+                defaults.append(parser.parse_default_expression())
 
         return defaults
 
@@ -87,30 +91,44 @@ class FunctionBuilder(BuildComponent):
         class_path: str,
     ) -> list[UObject]:
         properties: list[UObject] = []
+        owner = self.context.references.display_class_path(class_path)
+
         for parameter in function.parameters:
-            parameter_flags = PropertyFlags.PARAM
+            path = f"{owner}.{function.name}.{parameter.name}"
 
-            for modifier in parameter.modifiers:
-                match modifier:
-                    case ParameterModifier.OUT:
-                        parameter_flags |= PropertyFlags.OUT_PARAM
-                        function_payload.function_flags |= FunctionFlags.HAS_OUT_PARAMS
+            with declaration_context(path, parameter.location):
+                if parameter.array_dimension_name is not None or parameter.array_dimension != 1:
+                    msg = "Compiling fixed-array parameters is not implemented"
+                    raise NotImplementedError(msg)
 
-                    case ParameterModifier.CONST:
-                        parameter_flags |= PropertyFlags.CONST
+                parameter_flags = PropertyFlags.PARAM
 
-                    case ParameterModifier.OPTIONAL:
-                        parameter_flags |= PropertyFlags.OPTIONAL_PARAM
+                for modifier in parameter.modifiers:
+                    match modifier:
+                        case ParameterModifier.OUT:
+                            parameter_flags |= PropertyFlags.OUT_PARAM
+                            function_payload.function_flags |= FunctionFlags.HAS_OUT_PARAMS
 
-                    case _:
-                        msg = f"Unsupported parameter modifier {modifier!r}"
-                        raise NotImplementedError(msg)
+                        case ParameterModifier.CONST:
+                            parameter_flags |= PropertyFlags.CONST
 
-            properties.append(
-                self.properties.create_property(
-                    function_object, parameter.name, parameter.type_ref, class_path, parameter_flags
+                        case ParameterModifier.OPTIONAL:
+                            parameter_flags |= PropertyFlags.OPTIONAL_PARAM
+
+                        case _:
+                            msg = f"Unsupported parameter modifier {modifier.value!r}"
+                            raise NotImplementedError(msg)
+
+                properties.append(
+                    self.properties.create_property(
+                        function_object,
+                        parameter.name,
+                        parameter.type_ref,
+                        class_path,
+                        parameter_flags,
+                    )
                 )
-            )
+
         return properties
 
     def _prepare_function(
@@ -202,7 +220,7 @@ class FunctionBuilder(BuildComponent):
 
         function_object = UObject(
             FName(function.name),
-            ObjectFlags.DEFAULT_EXPORT,
+            ObjectFlags.PUBLIC_EXPORT,
             class_object_reference,
             function_class,
             payload=function_payload,
@@ -225,9 +243,13 @@ class FunctionBuilder(BuildComponent):
                 )
             )
 
-        properties.extend(
-            [
-                self.properties.create_property(
+        owner = self.context.references.display_class_path(class_path)
+
+        for local in locals_:
+            path = f"{owner}.{function.name}.{local.name}"
+
+            with declaration_context(path, local.location):
+                obj = self.properties.create_property(
                     function_object,
                     local.name,
                     local.type_ref,
@@ -235,9 +257,9 @@ class FunctionBuilder(BuildComponent):
                     PropertyFlags.NONE,
                     local.array_dimension,
                 )
-                for local in locals_
-            ]
-        )
+                payload = cast("UPropertyPayload", obj.payload)
+                payload.array_enum = self.properties.array_enum_reference(local, class_path)
+                properties.append(obj)
 
         for index, obj in enumerate(properties):
             payload = cast("UPropertyPayload", obj.payload)
@@ -260,19 +282,26 @@ class FunctionBuilder(BuildComponent):
     def _prepare_class_functions(
         self, class_path: str, exports: ClassExport
     ) -> list[PreparedFunction]:
-
         class_payload = exports.class_object.payload
 
         if not isinstance(class_payload, UClassPayload):
             msg = f"Class must be linked before building functions: {class_path}"
             raise ValueError(msg)  # noqa: TRY004
 
-        return [
-            self._prepare_function(
-                function, class_path, class_payload, exports.class_object.reference()
-            )
-            for function in exports.declaration.functions
-        ]
+        owner = self.context.references.display_class_path(class_path)
+        prepared: list[PreparedFunction] = []
+
+        for function in exports.declaration.functions:
+            path = f"{owner}.{function.name}"
+
+            with declaration_context(path, function.location):
+                prepared.append(
+                    self._prepare_function(
+                        function, class_path, class_payload, exports.class_object.reference()
+                    )
+                )
+
+        return prepared
 
     def _prepare_all_functions(self) -> list[PreparedFunction]:
         prepared: list[PreparedFunction] = []
@@ -286,7 +315,13 @@ class FunctionBuilder(BuildComponent):
         prepared = self._prepare_all_functions()
 
         for function in prepared:
-            payload = cast("UFunctionPayload", function.function_object.payload)
+            scope = function.resolver.scope
+            owner = self.context.references.display_class_path(scope.class_path)
+            path = f"{owner}.{scope.function.name}"
 
-            emitter = FunctionEmitter(function.resolver, self.references, function.function_object)
-            payload.script = emitter.emit_body(function)
+            with declaration_context(path, scope.function.location):
+                payload = cast("UFunctionPayload", function.function_object.payload)
+                emitter = FunctionEmitter(
+                    function.resolver, self.references, function.function_object
+                )
+                payload.script = emitter.emit_body(function)

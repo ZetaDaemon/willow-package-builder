@@ -5,13 +5,14 @@ from typing import TYPE_CHECKING, cast
 from willow_package_builder.compiler.semantics.intrinsics import IMPLICIT_EXPORT_CLASS_PATH
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
-from willow_package_builder.logging import CompilationError, ValueBuildError
+from willow_package_builder.logging import CompilationError, ValueBuildError, declaration_context
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.properties.reference_text import parse_reference_text
 from willow_package_builder.properties.values import (
     ArrayValue,
     BoolValue,
     ByteValue,
+    DelegateValue,
     FloatValue,
     IdentifierValue,
     IntValue,
@@ -203,6 +204,13 @@ class ValueBuilder(BuildComponent):
             case TypeCategory.STRUCT, _:
                 return self._build_struct_value(context, value, resolved_type, existing)
 
+            case TypeCategory.DELEGATE, None:
+                return DelegateValue()
+
+            case TypeCategory.DELEGATE, _:
+                msg = f"{context}: Non-empty delegate values are not implemented"
+                raise NotImplementedError(msg)
+
             case (
                 TypeCategory.INT
                 | TypeCategory.BYTE
@@ -270,10 +278,13 @@ class ValueBuilder(BuildComponent):
             if config.name.casefold() == package_name.casefold()
         )
         visible = collect_visible_packages(config, self.context.packages)
+        owner = self.context.references.display_class_path(owner_class)
+        path = f"{owner}.{definition.name}"
 
-        return self.context.references.resolve_type(
-            definition.type_ref, owner_class, visible, self.context.parents
-        )
+        with declaration_context(path, definition.location):
+            return self.context.references.resolve_type(
+                definition.type_ref, owner_class, visible, self.context.parents
+            )
 
     def build_class_values(
         self,

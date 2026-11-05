@@ -80,7 +80,7 @@ class StructBuilder(BuildComponent):
 
                 obj = UObject(
                     FName(declaration.name),
-                    ObjectFlags.DEFAULT_EXPORT,
+                    ObjectFlags.PUBLIC_EXPORT,
                     exports.class_object.reference(),
                     struct_class,
                     payload=UScriptStructPayload(

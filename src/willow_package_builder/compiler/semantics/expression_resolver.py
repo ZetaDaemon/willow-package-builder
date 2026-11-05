@@ -19,7 +19,7 @@ from willow_package_builder.compiler.syntax.expressions import (
     StringExpression,
     UnaryExpression,
 )
-from willow_package_builder.logging import CompilationError
+from willow_package_builder.logging import CompilationError, declaration_context
 from willow_package_builder.package_config import collect_visible_packages
 
 from .types import ResolvedType, TypeCategory
@@ -242,3 +242,19 @@ class ExpressionResolver:
         return self.context.references.resolve_variable(
             receiver.declaration_path, expression.name, self.context.parents
         )
+
+    def resolve_local_array_dimension(self, declaration: VariableDeclaration) -> None:
+        name = declaration.array_dimension_name
+
+        if name is None:
+            return
+
+        class_path = self.scope.class_path
+        package_name = class_path.partition(".")[0].casefold()
+        owner = self.context.references.display_class_path(class_path)
+        path = f"{owner}.{self.scope.function.name}.{declaration.name}"
+
+        with declaration_context(path, declaration.location):
+            declaration.array_dimension = self.context.references.resolve_array_dimension(
+                name, class_path, self._visibility[package_name], self.context.parents
+            )

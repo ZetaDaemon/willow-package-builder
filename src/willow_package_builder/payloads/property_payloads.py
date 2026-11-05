@@ -12,16 +12,29 @@ from .class_payload import UFieldPayload
 class PropertyFlags(IntFlag):
     """PropertyFlags."""
 
-    NONE = 0
+    # fmt: off
+    NONE                = 0x0
 
-    EDIT = 0x00000001
-    CONST = 0x00000002
-    OPTIONAL_PARAM = 0x00000010
-    NET = 0x00000020
-    PARAM = 0x00000080
-    OUT_PARAM = 0x00000100
-    RETURN_PARAM = 0x00000400
-    NEED_CTOR_LINK = 0x00400000
+    EDIT                = 0x1
+    CONST               = 0x2
+    EXPORT_OBJECT       = 0x8
+    OPTIONAL_PARAM      = 0x10
+    NET                 = 0x20
+    PARAM               = 0x80
+    OUT_PARAM           = 0x100
+    RETURN_PARAM        = 0x400
+    EDIT_CONST          = 0x20000
+    ALWAYS_INIT         = 0x100000
+    DUPLICATE_TRANSIENT = 0x200000
+    NEED_CTOR_LINK      = 0x400000
+    NO_EXPORT           = 0x800000
+    EDIT_INLINE         = 0x4000000
+    INTERP              = 0x200000000
+    PRIVATE_WRITE       = 0x4000000000
+    PROTECTED_WRITE     = 0x8000000000
+
+
+# fmt: on
 
 
 @dataclass
