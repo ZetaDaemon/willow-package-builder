@@ -1,6 +1,6 @@
 # Willow Package Builder
 
-Willow Package Builder builds Unreal packages (`.upk`). Currently supporting Borderlands 2 and Borderlands The Presequel.
+Willow Package Builder (WPB) builds Unreal packages (`.upk`). Currently supporting Borderlands 2 and Borderlands The Presequel.
 
 ## Requirements
 
@@ -71,41 +71,5 @@ willow-package-builder --help
 
 Use the hyphenated command `willow-package-builder`; the Python module is named `willow_package_builder`.
 
-## Build a package
-
-Pass the game target and the directory containing your source package's `package.toml`:
-
-```sh
-willow-package-builder bl2 "path/to/MyPackage"
-```
-
-For The Pre-Sequel:
-
-```sh
-willow-package-builder tps "path/to/MyPackage"
-```
-
-The source package must be configured with the reference packages it needs. Use reference class dumps for the target game.
-
-By default, output is written next to the source package directory. Specify an output directory with `--output`:
-
-```sh
-willow-package-builder bl2 "path/to/MyPackage" --output "path/to/output"
-```
-
-A successful build writes a `.upk` file and a corresponding `.manifest.json` file. Their names come from the package configuration.
-
-### Logging and warnings
-
-```sh
-# Show Python tracebacks for build errors.
-willow-package-builder bl2 "path/to/MyPackage" --debug
-
-# Write build messages only to the log file.
-willow-package-builder bl2 "path/to/MyPackage" --silent
-
-# Treat all warnings as errors.
-willow-package-builder bl2 "path/to/MyPackage" --warnings error
-```
-
-Build logs are written to `willow-package-builder.log` in the source package directory's parent. Run `willow-package-builder --help` for all options, including controls for individual warning categories.
+## Usage
+See [USAGE.md](USAGE.md) for package setup and object definitions.
