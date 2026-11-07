@@ -181,7 +181,7 @@ class UStatePayload(UStructPayload, ABC):
 
 @dataclass
 class UClassPayload(UStatePayload):
-    """BL2 class definition payload."""
+    """Class definition payload."""
 
     net_index: int = -1
 
@@ -202,6 +202,8 @@ class UClassPayload(UStatePayload):
     dll_bind_name: FName = field(default_factory=lambda: NONE_NAME)
 
     default_object: ReferencePath = field(default_factory=ReferencePath)
+
+    memory_tag: int = 1
 
     @override
     def serialize_body(self, package: Package) -> bytes:
@@ -236,7 +238,7 @@ class UClassPayload(UStatePayload):
             + serialize_names(self.class_groups)
             + serialize_fstring(self.native_class_name)
             + self.dll_bind_name.serialize(package)
-            + struct.pack("<B", get_game().CLASS_UNKNOWN_BYTE)
+            + struct.pack("<B", self.memory_tag)
             + self.default_object.serialize(package)
         )
 
@@ -252,7 +254,7 @@ class UClassPayload(UStatePayload):
 
 @dataclass
 class UFunctionPayload(UStructPayload):
-    """BL2 scripted function payload."""
+    """Scripted function payload."""
 
     friendly_name: FName = field(kw_only=True)
 
@@ -286,7 +288,7 @@ class UFunctionPayload(UStructPayload):
             raise ValueError(msg)
 
         return (
-            struct.pack("<Hi", 0, self.net_index)  # Empty BL2 simple-locals table.
+            struct.pack("<Hi", 0, self.net_index)  # Empty simple-locals table.
             + NONE_NAME.serialize(package)  # Empty property list.
             + self.serialize_body(package)
         )

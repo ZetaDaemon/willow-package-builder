@@ -14,7 +14,7 @@ class Bl2Opcode:
     LOCAL_VARIABLE = Opcode(0x00)
     INSTANCE_VARIABLE = Opcode(0x01)
     DEFAULT_VARIABLE = Opcode(0x02)
-    STATE_VARIABLE = Opcode(0x03)
+    SWITCH_SIZE = Opcode(0x03)
     NATIVE_PARAMETER = Opcode(0x29)
     BOOL_VARIABLE = Opcode(0x2D)
     STRUCT_MEMBER = Opcode(0x35)
@@ -140,8 +140,6 @@ class Bl2(Game):
     LICENSE_VERSION = 46
     ENGINE_VERSION = 1712575
     COOKER_VERSION = 134
-
-    CLASS_UNKNOWN_BYTE = 45
 
     OPCODES = Bl2Opcode()
 

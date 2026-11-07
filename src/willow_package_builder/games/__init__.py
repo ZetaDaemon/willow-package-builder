@@ -3,6 +3,8 @@ from contextvars import ContextVar
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from willow_package_builder.games.tps import TPS
+
 from .bl2 import Bl2
 
 if TYPE_CHECKING:
@@ -17,7 +19,7 @@ class TargetGame(StrEnum):
     TPS = "tps"
 
 
-GAME_DICT: dict[TargetGame, type[Game]] = {TargetGame.BL2: Bl2}
+GAME_DICT: dict[TargetGame, type[Game]] = {TargetGame.BL2: Bl2, TargetGame.TPS: TPS}
 
 _active_game: ContextVar[Game | None] = ContextVar("active_game", default=None)
 

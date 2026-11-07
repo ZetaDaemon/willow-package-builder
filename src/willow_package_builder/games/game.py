@@ -12,8 +12,6 @@ class Game:
     ENGINE_VERSION: ClassVar[int]
     COOKER_VERSION: ClassVar[int]
 
-    CLASS_UNKNOWN_BYTE: ClassVar[int]
-
     OPCODES: ClassVar[Opcodes]
 
     PACKAGE_FLAGS: ClassVar[PackageFlags]
