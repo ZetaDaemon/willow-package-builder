@@ -277,8 +277,6 @@ Flags:
 - `PUBLIC` marks the object as public for external referencing.
 - `KEEP_ALIVE` adds its path to the generated manifest's `keep_alive` list.
 
-Objects directly owned by package folders receive both options automatically. Child objects owned by other objects require explicit flags when needed, including children defined in separate files.
-
 ## Object lifetime and the manifest
 
 `KEEP_ALIVE` records an object's path in the generated
@@ -297,8 +295,28 @@ For example:
   "classes": ["MyPackage.MyClass"],
   "keep_alive": ["MyObjects.Example"]
 }
+```
 
-## Build and load
+Your mod or package loader must load the .upk, read the manifest, resolve
+the listed objects, and retain them using the SDK's keep-alive mechanism.
+
+Loading the .upk alone does not process the manifest. Include both files
+when distributing a package with a loader that uses this metadata.
+
+Objects directly owned by package folders automatically receive
+KEEP_ALIVE. Child objects receive it only when explicitly requested:
+
+```yaml
+Flags:
+  - KEEP_ALIVE
+```
+
+A parent object's outer relationship does not automatically keep its
+children alive. Referenced children can remain alive through their parent's
+properties; independently used children may need their own KEEP_ALIVE
+entry.
+
+## Building
 
 ```sh
 willow-package-builder bl2 "path/to/MyPackage"
@@ -313,8 +331,6 @@ willow-package-builder bl2 "path/to/MyPackage" --output "path/to/output"
 ```
 
 Without `--output`, WPB writes next to the target source directory. It writes each built package as `<name>.upk` with a corresponding `<name>.manifest.json`. Required packages are written to the same output directory.
-
-The manifest lists compiled classes and objects marked for keeping alive. Your mod's loading code must load the package and handle those lifetime requirements. Building a package does not install it into the game or load it automatically.
 
 ## Logs and warnings
 
