@@ -1,6 +1,14 @@
-from dataclasses import dataclass, field
+from abc import ABC
+from dataclasses import KW_ONLY, dataclass, field
 from enum import StrEnum
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+from willow_package_builder.upackage import ReferencePath
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from willow_package_builder.upackage import FName
 
 
 class ObjectFlag(StrEnum):
@@ -11,20 +19,32 @@ class ObjectFlag(StrEnum):
 
 
 @dataclass(eq=False)
-class FolderDeclaration:
-    name: str
-    outer: FolderDeclaration | ObjectDeclaration | None
+class Definition(ABC):
+    name: FName
+    outer: Definition | None
     source: Path
-    children: list[FolderDeclaration | ObjectDeclaration] = field(default_factory=list)
+
+    _: KW_ONLY
+
+    children: list[Definition] = field(default_factory=list)
+
+    @property
+    def reference(self) -> ReferencePath:
+        if self.outer is None:
+            return ReferencePath(self.name)
+        return self.outer.reference + self.name
 
 
 @dataclass(eq=False)
-class ObjectDeclaration:
-    name: str
-    class_name: str
-    outer: FolderDeclaration | ObjectDeclaration | None
-    properties: dict[str, object]
+class FolderDefinition(Definition):
+    """A folder in the package."""
+
+
+@dataclass(eq=False)
+class ObjectDefinition(Definition):
+    class_name: ReferencePath
+    properties: dict[FName, object]
     source: Path
     document: int
-    children: list[FolderDeclaration | ObjectDeclaration] = field(default_factory=list)
     flags: frozenset[ObjectFlag] = field(default_factory=frozenset)
+    archetype: str | None = None

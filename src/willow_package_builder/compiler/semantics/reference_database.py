@@ -14,22 +14,36 @@ from willow_package_builder.compiler.syntax.declarations import (
     TypeReference,
     VariableDeclaration,
 )
+from willow_package_builder.compiler.syntax.keyword import Keyword
+from willow_package_builder.compiler.syntax.punctuation import Operator
 from willow_package_builder.logging import (
     CompilationError,
     UnknownPropertyError,
     declaration_context,
 )
 from willow_package_builder.package_config import PackageConfig, collect_visible_packages
+from willow_package_builder.upackage import FName, ReferencePath
 
-from .intrinsics import INTRINSICS, PROPERTY_CLASS_PATHS, IntrinsicDefinition
+from .intrinsics import (
+    CORE_INTERFACE,
+    CORE_OBJECT,
+    INTRINSICS,
+    PROPERTY_CLASS_PATHS,
+    IntrinsicDefinition,
+)
 from .types import ResolvedType, TypeCategory
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
+DELEGATE_TYPE = ReferencePath("delegate")
+MAP_TYPE = ReferencePath("map")
+ARRAY_TYPE = ReferencePath("array")
+CLASS_TYPE = ReferencePath("class")
+
 PRIMITIVE_TYPES = {
-    t.value: ResolvedType(t)
-    for t in (
+    ReferencePath(category.value): ResolvedType(category)
+    for category in (
         TypeCategory.BYTE,
         TypeCategory.INT,
         TypeCategory.BOOL,
@@ -42,27 +56,29 @@ PRIMITIVE_TYPES = {
 
 @dataclass(frozen=True)
 class ResolvedMember[T]:
-    owner_class: str
+    owner_class: ReferencePath
     declaration: T
 
 
 @dataclass
 class ReferenceDatabase:
-    classes: dict[str, ClassDeclaration] = field(default_factory=dict)
-    operators: dict[str, list[OperatorDeclaration]] = field(default_factory=dict)
-    intrinsics: dict[str, IntrinsicDefinition] = field(default_factory=lambda: dict(INTRINSICS))
+    classes: dict[ReferencePath, ClassDeclaration] = field(default_factory=dict)
+    operators: dict[Operator | Keyword, list[OperatorDeclaration]] = field(default_factory=dict)
+    intrinsics: dict[ReferencePath, IntrinsicDefinition] = field(
+        default_factory=lambda: dict(INTRINSICS)
+    )
 
-    _class_paths: dict[str, str] = field(default_factory=dict, init=False, repr=False)
-    _parent_cache: dict[str, str | None] | None = field(default=None, init=False, repr=False)
+    _parent_cache: dict[ReferencePath, ReferencePath | None] | None = field(
+        default=None, init=False, repr=False
+    )
     _parent_cache_packages: tuple[PackageConfig, ...] | None = field(
         default=None, init=False, repr=False
     )
 
-    def add_class(self, package_name: str, declaration: ClassDeclaration) -> None:
-        path = f"{package_name}.{declaration.name}"
-        key = path.casefold()
+    def add_class(self, package_name: FName, declaration: ClassDeclaration) -> None:
+        path = ReferencePath(declaration.name, ReferencePath(package_name))
 
-        if key in self.classes:
+        if path in self.classes:
             msg = f"Class already registered: {path}"
             raise CompilationError(msg)
 
@@ -71,50 +87,44 @@ class ReferenceDatabase:
                 msg = f"Binary operator {operator.name!r} in {path} has no precedence"
                 raise CompilationError(msg)
 
-        self.classes[key] = declaration
-        self._class_paths[key] = path
+        self.classes[path] = declaration
         self._parent_cache = None
         self._parent_cache_packages = None
 
         for operator in declaration.operators:
-            operator_key = operator.name.casefold()
+            operator_key = operator.name
             self.operators.setdefault(operator_key, []).append(operator)
 
     def resolve_class_path(
         self,
-        name: str,
-        current_package: str,
-        visible_packages: set[str],
-        additional_paths: Iterable[str] = (),
+        name: ReferencePath,
+        current_package: FName,
+        visible_packages: set[FName],
+        additional_paths: Iterable[ReferencePath] = (),
         *,
         include_intrinsics: bool = False,
-    ) -> str:
+    ) -> ReferencePath:
         """Resolve a class name to its qualified path."""
-        allowed_packages = {
-            current_package.casefold(),
-            *(package.casefold() for package in visible_packages),
-        }
+        allowed_packages = {current_package, *(package for package in visible_packages)}
         available = set(self.classes)
-        available.update(path.casefold() for path in additional_paths)
+        available.update(path for path in additional_paths)
 
         if include_intrinsics:
             available.update(self.intrinsics)
 
-        if "." in name:
-            key = name.casefold()
-            package_name = key.partition(".")[0]
-
+        if (package_path := name.outer) is not None:
+            package_name = package_path.name
             if package_name not in allowed_packages:
                 msg = f"Package {package_name!r} is not available to {current_package}"
                 raise CompilationError(msg)
 
-            if key not in available:
+            if name not in available:
                 msg = f"Unknown class: {name}"
                 raise CompilationError(msg)
 
-            return key
+            return name
 
-        local_key = f"{current_package}.{name}".casefold()
+        local_key = ReferencePath(name.name, ReferencePath(current_package))
 
         if local_key in available:
             return local_key
@@ -122,7 +132,7 @@ class ReferenceDatabase:
         matches = [
             key
             for package_name in sorted(allowed_packages)
-            if (key := f"{package_name}.{name}".casefold()) in available
+            if (key := ReferencePath(name.name, ReferencePath(package_name))) in available
         ]
 
         if not matches:
@@ -130,43 +140,51 @@ class ReferenceDatabase:
             raise CompilationError(msg)
 
         if len(matches) > 1:
-            candidates = ", ".join(matches)
+            candidates = ", ".join([str(m) for m in matches])
             msg = f"Ambiguous class {name!r}; use a qualified name: {candidates}"
             raise CompilationError(msg)
 
         return matches[0]
 
-    def parent_class_name(self, class_path: str, declaration: ClassDeclaration) -> str | None:
+    def parent_class_name(
+        self, class_path: ReferencePath, declaration: ClassDeclaration
+    ) -> ReferencePath | None:
         """Return the explicit or implicit parent class name."""
         if declaration.parent is not None:
             return declaration.parent
 
         if declaration.is_interface:
-            if class_path.casefold() == "core.interface":
-                return "Core.Object"
+            if class_path == CORE_INTERFACE:
+                return CORE_OBJECT
 
-            return "Core.Interface"
+            return CORE_INTERFACE
 
         return None
 
     def resolve_class(
-        self, name: str, current_package: str, visible_packages: set[str]
-    ) -> tuple[str, ClassDeclaration]:
+        self, name: ReferencePath, current_package: FName, visible_packages: set[FName]
+    ) -> tuple[ReferencePath, ClassDeclaration]:
         path = self.resolve_class_path(name, current_package, visible_packages)
         return path, self.classes[path]
 
-    def resolve_parent_classes(self, packages: tuple[PackageConfig, ...]) -> dict[str, str | None]:
+    def resolve_parent_classes(
+        self, packages: tuple[PackageConfig, ...]
+    ) -> dict[ReferencePath, ReferencePath | None]:
         if self._parent_cache is not None and self._parent_cache_packages == packages:
             return self._parent_cache.copy()
 
-        configs = {config.name.casefold(): config for config in packages}
+        configs = {config.name: config for config in packages}
         visibility = {
             name: collect_visible_packages(config, packages) for name, config in configs.items()
         }
-        parents: dict[str, str | None] = {}
+        parents: dict[ReferencePath, ReferencePath | None] = {}
 
         for class_path, declaration in self.classes.items():
-            package_key = class_path.partition(".")[0]
+            if class_path.outer is None:
+                msg = f"Expected qualified class path, got {class_path}"
+                raise ValueError(msg)
+
+            package_key = class_path.outer.name
             config = configs[package_key]
             parent_name = self.parent_class_name(class_path, declaration)
 
@@ -174,9 +192,7 @@ class ReferenceDatabase:
                 parents[class_path] = None
                 continue
 
-            display_path = self.display_class_path(class_path)
-
-            with declaration_context(display_path, declaration.location):
+            with declaration_context(class_path, declaration.location):
                 parent_path, _ = self.resolve_class(
                     parent_name, config.name, visibility[package_key]
                 )
@@ -186,20 +202,22 @@ class ReferenceDatabase:
         self._parent_cache_packages = packages
         return parents.copy()
 
-    def inheritance_order(self, parents: Mapping[str, str | None]) -> tuple[str, ...]:
-        ordered: list[str] = []
-        completed: set[str] = set()
-        active: list[str] = []
-        active_set: set[str] = set()
+    def inheritance_order(
+        self, parents: Mapping[ReferencePath, ReferencePath | None]
+    ) -> tuple[ReferencePath, ...]:
+        ordered: list[ReferencePath] = []
+        completed: set[ReferencePath] = set()
+        active: list[ReferencePath] = []
+        active_set: set[ReferencePath] = set()
 
-        def visit(class_path: str) -> None:
+        def visit(class_path: ReferencePath) -> None:
             if class_path in completed:
                 return
 
             if class_path in active_set:
                 start = active.index(class_path)
                 cycle = [*active[start:], class_path]
-                description = " -> ".join(cycle)
+                description = " -> ".join([str(c) for c in cycle])
                 msg = f"Inheritance cycle: {description}"
                 raise CompilationError(msg)
 
@@ -232,9 +250,9 @@ class ReferenceDatabase:
         return tuple(ordered)
 
     def iter_class_hierarchy(
-        self, class_path: str, parents: Mapping[str, str | None]
-    ) -> Iterator[tuple[str, ClassDeclaration]]:
-        current: str | None = class_path.casefold()
+        self, class_path: ReferencePath, parents: Mapping[ReferencePath, ReferencePath | None]
+    ) -> Iterator[tuple[ReferencePath, ClassDeclaration]]:
+        current: ReferencePath | None = class_path
 
         while current is not None:
             declaration = self.classes.get(current)
@@ -251,27 +269,30 @@ class ReferenceDatabase:
             current = parents[current]
 
     def resolve_variable(
-        self, class_path: str, name: str, parents: Mapping[str, str | None]
+        self,
+        class_path: ReferencePath,
+        name: FName,
+        parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedMember[VariableDeclaration]:
-        key = name.casefold()
 
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for variable in declaration.variables:
-                if variable.name.casefold() == key:
+                if variable.name == name:
                     return ResolvedMember(owner, variable)
 
-        display_path = self.display_class_path(class_path)
-        msg = f"Unknown variable {name!r} on {display_path}"
+        msg = f"Unknown variable {name!r} on {class_path}"
         raise UnknownPropertyError(msg)
 
     def resolve_function(
-        self, class_path: str, name: str, parents: Mapping[str, str | None]
+        self,
+        class_path: ReferencePath,
+        name: FName,
+        parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedMember[FunctionDeclaration]:
-        key = name.casefold()
 
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for function in declaration.functions:
-                if function.name.casefold() == key:
+                if function.name == name:
                     return ResolvedMember(owner, function)
 
         msg = f"Unknown function {name!r} on {class_path}"
@@ -280,18 +301,23 @@ class ReferenceDatabase:
     def resolve_type(
         self,
         type_ref: TypeReference | None,
-        current_class: str,
-        visible_packages: set[str],
-        parents: Mapping[str, str | None],
+        current_class: ReferencePath,
+        visible_packages: set[FName],
+        parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedType:
-        current_package = current_class.partition(".")[0]
-
         if type_ref is None:
             return ResolvedType(TypeCategory.VOID)
 
-        name = type_ref.name.casefold()
+        package_path = current_class.outer
 
-        if name == "delegate":
+        if package_path is None or package_path.is_none():
+            msg = f"Expected a qualified current class path, got {current_class}"
+            raise ValueError(msg)
+
+        current_package = package_path.name
+        name = type_ref.name
+
+        if name == DELEGATE_TYPE:
             if len(type_ref.arguments) != 1:
                 msg = "delegate requires exactly one signature"
                 raise CompilationError(msg)
@@ -302,29 +328,30 @@ class ReferenceDatabase:
                 msg = "Delegate signature must be a function name"
                 raise CompilationError(msg)
 
-            owner_name, separator, function_name = signature.name.rpartition(".")
+            owner_name = signature.name.outer
+            function_name = signature.name.name
 
-            if separator:
+            if owner_name is not None and not owner_name.is_none():
                 owner_path, _ = self.resolve_class(owner_name, current_package, visible_packages)
             else:
                 owner_path = current_class
-                function_name = signature.name
 
             member = self.resolve_function(owner_path, function_name, parents)
 
             if member.declaration.func_category is not FunctionCategory.DELEGATE:
-                owner = self.display_class_path(member.owner_class)
-                msg = f"{owner}.{member.declaration.name} is not a delegate declaration"
+                msg = (
+                    f"{member.owner_class}.{member.declaration.name} is not a delegate declaration"
+                )
                 raise CompilationError(msg)
 
-            path = f"{member.owner_class}.{member.declaration.name}".casefold()
+            path = member.owner_class + member.declaration.name
             return ResolvedType(TypeCategory.DELEGATE, path)
 
-        if name == "map":
+        if name == MAP_TYPE:
             msg = "Native map type resolution is not implemented"
             raise NotImplementedError(msg)
 
-        if name == "array":
+        if name == ARRAY_TYPE:
             if len(type_ref.arguments) != 1:
                 msg = "array requires exactly one type argument"
                 raise CompilationError(msg)
@@ -332,18 +359,14 @@ class ReferenceDatabase:
             element_type = self.resolve_type(
                 type_ref.arguments[0], current_class, visible_packages, parents
             )
-
             return ResolvedType(TypeCategory.ARRAY, arguments=(element_type,))
 
-        if name == "class":
+        if name == CLASS_TYPE:
             if len(type_ref.arguments) > 1:
                 msg = "class accepts at most one type argument"
                 raise CompilationError(msg)
 
-            bound_ref = (
-                type_ref.arguments[0] if type_ref.arguments else TypeReference("Core.Object")
-            )
-
+            bound_ref = type_ref.arguments[0] if type_ref.arguments else TypeReference(CORE_OBJECT)
             bound = self.resolve_type(bound_ref, current_class, visible_packages, parents)
 
             if bound.category is not TypeCategory.OBJECT:
@@ -353,21 +376,24 @@ class ReferenceDatabase:
             return ResolvedType(TypeCategory.CLASS, arguments=(bound,))
 
         if type_ref.arguments:
-            msg = f"Type {type_ref.name!r} does not accept type arguments"
+            msg = f"Type {name} does not accept type arguments"
             raise CompilationError(msg)
 
         primitive = PRIMITIVE_TYPES.get(name)
+
         if primitive is not None:
             return primitive
 
-        if "." not in name:
-            member_type = self.find_member_type(current_class, type_ref.name, parents)
+        owner_name = name.outer
+
+        if owner_name is None or owner_name.is_none():
+            member_type = self.find_member_type(current_class, name.name, parents)
 
             if member_type is not None:
                 return member_type
 
             member_type = self.find_visible_member_type(
-                type_ref.name, current_package, visible_packages
+                name.name, current_package, visible_packages
             )
 
             if member_type is not None:
@@ -375,85 +401,83 @@ class ReferenceDatabase:
 
         elif name not in self.classes and name not in self.intrinsics:
             # Examples: Object.Vector or Core.Object.Vector.
-            owner_name, _, member_name = type_ref.name.rpartition(".")
-
             owner_path, _ = self.resolve_class(owner_name, current_package, visible_packages)
-
-            member_type = self.find_member_type(owner_path, member_name, parents)
+            member_type = self.find_member_type(owner_path, name.name, parents)
 
             if member_type is None:
-                msg = f"Unknown struct or enum {member_name!r} on {owner_path}"
+                msg = f"Unknown struct or enum {name.name!r} on {owner_path}"
                 raise CompilationError(msg)
 
             return member_type
 
         class_path = self.resolve_class_path(
-            type_ref.name, current_package, visible_packages, include_intrinsics=True
+            name, current_package, visible_packages, include_intrinsics=True
         )
-
         return ResolvedType(TypeCategory.OBJECT, class_path)
 
     def resolve_struct(
-        self, class_path: str, name: str, parents: Mapping[str, str | None]
+        self,
+        class_path: ReferencePath,
+        name: FName,
+        parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedMember[StructDeclaration]:
-        key = name.casefold()
 
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for struct in declaration.structs:
-                if struct.name.casefold() == key:
+                if struct.name == name:
                     return ResolvedMember(owner, struct)
 
         msg = f"Unknown struct {name!r} on {class_path}"
         raise CompilationError(msg)
 
     def resolve_enum(
-        self, class_path: str, name: str, parents: Mapping[str, str | None]
+        self,
+        class_path: ReferencePath,
+        name: FName,
+        parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedMember[EnumDeclaration]:
-        key = name.casefold()
 
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for enum in declaration.enums:
-                if enum.name.casefold() == key:
+                if enum.name == name:
                     return ResolvedMember(owner, enum)
 
         msg = f"Unknown enum {name!r} on {class_path}"
         raise CompilationError(msg)
 
     def find_member_type(
-        self, class_path: str, name: str, parents: Mapping[str, str | None]
+        self,
+        class_path: ReferencePath,
+        name: FName,
+        parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedType | None:
-        key = name.casefold()
 
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for struct in declaration.structs:
-                if struct.name.casefold() == key:
-                    return ResolvedType(TypeCategory.STRUCT, f"{owner}.{struct.name}".casefold())
+                if struct.name == name:
+                    return ResolvedType(TypeCategory.STRUCT, owner + struct.name)
 
             for enum in declaration.enums:
-                if enum.name.casefold() == key:
-                    return ResolvedType(TypeCategory.ENUM, f"{owner}.{enum.name}".casefold())
+                if enum.name == name:
+                    return ResolvedType(TypeCategory.ENUM, owner + enum.name)
 
         return None
 
     def resolve_binary_operator(
         self,
-        name: str,
+        name: Operator | Keyword,
         left: ResolvedType,
         right: ResolvedType,
-        current_class: str,
-        visible_packages: set[str],
-        parents: Mapping[str, str | None],
+        current_class: ReferencePath,
+        visible_packages: set[FName],
+        parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedMember[OperatorDeclaration]:
-        key = name.casefold()
 
         for owner, declaration in self.iter_class_hierarchy(current_class, parents):
             matches: list[OperatorDeclaration] = []
 
             for operator in declaration.operators:
-                if (
-                    operator.op_category is not OperatorCategory.BINARY
-                    or operator.name.casefold() != key
-                ):
+                if operator.op_category is not OperatorCategory.BINARY or operator.name != name:
                     continue
 
                 left_type = self.resolve_type(
@@ -480,14 +504,13 @@ class ReferenceDatabase:
         msg = f"No exact overload of {name!r} for {left!r} and {right!r}"
         raise CompilationError(msg)
 
-    def lookup_class(self, path: str) -> ClassDeclaration | IntrinsicDefinition:
-        key = path.casefold()
+    def lookup_class(self, path: ReferencePath) -> ClassDeclaration | IntrinsicDefinition:
 
-        intrinsic = self.intrinsics.get(key)
+        intrinsic = self.intrinsics.get(path)
         if intrinsic is not None:
             return intrinsic
 
-        declaration = self.classes.get(key)
+        declaration = self.classes.get(path)
         if declaration is not None:
             return declaration
 
@@ -501,25 +524,23 @@ class ReferenceDatabase:
             msg = f"Type {resolved} cannot be represented as a property"
             raise CompilationError(msg)
 
-        return self.intrinsics[path.casefold()]
+        return self.intrinsics[path]
 
     def resolve_unary_operator(
         self,
-        name: str,
+        name: Keyword | Operator,
         category: Literal[OperatorCategory.PREFIX, OperatorCategory.POSTFIX],
         operand: ResolvedType,
-        current_class: str,
-        visible_packages: set[str],
-        parents: Mapping[str, str | None],
+        current_class: ReferencePath,
+        visible_packages: set[FName],
+        parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedMember[OperatorDeclaration]:
-
-        key = name.casefold()
 
         for owner, declaration in self.iter_class_hierarchy(current_class, parents):
             matches: list[OperatorDeclaration] = []
 
             for operator in declaration.operators:
-                if operator.op_category is not category or operator.name.casefold() != key:
+                if operator.op_category is not category or operator.name != name:
                     continue
 
                 parameter_type = self.resolve_type(
@@ -544,14 +565,13 @@ class ReferenceDatabase:
 
     def resolve_struct_variable(
         self,
-        struct_path: str,
-        name: str,
-        parents: Mapping[str, str | None],
-        visible_packages: set[str],
+        struct_path: ReferencePath,
+        name: FName,
+        parents: Mapping[ReferencePath, ReferencePath | None],
+        visible_packages: set[FName],
     ) -> ResolvedMember[VariableDeclaration]:
-        current = struct_path.casefold()
-        key = name.casefold()
-        visited: set[str] = set()
+        current = struct_path
+        visited: set[ReferencePath] = set()
 
         while True:
             if current in visited:
@@ -559,12 +579,15 @@ class ReferenceDatabase:
                 raise CompilationError(msg)
 
             visited.add(current)
-            owner_class, _, struct_name = current.rpartition(".")
+            owner_class, struct_name = current.split()
+            if owner_class is None:
+                msg = f"Expected a fully qualified struct, got {current}."
+                raise ValueError(msg)
             member = self.resolve_struct(owner_class, struct_name, parents)
             declaration = member.declaration
 
             for variable in declaration.variables:
-                if variable.name.casefold() == key:
+                if variable.name == name:
                     return ResolvedMember(member.owner_class, variable)
 
             if declaration.parent is None:
@@ -582,33 +605,34 @@ class ReferenceDatabase:
                 msg = f"Parent struct of {current} has no declaration path"
                 raise ValueError(msg)
 
-            current = parent.declaration_path.casefold()
+            current = parent.declaration_path
 
-        display_path = self.display_type_path(struct_path, parents)
-        msg = f"Unknown field {name!r} on struct {display_path}"
+        msg = f"Unknown field {name!r} on struct {struct_path}"
         raise UnknownPropertyError(msg)
 
     def struct_hierarchy(
         self,
-        struct_path: str,
-        parents: Mapping[str, str | None],
+        struct_path: ReferencePath,
+        parents: Mapping[ReferencePath, ReferencePath | None],
         packages: tuple[PackageConfig, ...],
-    ) -> list[tuple[str, StructDeclaration]]:
+    ) -> list[tuple[ReferencePath, StructDeclaration]]:
         """Return parent-to-child declarations and their owning classes."""
-        hierarchy: list[tuple[str, StructDeclaration]] = []
-        visited: set[str] = set()
+        hierarchy: list[tuple[ReferencePath, StructDeclaration]] = []
+        visited: set[ReferencePath] = set()
         current = struct_path
 
         while True:
-            key = current.casefold()
-
-            if key in visited:
+            if current in visited:
                 msg = f"Struct inheritance cycle at {current}"
                 raise CompilationError(msg)
 
-            visited.add(key)
+            visited.add(current)
 
-            owner_class, _, struct_name = current.rpartition(".")
+            owner_class, struct_name = current.split()
+            if owner_class is None:
+                msg = f"Expected a fully qualified struct, got {current}."
+                raise ValueError(msg)
+
             member = self.resolve_struct(owner_class, struct_name, parents)
             declaration = member.declaration
             hierarchy.append((member.owner_class, declaration))
@@ -616,10 +640,12 @@ class ReferenceDatabase:
             if declaration.parent is None:
                 break
 
-            package_name = member.owner_class.partition(".")[0]
-            config = next(
-                config for config in packages if config.name.casefold() == package_name.casefold()
-            )
+            if member.owner_class.outer is None:
+                msg = f"Expected fully qualified class name, got {member.owner_class}"
+                raise ValueError(msg)
+
+            package_name = member.owner_class.outer.name
+            config = next(config for config in packages if config.name == package_name)
             visible = collect_visible_packages(config, packages)
 
             parent = self.resolve_type(
@@ -640,79 +666,83 @@ class ReferenceDatabase:
         return hierarchy
 
     def is_subclass(
-        self, class_path: str, base_path: str, parents: Mapping[str, str | None]
+        self,
+        class_path: ReferencePath,
+        base_path: ReferencePath,
+        parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> bool:
         """Check whether a class is the given base class or extends it."""
-        base = base_path.casefold()
-        self.lookup_class(base)
+        self.lookup_class(base_path)
 
-        current: str | None = class_path.casefold()
-        visited: set[str] = set()
+        current: ReferencePath | None = class_path
+        visited: set[ReferencePath] = set()
 
         while current is not None:
-            key = current.casefold()
-
-            if key in visited:
+            if current in visited:
                 msg = f"Inheritance cycle while checking {class_path}: {current}"
                 raise CompilationError(msg)
 
-            visited.add(key)
-            definition = self.lookup_class(key)
+            visited.add(current)
+            definition = self.lookup_class(current)
 
-            if key == base:
+            if current == base_path:
                 return True
 
             if isinstance(definition, IntrinsicDefinition):
                 current = definition.parent
             else:
-                current = parents[key]
+                current = parents[current]
 
         return False
 
     def resolve_within_class(
-        self, class_path: str, parents: Mapping[str, str | None], packages: Iterable[PackageConfig]
-    ) -> str:
-        configs = {config.name.casefold(): config for config in packages}
+        self,
+        class_path: ReferencePath,
+        parents: Mapping[ReferencePath, ReferencePath | None],
+        packages: Iterable[PackageConfig],
+    ) -> ReferencePath:
+        configs = {config.name: config for config in packages}
         package_list = tuple(configs.values())
 
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             if declaration.within is None:
                 continue
 
-            config = configs[owner.partition(".")[0].casefold()]
+            if owner.outer is None:
+                msg = f"Expected fully qualified class path, got {owner}"
+                raise ValueError(msg)
+            config = configs[owner.outer.name]
             visible = collect_visible_packages(config, package_list)
 
             return self.resolve_class_path(
                 declaration.within, config.name, visible, include_intrinsics=True
             )
 
-        return "core.object"
+        return CORE_OBJECT
 
     def find_visible_member_type(
-        self, name: str, current_package: str, visible_packages: set[str]
+        self, name: FName, current_package: FName, visible_packages: set[FName]
     ) -> ResolvedType | None:
-        key = name.casefold()
-        package_key = current_package.casefold()
-        allowed = {package_key, *(p.casefold() for p in visible_packages)}
+        allowed = {current_package, *visible_packages}
         candidates: list[ResolvedType] = []
 
         for owner, declaration in self.classes.items():
-            if owner.partition(".")[0].casefold() not in allowed:
+            if owner.base not in allowed:
                 continue
 
             candidates.extend(
                 [
-                    ResolvedType(TypeCategory.STRUCT, f"{owner}.{struct.name}".casefold())
+                    ResolvedType(TypeCategory.STRUCT, owner + struct.name)
                     for struct in declaration.structs
-                    if struct.name.casefold() == key
+                    if struct.name == name
                 ]
             )
 
             candidates.extend(
                 [
-                    ResolvedType(TypeCategory.ENUM, f"{owner}.{enum.name}".casefold())
+                    ResolvedType(TypeCategory.ENUM, owner + enum.name)
                     for enum in declaration.enums
-                    if enum.name.casefold() == key
+                    if enum.name == name
                 ]
             )
 
@@ -720,7 +750,7 @@ class ReferenceDatabase:
             candidate
             for candidate in candidates
             if candidate.declaration_path is not None
-            and candidate.declaration_path.partition(".")[0] == package_key
+            and candidate.declaration_path.base == current_package
         ]
         candidates = local or candidates
 
@@ -731,73 +761,12 @@ class ReferenceDatabase:
 
         return candidates[0] if candidates else None
 
-    def display_class_path(self, class_path: str) -> str:
-        key = class_path.casefold()
-
-        if key in self._class_paths:
-            return self._class_paths[key]
-
-        intrinsic = self.intrinsics.get(key)
-
-        if intrinsic is not None:
-            return intrinsic.path
-
-        return class_path
-
-    def display_type_path(self, path: str, parents: Mapping[str, str | None]) -> str:
-        """Format a class, struct, or enum path using declaration spelling."""
-        key = path.casefold()
-
-        if key in self.classes or key in self.intrinsics:
-            return self.display_class_path(path)
-
-        owner, separator, member_name = path.rpartition(".")
-
-        if not separator:
-            return path
-
-        current: str | None = owner.casefold()
-        visited: set[str] = set()
-
-        while current is not None and current not in visited:
-            visited.add(current)
-            declaration = self.classes.get(current)
-
-            if declaration is None:
-                break
-
-            for member in (*declaration.structs, *declaration.enums):
-                if member.name.casefold() == member_name.casefold():
-                    return f"{self.display_class_path(current)}.{member.name}"
-
-            current = parents.get(current)
-
-            if current is not None:
-                current = current.casefold()
-
-        return f"{self.display_class_path(owner)}.{member_name}"
-
-    def display_type(self, resolved: ResolvedType, parents: Mapping[str, str | None]) -> str:
-        """Format a resolved type for diagnostics."""
-        if resolved.declaration_path is not None:
-            name = self.display_type_path(resolved.declaration_path, parents)
-        else:
-            name = resolved.category.value
-
-        if resolved.arguments:
-            arguments = ", ".join(
-                self.display_type(argument, parents) for argument in resolved.arguments
-            )
-            return f"{name}<{arguments}>"
-
-        return name
-
     def resolve_array_dimension(
         self,
-        name: str,
-        current_class: str,
-        visible_packages: set[str],
-        parents: Mapping[str, str | None],
+        name: ReferencePath,
+        current_class: ReferencePath,
+        visible_packages: set[FName],
+        parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> int:
         resolved = self.resolve_type(TypeReference(name), current_class, visible_packages, parents)
 
@@ -809,7 +778,11 @@ class ReferenceDatabase:
             msg = "Resolved array dimension enum has no declaration path"
             raise ValueError(msg)
 
-        owner, _, enum_name = resolved.declaration_path.rpartition(".")
+        owner, enum_name = resolved.declaration_path.split()
+        if owner is None:
+            msg = f"Expected a fully qualified enum, got {resolved.declaration_path}."
+            raise ValueError(msg)
+
         member = self.resolve_enum(owner, enum_name, parents)
         dimension = len(member.declaration.members)
 

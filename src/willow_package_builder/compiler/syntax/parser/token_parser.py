@@ -1,5 +1,8 @@
+from willow_package_builder.compiler.syntax.keyword import Keyword
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
+from willow_package_builder.compiler.syntax.punctuation import Operator, Punctuation
 from willow_package_builder.logging import CompilationError
+from willow_package_builder.upackage import ReferencePath
 
 
 class TokenParser:
@@ -26,23 +29,20 @@ class TokenParser:
 
         return token
 
-    def match(self, text: str) -> bool:
+    def match(self, text: Keyword | Punctuation | Operator) -> bool:
         token = self.peek()
 
-        if token.category is TokenCategory.EOF:
-            return False
-
-        if token.text.casefold() != text.casefold():
+        if token != text:
             return False
 
         self.advance()
         return True
 
-    def expect(self, text: str) -> Token:
+    def expect(self, text: Keyword | Punctuation | Operator) -> Token:
         token = self.peek()
 
         if not self.match(text):
-            msg = f"Expected {text!r}, got {token.text!r} at {token.line}:{token.column}"
+            msg = f"Expected {text!r}, got {token._text!r} at {token.line}:{token.column}"
             raise CompilationError(msg)
 
         return token
@@ -51,18 +51,18 @@ class TokenParser:
         token = self.peek()
 
         if token.category is not TokenCategory.IDENTIFIER:
-            msg = f"Expected identifier, got {token.text!r} at {token.line}:{token.column}"
+            msg = f"Expected identifier, got {token._text!r} at {token.line}:{token.column}"
             raise CompilationError(msg)
 
         return self.advance()
 
-    def parse_qualified_name(self) -> str:
-        parts = [self.expect_identifier().text]
+    def parse_qualified_name(self) -> ReferencePath:
+        path = ReferencePath(self.expect_identifier().fname)
 
-        while self.match("."):
-            parts.append(self.expect_identifier().text)
+        while self.match(Punctuation.DOT):
+            path += self.expect_identifier().fname
 
-        return ".".join(parts)
+        return path
 
     def parse_integer(self) -> int:
         token = self.peek()
@@ -72,11 +72,11 @@ class TokenParser:
             raise CompilationError(msg)
 
         self.advance()
-        base = 16 if token.text.lower().startswith("0x") else 10
-        return int(token.text, base)
+        base = 16 if token._text.lower().startswith("0x") else 10
+        return int(token._text, base)
 
     def parse_parenthesized_tokens(self) -> tuple[Token, ...]:
-        opening = self.expect("(")
+        opening = self.expect(Punctuation.LEFT_PAREN)
         tokens: list[Token] = []
         depth = 1
 
@@ -88,9 +88,9 @@ class TokenParser:
                 raise CompilationError(msg)
 
             if token.category is TokenCategory.SYMBOL:
-                if token.text == "(":
+                if token == Punctuation.LEFT_PAREN:
                     depth += 1
-                elif token.text == ")":
+                elif token == Punctuation.RIGHT_PAREN:
                     depth -= 1
 
             if depth:
@@ -99,7 +99,7 @@ class TokenParser:
         return tuple(tokens)
 
     def parse_braced_tokens(self) -> tuple[Token, ...]:
-        opening = self.expect("{")
+        opening = self.expect(Punctuation.LEFT_BRACE)
         tokens: list[Token] = []
         depth = 1
 
@@ -111,12 +111,16 @@ class TokenParser:
                 raise CompilationError(msg)
 
             if token.category is TokenCategory.SYMBOL:
-                if token.text == "{":
+                if token == Punctuation.LEFT_BRACE:
                     depth += 1
-                elif token.text == "}":
+                elif token == Punctuation.RIGHT_BRACE:
                     depth -= 1
 
             if depth:
                 tokens.append(token)
 
         return tuple(tokens)
+
+    def peek_keyword(self, offset: int = 0) -> Keyword | None:
+        """Read an identifier as a keyword without consuming it."""
+        return self.peek(offset).keyword

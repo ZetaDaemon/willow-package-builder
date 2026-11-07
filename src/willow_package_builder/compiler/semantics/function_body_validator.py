@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from willow_package_builder.compiler.semantics.intrinsics import CORE_OBJECT
 from willow_package_builder.compiler.syntax.declarations import (
     ParameterDeclaration,
     VariableDeclaration,
@@ -39,6 +40,8 @@ from .scope import VariableCategory
 from .types import ResolvedType, TypeCategory
 
 if TYPE_CHECKING:
+    from willow_package_builder.upackage import ReferencePath
+
     from .expression_resolver import ExpressionResolver
 
 
@@ -76,7 +79,7 @@ class FunctionBodyValidator:
 
         if (
             VariableModifier.PRIVATE_WRITE in declaration.modifiers
-            and owner.casefold() != self.resolver.scope.class_path.casefold()
+            and owner != self.resolver.scope.class_path
         ):
             msg = f"Cannot modify privatewrite variable {owner}.{declaration.name}"
             raise CompilationError(msg)
@@ -87,7 +90,7 @@ class FunctionBodyValidator:
         ):
             current_class = self.resolver.scope.class_path
             allowed = any(
-                ancestor.casefold() == owner.casefold()
+                ancestor == owner
                 for ancestor, _ in self.resolver.context.references.iter_class_hierarchy(
                     current_class, self.resolver.context.parents
                 )
@@ -262,22 +265,21 @@ class FunctionBodyValidator:
 
     def validate_statement(self, statement: Statement, return_type: ResolvedType) -> None:
         scope = self.resolver.scope
-        owner = self.resolver.context.references.display_class_path(scope.class_path)
-        path = f"{owner}.{scope.function.name}"
+        owner = scope.class_path
+        path = owner + scope.function.name
 
         with declaration_context(path, statement.location):
             self._validate_statement(statement, return_type)
 
     def validate(self, body: FunctionBody) -> None:
         scope = self.resolver.scope
-        references = self.resolver.context.references
-        owner = references.display_class_path(scope.class_path)
-        function_path = f"{owner}.{scope.function.name}"
+        owner = scope.class_path
+        function_path = owner + scope.function.name
 
         with declaration_context(function_path, scope.function.location):
             # Resolve declared types even when the variables are unused.
             for declaration in (*scope.function.parameters, *body.function_locals):
-                path = f"{function_path}.{declaration.name}"
+                path = function_path + declaration.name
 
                 with declaration_context(path, declaration.location):
                     self.resolver.resolve_declared_type(declaration.type_ref, scope.class_path)
@@ -317,7 +319,7 @@ class FunctionBodyValidator:
         member = self.resolver.resolve_call(expression)
         function = member.declaration
         scope = self.resolver.scope
-        path = f"{member.owner_class}.{function.name}"
+        path = member.owner_class + function.name
 
         match expression.callee:
             case MemberExpression():
@@ -336,9 +338,15 @@ class FunctionBodyValidator:
 
         if (
             FunctionModifier.PRIVATE in function.modifiers
-            and member.owner_class.casefold() != scope.class_path.casefold()
+            and member.owner_class != scope.class_path
         ):
             msg = f"Cannot access private function {path}"
+            raise CompilationError(msg)
+
+        if FunctionModifier.PROTECTED in function.modifiers and not self.can_access_protected(
+            member.owner_class
+        ):
+            msg = f"Cannot access protected function {path}"
             raise CompilationError(msg)
 
         parameters = function.parameters
@@ -418,17 +426,14 @@ class FunctionBodyValidator:
                 raise NotImplementedError(msg)
 
     def validate_variable_access(
-        self, declaration: ParameterDeclaration | VariableDeclaration, owner: str
+        self, declaration: ParameterDeclaration | VariableDeclaration, owner: ReferencePath
     ) -> None:
         if not isinstance(declaration, VariableDeclaration):
             return
 
         current = self.resolver.scope.class_path
 
-        if (
-            VariableModifier.PRIVATE in declaration.modifiers
-            and current.casefold() != owner.casefold()
-        ):
+        if VariableModifier.PRIVATE in declaration.modifiers and current != owner:
             msg = f"Cannot access private variable {owner}.{declaration.name}"
             raise CompilationError(msg)
 
@@ -438,15 +443,15 @@ class FunctionBodyValidator:
             msg = f"Cannot access protected variable {owner}.{declaration.name}"
             raise CompilationError(msg)
 
-    def can_access_protected(self, owner: str) -> bool:
+    def can_access_protected(self, owner: ReferencePath) -> bool:
         references = self.resolver.context.references
         parents = self.resolver.context.parents
         packages = self.resolver.context.packages
         current = self.resolver.scope.class_path
-        visited: set[str] = set()
+        visited: set[ReferencePath] = set()
 
-        while current.casefold() != "core.object":
-            key = current.casefold()
+        while current != CORE_OBJECT:
+            key = current
 
             if key in visited:
                 msg = f"Circular within hierarchy at {current}"

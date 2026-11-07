@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from willow_package_builder.builder.build_component import BuildComponent
-from willow_package_builder.compiler.codegen.emitter import FunctionEmitter
+from willow_package_builder.compiler.codegen.emitter import RETURN_VALUE, FunctionEmitter
 from willow_package_builder.compiler.semantics.expression_resolver import ExpressionResolver
 from willow_package_builder.compiler.semantics.function_body_validator import FunctionBodyValidator
 from willow_package_builder.compiler.semantics.scope import FunctionScope
@@ -64,14 +64,14 @@ class FunctionBuilder(BuildComponent):
         self, function: FunctionDeclaration, resolver: ExpressionResolver
     ) -> list[Expression | None]:
         defaults: list[Expression | None] = []
-        owner = self.context.references.display_class_path(resolver.scope.class_path)
+        owner = resolver.scope.class_path
 
         for parameter in function.parameters:
             if parameter.default_tokens is None:
                 defaults.append(None)
                 continue
 
-            path = f"{owner}.{function.name}.{parameter.name}"
+            path = owner + function.name + parameter.name
 
             with declaration_context(path, parameter.location):
                 if ParameterModifier.OPTIONAL not in parameter.modifiers:
@@ -88,13 +88,13 @@ class FunctionBuilder(BuildComponent):
         function: FunctionDeclaration,
         function_payload: UFunctionPayload,
         function_object: UObject,
-        class_path: str,
+        class_path: ReferencePath,
     ) -> list[UObject]:
         properties: list[UObject] = []
-        owner = self.context.references.display_class_path(class_path)
+        owner = class_path
 
         for parameter in function.parameters:
-            path = f"{owner}.{function.name}.{parameter.name}"
+            path = owner + function.name + parameter.name
 
             with declaration_context(path, parameter.location):
                 if parameter.array_dimension_name is not None or parameter.array_dimension != 1:
@@ -134,11 +134,11 @@ class FunctionBuilder(BuildComponent):
     def _prepare_function(
         self,
         function: FunctionDeclaration,
-        class_path: str,
+        class_path: ReferencePath,
         class_payload: UClassPayload,
         class_object_reference: ReferencePath,
     ) -> PreparedFunction:
-        function_class = self.references.class_object_reference("Core.Function")
+        function_class = self.references.class_object_reference(ReferencePath("Core.Function"))
         supported_modifiers = {FunctionModifier.STATIC, FunctionModifier.PROTECTED}
 
         if function.func_category is not FunctionCategory.FUNCTION:
@@ -167,10 +167,7 @@ class FunctionBuilder(BuildComponent):
             for owner, ancestor in self.context.references.iter_class_hierarchy(
                 parent, self.context.parents
             ):
-                if any(
-                    candidate.name.casefold() == function.name.casefold()
-                    for candidate in ancestor.functions
-                ):
+                if any(candidate.name == function.name for candidate in ancestor.functions):
                     msg = (
                         f"Override {class_path}.{function.name} of {owner} "
                         "is not supported by the function builder yet"
@@ -213,13 +210,11 @@ class FunctionBuilder(BuildComponent):
             raise NotImplementedError(msg)
 
         function_payload = UFunctionPayload(
-            friendly_name=FName(function.name),
-            function_flags=flags,
-            next_field=class_payload.children,
+            friendly_name=function.name, function_flags=flags, next_field=class_payload.children
         )
 
         function_object = UObject(
-            FName(function.name),
+            function.name,
             ObjectFlags.PUBLIC_EXPORT,
             class_object_reference,
             function_class,
@@ -236,17 +231,17 @@ class FunctionBuilder(BuildComponent):
             properties.append(
                 self.properties.create_property(
                     function_object,
-                    "ReturnValue",
+                    RETURN_VALUE,
                     function.return_type,
                     class_path,
                     PropertyFlags.PARAM | PropertyFlags.OUT_PARAM | PropertyFlags.RETURN_PARAM,
                 )
             )
 
-        owner = self.context.references.display_class_path(class_path)
+        owner = class_path
 
         for local in locals_:
-            path = f"{owner}.{function.name}.{local.name}"
+            path = owner + function.name + local.name
 
             with declaration_context(path, local.location):
                 obj = self.properties.create_property(
@@ -275,12 +270,12 @@ class FunctionBuilder(BuildComponent):
         prepared_function = PreparedFunction(resolver, body, function_object, parameter_defaults)
 
         class_payload.children = function_reference
-        class_payload.function_map[FName(function.name)] = function_reference
+        class_payload.function_map[function.name] = function_reference
 
         return prepared_function
 
     def _prepare_class_functions(
-        self, class_path: str, exports: ClassExport
+        self, class_path: ReferencePath, exports: ClassExport
     ) -> list[PreparedFunction]:
         class_payload = exports.class_object.payload
 
@@ -288,11 +283,11 @@ class FunctionBuilder(BuildComponent):
             msg = f"Class must be linked before building functions: {class_path}"
             raise ValueError(msg)  # noqa: TRY004
 
-        owner = self.context.references.display_class_path(class_path)
+        owner = class_path
         prepared: list[PreparedFunction] = []
 
         for function in exports.declaration.functions:
-            path = f"{owner}.{function.name}"
+            path = owner + function.name
 
             with declaration_context(path, function.location):
                 prepared.append(
@@ -316,8 +311,8 @@ class FunctionBuilder(BuildComponent):
 
         for function in prepared:
             scope = function.resolver.scope
-            owner = self.context.references.display_class_path(scope.class_path)
-            path = f"{owner}.{scope.function.name}"
+            owner = scope.class_path
+            path = owner + scope.function.name
 
             with declaration_context(path, scope.function.location):
                 payload = cast("UFunctionPayload", function.function_object.payload)

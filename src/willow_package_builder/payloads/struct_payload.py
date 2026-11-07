@@ -4,7 +4,7 @@ from enum import IntFlag
 from typing import TYPE_CHECKING, override
 
 from willow_package_builder.properties.value_serializer import ValueSerializer
-from willow_package_builder.upackage import FName, Package
+from willow_package_builder.upackage import FName, Package, ReferencePath
 
 from .class_payload import UStructPayload
 
@@ -31,7 +31,7 @@ class StructFlags(IntFlag):
 class UScriptStructPayload(UStructPayload):
     """A script-defined struct and its default values."""
 
-    struct_path: str = field(kw_only=True)
+    struct_path: ReferencePath = field(kw_only=True)
     context: BuildContext = field(kw_only=True, repr=False)
 
     net_index: int = -1

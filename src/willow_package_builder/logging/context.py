@@ -1,16 +1,23 @@
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .diagnostics import CompilationError, SourceLocation, UnsupportedFeatureError
 
+if TYPE_CHECKING:
+    from willow_package_builder.upackage import ReferencePath
+
 
 @contextmanager
-def declaration_context(path: str, location: SourceLocation | None) -> Generator[None]:
+def declaration_context(
+    path: ReferencePath | Path, location: SourceLocation | None
+) -> Generator[None]:
     try:
         yield
     except CompilationError as error:
         if error.context is None:
-            error.context = path
+            error.context = str(path)
 
             if error.location is None:
                 error.location = location

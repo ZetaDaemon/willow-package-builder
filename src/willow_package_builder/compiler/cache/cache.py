@@ -21,6 +21,7 @@ from willow_package_builder.compiler.syntax.declarations import (
     TypeReference,
     VariableDeclaration,
 )
+from willow_package_builder.compiler.syntax.keyword import Keyword
 from willow_package_builder.compiler.syntax.lexer import Lexer, Token, TokenCategory
 from willow_package_builder.compiler.syntax.modifiers import (
     ClassModifierName,
@@ -31,6 +32,7 @@ from willow_package_builder.compiler.syntax.modifiers import (
 )
 from willow_package_builder.compiler.syntax.parser import DeclarationParser
 from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
+from willow_package_builder.compiler.syntax.punctuation import Operator
 from willow_package_builder.logging import CompilationError, SourceLocation, info
 from willow_package_builder.properties.values import (
     ArrayValue,
@@ -61,8 +63,8 @@ DECLARATION_PARSER_VERSION = 13
 
 @dataclass
 class CachedClass:
-    package_name: str
-    source_path: str
+    package_name: FName
+    source_path: Path
     source_hash: str
     declaration: ClassDeclaration
 
@@ -107,8 +109,11 @@ CACHE_TYPES: dict[str, Callable[..., object]] = {
         IndexedArrayDefaults,
         DelegateValue,
         ReferencePath,
+        Keyword,
+        Path,
     )
 }
+CACHE_TYPES["Path"] = lambda args: Path(args)  # noqa: PLW0108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
 
 CACHE_ENUMS: dict[str, type[Enum]] = {
     cls.__name__: cls
@@ -121,6 +126,7 @@ CACHE_ENUMS: dict[str, type[Enum]] = {
         ClassModifierName,
         VariableModifier,
         StructModifier,
+        Operator,
     )
 }
 
@@ -132,6 +138,9 @@ def encode_cache_value(value: object) -> object:
 
     if isinstance(value, Name):
         return {"$type": "Name", "fields": {"name": str(value)}}
+
+    if isinstance(value, Path):
+        return {"$type": "Path", "fields": {"args": str(value)}}
 
     if is_dataclass(value) and not isinstance(value, type):
         return {
@@ -273,7 +282,7 @@ def load_or_parse_class(
     config: PackageConfig, source_path: Path, *, include_body_tokens: bool
 ) -> CachedClass:
     source_path = source_path.resolve()
-    relative_path = source_path.relative_to(config.directory).as_posix()
+    relative_path = source_path.relative_to(config.directory)
 
     source_bytes = source_path.read_bytes()
     source_hash = sha256(source_bytes).hexdigest()

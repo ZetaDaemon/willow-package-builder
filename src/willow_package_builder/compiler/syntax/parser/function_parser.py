@@ -1,4 +1,3 @@
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Self
 
 from willow_package_builder.compiler.syntax.declarations import OperatorCategory
@@ -15,7 +14,9 @@ from willow_package_builder.compiler.syntax.expressions import (
     StringExpression,
     UnaryExpression,
 )
+from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
+from willow_package_builder.compiler.syntax.punctuation import Operator, Punctuation
 from willow_package_builder.compiler.syntax.statements import (
     AssignmentStatement,
     BreakStatement,
@@ -35,6 +36,8 @@ from willow_package_builder.logging import CompilationError, SourceLocation
 from .declaration_syntax_parser import DeclarationSyntaxParser
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from willow_package_builder.compiler.semantics.expression_resolver import ExpressionResolver
     from willow_package_builder.compiler.syntax.declarations import (
         FunctionDeclaration,
@@ -45,7 +48,7 @@ if TYPE_CHECKING:
 class FunctionParser(DeclarationSyntaxParser):
     expression_resolver: ExpressionResolver | None
 
-    def __init__(
+    def __init__(  # noqa: D107
         self, tokens: list[Token], expression_resolver: ExpressionResolver | None = None
     ) -> None:
         super().__init__(tokens)
@@ -61,7 +64,7 @@ class FunctionParser(DeclarationSyntaxParser):
         if tokens:
             last = tokens[-1]
             line = last.line
-            column = last.column + len(last.text)
+            column = last.column + len(last)
 
         eof = Token(TokenCategory.EOF, "", line, column)
 
@@ -83,28 +86,31 @@ class FunctionParser(DeclarationSyntaxParser):
         match token.category:
             case TokenCategory.INTEGER:
                 self.advance()
-                base = 16 if token.text.lower().startswith("0x") else 10
-                return IntegerExpression(int(token.text, base))
+                return IntegerExpression(int(token))
 
             case TokenCategory.IDENTIFIER:
                 self.advance()
-                keyword = token.text.casefold()
 
-                if keyword in ("true", "false"):
-                    return BooleanExpression(keyword == "true")
+                match token:
+                    case ScriptKeywords.TRUE:
+                        return BooleanExpression(True)  # noqa: FBT003
 
-                if keyword == "self":
-                    return SelfExpression()
+                    case ScriptKeywords.FALSE:
+                        return BooleanExpression(False)  # noqa: FBT003
 
-                return IdentifierExpression(token.text)
+                    case ScriptKeywords.SELF:
+                        return SelfExpression()
+
+                    case _:
+                        return IdentifierExpression(token.fname)
 
             case TokenCategory.FLOAT:
                 self.advance()
-                return FloatExpression(float(token.text))
+                return FloatExpression(float(token))
 
             case TokenCategory.STRING:
                 self.advance()
-                value = token.text[1:-1]
+                value = str(token)[1:-1]
 
                 if "\\" in value:
                     msg = (
@@ -118,12 +124,12 @@ class FunctionParser(DeclarationSyntaxParser):
             case _:
                 pass
 
-        if self.match("("):
+        if self.match(Punctuation.LEFT_PAREN):
             expression = self.parse_expression()
-            self.expect(")")
+            self.expect(Punctuation.RIGHT_PAREN)
             return expression
 
-        msg = f"Expected expression, got {token.text!r} at {token.line}:{token.column}"
+        msg = f"Expected expression, got {token} at {token.line}:{token.column}"
         raise CompilationError(msg)
 
     def parse_expression(self, maximum_precedence: int | None = None) -> Expression:
@@ -137,11 +143,12 @@ class FunctionParser(DeclarationSyntaxParser):
 
         while True:
             token = self.peek()
+            operator = token.operator_name
 
-            if token.category not in (TokenCategory.SYMBOL, TokenCategory.IDENTIFIER):
+            if operator is None:
                 break
 
-            precedence = resolver.binary_precedence(token.text, resolver.type_of(left))
+            precedence = resolver.binary_precedence(operator, resolver.type_of(left))
 
             if precedence is None:
                 break
@@ -152,9 +159,7 @@ class FunctionParser(DeclarationSyntaxParser):
             self.advance()
             right = self.parse_expression(precedence - 1)
 
-            expression = BinaryExpression(left, token.text, right)
-
-            # Verify that these two operand types have an exact overload.
+            expression = BinaryExpression(left, operator, right)
             resolver.resolve_operator(expression)
             left = expression
 
@@ -163,18 +168,18 @@ class FunctionParser(DeclarationSyntaxParser):
     def parse_local_declarations(self) -> list[VariableDeclaration]:
         declarations: list[VariableDeclaration] = []
 
-        while self.peek().text.casefold() == "local":
+        while self.peek() == ScriptKeywords.LOCAL:
             declarations.extend(self.parse_variable_declaration(is_local=True))
 
         return declarations
 
     def parse_statement_branch(self) -> list[Statement]:
-        if not self.match("{"):
+        if not self.match(Punctuation.LEFT_BRACE):
             return [self.parse_statement()]
 
         statements: list[Statement] = []
 
-        while not self.match("}"):
+        while not self.match(Punctuation.RIGHT_BRACE):
             token = self.peek()
 
             if token.category is TokenCategory.EOF:
@@ -186,82 +191,84 @@ class FunctionParser(DeclarationSyntaxParser):
         return statements
 
     def parse_if_statement(self) -> IfStatement:
-        self.expect("if")
-        self.expect("(")
+        self.expect(ScriptKeywords.IF)
+        self.expect(Punctuation.LEFT_PAREN)
         condition = self.parse_expression()
-        self.expect(")")
+        self.expect(Punctuation.RIGHT_PAREN)
 
         then_statements = self.parse_statement_branch()
 
         else_statements = None
-        if self.match("else"):
+        if self.match(ScriptKeywords.ELSE):
             else_statements = self.parse_statement_branch()
 
         return IfStatement(condition, then_statements, else_statements)
 
     def parse_while_statement(self) -> WhileStatement:
-        self.expect("while")
-        self.expect("(")
+        self.expect(ScriptKeywords.WHILE)
+        self.expect(Punctuation.LEFT_PAREN)
         condition = self.parse_expression()
-        self.expect(")")
+        self.expect(Punctuation.RIGHT_PAREN)
 
         statements = self.parse_statement_branch()
         return WhileStatement(condition, statements)
 
     def _parse_statement(self) -> Statement:
-        if self.match(";"):
+        if self.match(Punctuation.SEMICOLON):
             return EmptyStatement()
 
-        if self.match("return"):
-            if self.match(";"):
+        if self.match(ScriptKeywords.RETURN):
+            if self.match(Punctuation.SEMICOLON):
                 return ReturnStatement()
 
             value = self.parse_expression()
-            self.expect(";")
+            self.expect(Punctuation.SEMICOLON)
             return ReturnStatement(value)
 
         token = self.peek()
 
-        match token.text.casefold():
-            case "local":
+        # Because the match case ends up replacing the token variable with the match
+        # i assigned it to a secondary variable so token.line and token.column remain available.
+        t = token
+        match t:
+            case ScriptKeywords.LOCAL:
                 msg = (
                     "Local declarations must precede executable statements "
                     f"at {token.line}:{token.column}"
                 )
                 raise CompilationError(msg)
 
-            case "if":
+            case ScriptKeywords.IF:
                 return self.parse_if_statement()
 
-            case "while":
+            case ScriptKeywords.WHILE:
                 return self.parse_while_statement()
 
-            case "for":
+            case ScriptKeywords.FOR:
                 return self.parse_for_statement()
 
-            case "do":
+            case ScriptKeywords.DO:
                 return self.parse_do_until_statement()
 
             case _:
                 pass
 
-        if self.match("break"):
-            self.expect(";")
+        if self.match(ScriptKeywords.BREAK):
+            self.expect(Punctuation.SEMICOLON)
             return BreakStatement()
 
-        if self.match("continue"):
-            self.expect(";")
+        if self.match(ScriptKeywords.CONTINUE):
+            self.expect(Punctuation.SEMICOLON)
             return ContinueStatement()
 
         expression = self.parse_expression()
 
-        if self.match("="):
+        if self.match(Operator.EQUAL):
             value = self.parse_expression()
-            self.expect(";")
-
+            self.expect(Punctuation.SEMICOLON)
             return AssignmentStatement(expression, value)
 
-        self.expect(";")
+        self.expect(Punctuation.SEMICOLON)
         return ExpressionStatement(expression)
 
     def parse_statement(self) -> Statement:
@@ -295,38 +302,38 @@ class FunctionParser(DeclarationSyntaxParser):
         location = SourceLocation(token.line, token.column)
         expression = self.parse_expression()
 
-        if self.match("="):
+        if self.match(Operator.EQUAL):
             value = self.parse_expression()
             return AssignmentStatement(expression, value, location=location)
 
         return ExpressionStatement(expression, location=location)
 
     def parse_for_statement(self) -> ForStatement:
-        self.expect("for")
-        self.expect("(")
+        self.expect(ScriptKeywords.FOR)
+        self.expect(Punctuation.LEFT_PAREN)
 
         initializer = self.parse_for_clause()
-        self.expect(";")
+        self.expect(Punctuation.SEMICOLON)
 
         condition = self.parse_expression()
-        self.expect(";")
+        self.expect(Punctuation.SEMICOLON)
 
         increment = self.parse_for_clause()
-        self.expect(")")
+        self.expect(Punctuation.RIGHT_PAREN)
 
         statements = self.parse_statement_branch()
 
         return ForStatement(initializer, condition, increment, statements)
 
     def parse_do_until_statement(self) -> DoUntilStatement:
-        self.expect("do")
+        self.expect(ScriptKeywords.DO)
         statements = self.parse_statement_branch()
 
-        self.expect("until")
-        self.expect("(")
+        self.expect(ScriptKeywords.UNTIL)
+        self.expect(Punctuation.LEFT_PAREN)
         condition = self.parse_expression()
-        self.expect(")")
-        self.expect(";")
+        self.expect(Punctuation.RIGHT_PAREN)
+        self.expect(Punctuation.SEMICOLON)
 
         return DoUntilStatement(statements, condition)
 
@@ -340,19 +347,23 @@ class FunctionParser(DeclarationSyntaxParser):
         expression = self.parse_primary_expression()
 
         while True:
-            if self.match("."):
-                name = self.expect_identifier().text
+            if self.match(Punctuation.DOT):
+                name = self.expect_identifier().fname
                 expression = MemberExpression(expression, name)
                 continue
 
-            if self.peek().text == "(":
+            if self.peek() == Punctuation.LEFT_PAREN:
                 arguments = self.parse_call_arguments()
                 expression = CallExpression(expression, arguments)
                 continue
 
-            if resolver.has_unary_operator(self.peek().text, OperatorCategory.POSTFIX):
-                token = self.advance()
-                expression = UnaryExpression(token.text, expression, OperatorCategory.POSTFIX)
+            operator_name = self.peek().operator_name
+            if operator_name is not None and resolver.has_unary_operator(
+                operator_name, OperatorCategory.POSTFIX
+            ):
+                # we already got what we needed in operator_name, now just progress the parser.
+                self.advance()
+                expression = UnaryExpression(operator_name, expression, OperatorCategory.POSTFIX)
                 resolver.resolve_unary_operator(expression)
                 continue
 
@@ -365,45 +376,45 @@ class FunctionParser(DeclarationSyntaxParser):
             msg = "Unary expression parsing requires an expression resolver"
             raise ValueError(msg)
 
-        token = self.peek()
+        operator_name = self.peek().operator_name
 
-        if resolver.has_unary_operator(token.text, OperatorCategory.PREFIX):
+        if operator_name is not None and resolver.has_unary_operator(
+            operator_name, OperatorCategory.PREFIX
+        ):
+            # we already got what we needed in operator_name, now just progress the parser.
             self.advance()
             operand = self.parse_unary_expression()
 
-            expression = UnaryExpression(token.text, operand, OperatorCategory.PREFIX)
+            expression = UnaryExpression(operator_name, operand, OperatorCategory.PREFIX)
             resolver.resolve_unary_operator(expression)
             return expression
 
         return self.parse_postfix_expression()
 
     def parse_call_arguments(self) -> list[Expression | None]:
-        self.expect("(")
+        self.expect(Punctuation.LEFT_PAREN)
         arguments: list[Expression | None] = []
 
-        if self.match(")"):
+        if self.match(Punctuation.RIGHT_PAREN):
             return arguments
 
         while True:
-            if self.peek().text in (",", ")"):
+            if self.peek() in (Punctuation.COMMA, Punctuation.RIGHT_PAREN):
                 arguments.append(None)
             else:
                 arguments.append(self.parse_expression())
 
-            if self.match(")"):
+            if self.match(Punctuation.RIGHT_PAREN):
                 return arguments
 
-            self.expect(",")
+            self.expect(Punctuation.COMMA)
 
     def parse_default_expression(self) -> Expression:
         expression = self.parse_expression()
 
         token = self.peek()
         if token.category is not TokenCategory.EOF:
-            msg = (
-                f"Unexpected token {token.text!r} after parameter default "
-                f"at {token.line}:{token.column}"
-            )
+            msg = f"Unexpected token {token} after parameter default at {token.line}:{token.column}"
             raise CompilationError(msg)
 
         return expression

@@ -4,9 +4,8 @@ from typing import TYPE_CHECKING
 from willow_package_builder.builder.build_component import BuildComponent
 from willow_package_builder.compiler.syntax.modifiers import ClassModifierName
 from willow_package_builder.logging import CompilationError, WarningCode, info, warn
-from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import ClassFlags, StateFlags, UClassPayload
-from willow_package_builder.upackage import FName, ObjectFlags, UObject
+from willow_package_builder.upackage import ObjectFlags, ReferencePath, UObject
 
 from .exports import ClassExport
 
@@ -48,10 +47,10 @@ class ClassBuilder(BuildComponent):
     objects: ObjectBuilder
 
     def reserve_classes(self) -> None:
-        package_name = self.config.name.casefold()
+        package_name = self.config.name
 
         for class_path in self.context.class_order:
-            if class_path.partition(".")[0] != package_name:
+            if class_path.get_outer().name != package_name:
                 continue
 
             declaration = self.context.references.classes[class_path]
@@ -66,9 +65,7 @@ class ClassBuilder(BuildComponent):
                 continue
 
             info(f"Compiling class {class_path}")
-            class_object = UObject(FName(declaration.name), ObjectFlags.CLASS_EXPORT)
-
-            class_reference = self.package.add_export(class_object)
+            class_object = UObject(declaration.name, ObjectFlags.CLASS_EXPORT)
 
             default_object = self.objects.construct_cdo(class_path, class_object)
 
@@ -76,7 +73,7 @@ class ClassBuilder(BuildComponent):
 
             self.classes[class_path] = ClassExport(declaration, class_object, default_object)
 
-    def resolve_within_class(self, class_path: str) -> str:
+    def resolve_within_class(self, class_path: ReferencePath) -> ReferencePath:
         return self.context.references.resolve_within_class(
             class_path, self.context.parents, self.context.packages
         )

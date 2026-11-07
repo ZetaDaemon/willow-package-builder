@@ -3,55 +3,59 @@ from willow_package_builder.compiler.syntax.declarations import (
     TypeReference,
     VariableDeclaration,
 )
+from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
 from willow_package_builder.compiler.syntax.modifiers import VariableModifier
+from willow_package_builder.compiler.syntax.punctuation import Operator, Punctuation
 from willow_package_builder.logging import CompilationError, SourceLocation
+from willow_package_builder.upackage import ReferencePath
 
 from .token_parser import TokenParser
 
-PARAMETERIZED_TYPES = frozenset({"array", "class", "delegate"})
+PARAMETERIZED_TYPES = frozenset(ReferencePath(name) for name in ("array", "class", "delegate"))
+MAP_TYPE = ReferencePath("map")
 
 
 class DeclarationSyntaxParser(TokenParser):
     def expect_type_close(self) -> None:
         token = self.peek()
 
-        if token.category is not TokenCategory.SYMBOL or token.text not in (">", ">>", ">>>"):
-            msg = f"Expected '>', got {token.text!r} at {token.line}:{token.column}"
+        if token not in (Operator.GREATER, Operator.SHIFT_RIGHT, Operator.UNSIGNED_SHIFT_RIGHT):
+            msg = f"Expected '{Operator.GREATER!s}', got {token} at {token.line}:{token.column}"
             raise CompilationError(msg)
 
         self.advance()
 
         # Consume one closing bracket and leave the others for outer types.
-        if len(token.text) > 1:
+        if len(token_text := str(token)) > 1:
             self.tokens.insert(
                 self.position,
-                Token(TokenCategory.SYMBOL, token.text[1:], token.line, token.column + 1),
+                Token(TokenCategory.SYMBOL, token_text[1:], token.line, token.column + 1),
             )
 
     def parse_type(self, *, allow_modifiers: bool = False) -> TypeReference:
         modifiers: list[VariableModifier] = []
 
         if allow_modifiers:
-            while self.peek().text.casefold() in VariableModifier:
-                modifiers.append(VariableModifier(self.advance().text.casefold()))
+            while self.peek() in VariableModifier:
+                modifiers.append(VariableModifier(self.advance()))
 
         name = self.parse_qualified_name()
         arguments: list[TypeReference] = []
 
-        if name.casefold() == "map" and self.match("{"):
+        if name == MAP_TYPE and self.match(Punctuation.LEFT_BRACE):
             arguments.append(self.parse_type())
-            self.expect(",")
+            self.expect(Punctuation.COMMA)
             arguments.append(self.parse_type())
-            self.expect("}")
+            self.expect(Punctuation.RIGHT_BRACE)
 
             return TypeReference(name, tuple(arguments), tuple(modifiers))
 
-        if name.casefold() in PARAMETERIZED_TYPES and self.match("<"):
+        if name in PARAMETERIZED_TYPES and self.match(Operator.LESS):
             while True:
                 arguments.append(self.parse_type(allow_modifiers=True))
 
-                if not self.match(","):
+                if not self.match(Punctuation.COMMA):
                     break
 
             self.expect_type_close()
@@ -66,17 +70,17 @@ class DeclarationSyntaxParser(TokenParser):
         local int Temporary; -> one variable
         var int First, Second; -> two variables
         """
-        self.expect("local" if is_local else "var")
+        self.expect(ScriptKeywords.LOCAL if is_local else ScriptKeywords.VAR)
 
         category_tokens = None
         modifiers: list[VariableModifier] = []
 
         if not is_local:
-            if self.peek().text == "(":
+            if self.peek() == Punctuation.LEFT_PAREN:
                 category_tokens = self.parse_parenthesized_tokens()
 
-            while self.peek().text.casefold() in VariableModifier:
-                modifiers.append(VariableModifier(self.advance().text.casefold()))
+            while self.peek() in VariableModifier:
+                modifiers.append(VariableModifier(self.advance()))
 
         type_ref = self.parse_type()
 
@@ -84,12 +88,11 @@ class DeclarationSyntaxParser(TokenParser):
 
         while True:
             name_token = self.expect_identifier()
-            name = name_token.text
             array_dimension, array_dimension_name = self.parse_array_dimension()
 
             variables.append(
                 VariableDeclaration(
-                    name,
+                    name_token.fname,
                     type_ref,
                     array_dimension,
                     tuple(modifiers),
@@ -99,14 +102,14 @@ class DeclarationSyntaxParser(TokenParser):
                 )
             )
 
-            if not self.match(","):
+            if not self.match(Punctuation.COMMA):
                 break
 
-        self.expect(";")
+        self.expect(Punctuation.SEMICOLON)
         return variables
 
-    def parse_array_dimension(self) -> tuple[int, str | None]:
-        if not self.match("["):
+    def parse_array_dimension(self) -> tuple[int, ReferencePath | None]:
+        if not self.match(Punctuation.LEFT_BRACKET):
             return 1, None
 
         token = self.peek()
@@ -115,8 +118,7 @@ class DeclarationSyntaxParser(TokenParser):
 
         if token.category is TokenCategory.INTEGER:
             self.advance()
-            base = 16 if token.text.lower().startswith("0x") else 10
-            dimension = int(token.text, base)
+            dimension = int(token)
 
             if not 1 < dimension <= MAX_FIXED_ARRAY_DIMENSION:
                 msg = f"Fixed array dimension must be between 2 and {MAX_FIXED_ARRAY_DIMENSION}"
@@ -129,5 +131,5 @@ class DeclarationSyntaxParser(TokenParser):
             msg = "Expected an integer or named array dimension"
             raise CompilationError(msg, SourceLocation(token.line, token.column))
 
-        self.expect("]")
+        self.expect(Punctuation.RIGHT_BRACKET)
         return dimension, dimension_name

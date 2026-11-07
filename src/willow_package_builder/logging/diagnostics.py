@@ -21,6 +21,7 @@ class WarningCode(StrEnum):
     PLACEHOLDER_FUNCTION_BODY = "placeholder-function-body"
     UNSUPPORTED_INTERFACE_COMPILATION = "unsupported-interface-compilation"
     INVALID_REFERENCE_DEFAULT = "invalid-reference-default"
+    EXTERNAL_ARCHETYPE_DEFAULTS = "external-archetype-defaults"
 
 
 class WarningAction(StrEnum):

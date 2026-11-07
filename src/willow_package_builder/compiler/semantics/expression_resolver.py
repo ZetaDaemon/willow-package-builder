@@ -30,6 +30,9 @@ if TYPE_CHECKING:
         OperatorDeclaration,
         TypeReference,
     )
+    from willow_package_builder.compiler.syntax.keyword import Keyword
+    from willow_package_builder.compiler.syntax.punctuation import Operator
+    from willow_package_builder.upackage import FName, ReferencePath
 
     from .reference_database import ResolvedMember
     from .scope import FunctionScope
@@ -40,18 +43,21 @@ class ExpressionResolver:
     context: BuildContext
     scope: FunctionScope
 
-    _visibility: dict[str, set[str]] = field(default_factory=dict, init=False, repr=False)
+    _visibility: dict[FName, set[FName]] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._visibility = {
-            config.name.casefold(): collect_visible_packages(config, self.context.packages)
+            config.name: collect_visible_packages(config, self.context.packages)
             for config in self.context.packages
         }
 
     def resolve_declared_type(
-        self, type_ref: TypeReference | None, owner_class: str
+        self, type_ref: TypeReference | None, owner_class: ReferencePath
     ) -> ResolvedType:
-        package_name = owner_class.partition(".")[0].casefold()
+        if owner_class.outer is None:
+            msg = f"Expected fully qualified class, got {owner_class}"
+            raise ValueError(msg)
+        package_name = owner_class.outer.name
 
         return self.context.references.resolve_type(
             type_ref, owner_class, self._visibility[package_name], self.context.parents
@@ -60,7 +66,10 @@ class ExpressionResolver:
     def resolve_operator(self, expression: BinaryExpression) -> ResolvedMember[OperatorDeclaration]:
         left = self.type_of(expression.left)
         right = self.type_of(expression.right)
-        package_name = self.scope.class_path.partition(".")[0].casefold()
+        if self.scope.class_path.outer is None:
+            msg = f"Expected fully qualified class, got {self.scope.class_path}"
+            raise ValueError(msg)
+        package_name = self.scope.class_path.outer.name
 
         return self.context.references.resolve_binary_operator(
             expression.operator,
@@ -122,8 +131,7 @@ class ExpressionResolver:
                 msg = f"Unsupported expression type: {type(expression).__name__}"
                 raise NotImplementedError(msg)
 
-    def binary_precedence(self, name: str, left: ResolvedType) -> int | None:
-        key = name.casefold()
+    def binary_precedence(self, name: Operator | Keyword, left: ResolvedType) -> int | None:
         precedences: set[int] = set()
 
         # A declaration on a derived class takes priority over an inherited
@@ -134,10 +142,7 @@ class ExpressionResolver:
             self.scope.class_path, self.context.parents
         ):
             for operator in declaration.operators:
-                if (
-                    operator.op_category is not OperatorCategory.BINARY
-                    or operator.name.casefold() != key
-                ):
+                if operator.op_category is not OperatorCategory.BINARY or operator.name != name:
                     continue
 
                 left_type = self.resolve_declared_type(operator.parameters[0].type_ref, owner)
@@ -175,7 +180,10 @@ class ExpressionResolver:
         self, expression: UnaryExpression
     ) -> ResolvedMember[OperatorDeclaration]:
         operand = self.type_of(expression.operand)
-        package_name = self.scope.class_path.partition(".")[0].casefold()
+        if self.scope.class_path.outer is None:
+            msg = f"Expected fully qualified class, got {self.scope.class_path}"
+            raise ValueError(msg)
+        package_name = self.scope.class_path.outer.name
 
         return self.context.references.resolve_unary_operator(
             expression.operator,
@@ -187,15 +195,16 @@ class ExpressionResolver:
         )
 
     def has_unary_operator(
-        self, name: str, category: Literal[OperatorCategory.PREFIX, OperatorCategory.POSTFIX]
+        self,
+        name: Operator | Keyword,
+        category: Literal[OperatorCategory.PREFIX, OperatorCategory.POSTFIX],
     ) -> bool:
-        key = name.casefold()
 
         for _, declaration in self.context.references.iter_class_hierarchy(
             self.scope.class_path, self.context.parents
         ):
             if any(
-                operator.op_category is category and operator.name.casefold() == key
+                operator.op_category is category and operator.name == name
                 for operator in declaration.operators
             ):
                 return True
@@ -250,9 +259,14 @@ class ExpressionResolver:
             return
 
         class_path = self.scope.class_path
-        package_name = class_path.partition(".")[0].casefold()
-        owner = self.context.references.display_class_path(class_path)
-        path = f"{owner}.{self.scope.function.name}.{declaration.name}"
+        if class_path.outer is None:
+            msg = f"Expected fully qualified class, got {class_path}"
+            raise ValueError(msg)
+
+        package_name = class_path.outer.name
+
+        owner = class_path
+        path = owner + self.scope.function.name + declaration.name
 
         with declaration_context(path, declaration.location):
             declaration.array_dimension = self.context.references.resolve_array_dimension(

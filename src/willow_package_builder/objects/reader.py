@@ -1,14 +1,18 @@
-from collections.abc import Hashable
-from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import yaml
 from yaml.constructor import ConstructorError
-from yaml.nodes import MappingNode
 
-from willow_package_builder.logging import CompilationError
 from willow_package_builder.logging.diagnostics import ObjectDefinitionError
+from willow_package_builder.upackage import FName, ReferencePath
 
-from .declarations import FolderDeclaration, ObjectDeclaration, ObjectFlag
+from .declarations import Definition, FolderDefinition, ObjectDefinition, ObjectFlag
+
+if TYPE_CHECKING:
+    from collections.abc import Hashable
+    from pathlib import Path
+
+    from yaml.nodes import MappingNode
 
 
 class ObjectLoader(yaml.SafeLoader):
@@ -33,15 +37,6 @@ class ObjectLoader(yaml.SafeLoader):
         return mapping
 
 
-def object_path(declaration: ObjectDeclaration | FolderDeclaration) -> str:
-    parts: list[str] = []
-    part = declaration
-    while part is not None:
-        parts.append(part.name)
-        part = part.outer
-    return ".".join(reversed(parts))
-
-
 def parse_object_flags(value: object, context: str) -> frozenset[ObjectFlag]:
     """Parse the supported object flags."""
     if not isinstance(value, list):
@@ -61,11 +56,9 @@ def parse_object_flags(value: object, context: str) -> frozenset[ObjectFlag]:
     return frozenset(flags)
 
 
-def read_object_file(
-    source: Path, root: ObjectDeclaration | FolderDeclaration | None
-) -> list[ObjectDeclaration]:
-    declarations: list[ObjectDeclaration] = []
-    registered: dict[str, ObjectDeclaration] = {}
+def read_object_file(source: Path, root: Definition | None) -> list[ObjectDefinition]:
+    declarations: list[ObjectDefinition] = []
+    registered: dict[ReferencePath, ObjectDefinition] = {}
 
     try:
         with source.open(encoding="utf-8") as file:
@@ -75,6 +68,8 @@ def read_object_file(
                 if not isinstance(data, dict):
                     msg = f"{context}: Expected an object mapping"
                     raise ObjectDefinitionError(msg)
+
+                data = cast("dict[str, object]", data)
 
                 if document == 1:
                     if "Name" in data:
@@ -91,11 +86,13 @@ def read_object_file(
                         "containing neither '.' nor ':'"
                     )
                     raise ObjectDefinitionError(msg)
+                name = FName(name)
 
                 class_name = data.pop("Class", None)
                 if not isinstance(class_name, str) or not class_name.strip():
                     msg = f"{context}: Class must be a nonempty string"
                     raise ObjectDefinitionError(msg)
+                class_name = ReferencePath(class_name)
 
                 if not declarations:
                     if "Outer" in data:
@@ -103,7 +100,7 @@ def read_object_file(
                         raise ObjectDefinitionError(msg)
 
                     outer = root
-                    local_path = name
+                    local_path = ReferencePath(name) if outer is None else outer.reference + name
                 else:
                     primary = declarations[0]
                     outer = primary
@@ -120,14 +117,13 @@ def read_object_file(
                             msg = f"{context}: Outer must be a valid object path"
                             raise ObjectDefinitionError(msg)
 
-                        # Outer paths are relative to the primary object.
-                        # Its own name may explicitly select the primary.
-                        if outer_name.casefold() == primary.name.casefold():
-                            outer_path = primary.name
-                        else:
-                            outer_path = f"{primary.name}.{outer_name}"
+                        outer_path = (
+                            primary.reference
+                            if ReferencePath(outer_name) == ReferencePath(primary.name)
+                            else ReferencePath(outer_name, primary.reference)
+                        )
 
-                        resolved = registered.get(outer_path.casefold())
+                        resolved = registered.get(outer_path)
 
                         if resolved is None:
                             msg = (
@@ -139,24 +135,9 @@ def read_object_file(
                         outer = resolved
 
                     # Construct a file-local path, independent of directory ownership.
-                    parts = [name]
-                    ancestor = outer
+                    local_path = outer.reference + name
 
-                    while ancestor is not primary:
-                        parts.append(ancestor.name)
-                        parent = ancestor.outer
-
-                        if not isinstance(parent, ObjectDeclaration):
-                            msg = f"{context}: Invalid in-file ownership chain"
-                            raise RuntimeError(msg)  # noqa: TRY004
-
-                        ancestor = parent
-
-                    parts.append(primary.name)
-                    local_path = ".".join(reversed(parts))
-
-                key = local_path.casefold()
-                existing = registered.get(key)
+                existing = registered.get(local_path)
 
                 if existing is not None:
                     msg = (
@@ -167,13 +148,32 @@ def read_object_file(
 
                 flags = parse_object_flags(data.pop("Flags", []), context)
 
-                properties = data
+                archetype: str | None = None
 
-                declaration = ObjectDeclaration(
-                    name, class_name, outer, properties, source, document, flags=flags
+                if "Archetype" in data:
+                    raw_archetype = data.pop("Archetype")
+
+                    if not isinstance(raw_archetype, str) or not raw_archetype.strip():
+                        msg = f"{context}: Archetype must be a nonempty reference string"
+                        raise ObjectDefinitionError(msg)
+
+                    archetype = raw_archetype.strip()
+
+                raw_properties = data
+                properties: dict[FName, object] = {}
+                for raw_key, raw_value in raw_properties.items():
+                    key = FName(raw_key)
+                    if key in properties:
+                        msg = f"{context}: Duplicate property {key}"
+                        raise ObjectDefinitionError(msg)
+
+                    properties[key] = raw_value
+
+                declaration = ObjectDefinition(
+                    name, outer, source, class_name, properties, document, flags, archetype
                 )
 
-                registered[key] = declaration
+                registered[local_path] = declaration
                 declarations.append(declaration)
 
                 if outer is not None:
@@ -190,24 +190,23 @@ def read_object_file(
     return declarations
 
 
-def walk_objects_directory(directory: Path) -> list[FolderDeclaration | ObjectDeclaration]:
-    declarations: list[FolderDeclaration | ObjectDeclaration] = []
-    registered: dict[str, FolderDeclaration | ObjectDeclaration] = {}
+def walk_objects_directory(directory: Path) -> list[Definition]:
+    declarations: list[Definition] = []
+    registered: dict[ReferencePath, Definition] = {}
 
     if not directory.is_dir():
         msg = f"Objects directory does not exist or is not a directory: {directory}"
         raise ObjectDefinitionError(msg)
 
-    def register(declaration: FolderDeclaration | ObjectDeclaration) -> None:
-        path = object_path(declaration)
-        key = path.casefold()
-        existing = registered.get(key)
+    def register(declaration: Definition) -> None:
+        path = declaration.reference
+        existing = registered.get(path)
 
         if existing is not None:
             msg = f"Duplicate object path {path!r}: {existing.source} and {declaration.source}"
             raise ObjectDefinitionError(msg)
 
-        registered[key] = declaration
+        registered[path] = declaration
         declarations.append(declaration)
 
         if declaration.outer is not None:
@@ -215,7 +214,7 @@ def walk_objects_directory(directory: Path) -> list[FolderDeclaration | ObjectDe
             if declaration not in children:
                 children.append(declaration)
 
-    def visit(folder: Path, outer: FolderDeclaration | ObjectDeclaration | None) -> None:
+    def visit(folder: Path, outer: Definition | None) -> None:
         entries = sorted(folder.iterdir(), key=lambda entry: (entry.name.casefold(), entry.name))
 
         # Register this directory's objects before examining subdirectories.
@@ -239,11 +238,13 @@ def walk_objects_directory(directory: Path) -> list[FolderDeclaration | ObjectDe
                 )
                 raise ObjectDefinitionError(msg)
 
-            path = name if outer is None else f"{object_path(outer)}.{name}"
-            child_outer = registered.get(path.casefold())
+            name = FName(name)
+
+            path = ReferencePath(name) if outer is None else outer.reference + name
+            child_outer = registered.get(path)
 
             if child_outer is None:
-                child_outer = FolderDeclaration(name, outer, child_directory)
+                child_outer = FolderDefinition(name, outer, child_directory)
                 register(child_outer)
 
             visit(child_directory, child_outer)

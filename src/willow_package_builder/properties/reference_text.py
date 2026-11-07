@@ -1,28 +1,54 @@
 from willow_package_builder.logging import ValueBuildError
+from willow_package_builder.upackage import ReferencePath
 
 
-def parse_reference_text(context: str, value: str) -> tuple[str | None, str]:
-    """Extract an optional class annotation and the referenced path."""
+def parse_reference_text(
+    context: str, value: str, reference_base: ReferencePath | None
+) -> tuple[ReferencePath | None, ReferencePath]:
+    """Parse a reference and expand an explicitly relative object path."""
     text = value.strip()
-    annotation, separator, remainder = text.partition("'")
+    annotation_text, separator, remainder = text.partition("'")
 
-    if not separator:
-        if not text:
-            msg = f"{context}: Reference path cannot be empty"
+    if separator:
+        annotation_text = annotation_text.strip()
+
+        if not annotation_text or not remainder.endswith("'"):
+            msg = f"{context}: Invalid reference syntax: {value!r}"
             raise ValueBuildError(msg)
 
-        return None, text.replace(":", ".")
+        path_text = remainder[:-1].strip()
 
-    annotation = annotation.strip()
+        if "'" in path_text:
+            msg = f"{context}: Invalid reference syntax: {value!r}"
+            raise ValueBuildError(msg)
+    else:
+        annotation_text = ""
+        path_text = text
 
-    if not annotation or not remainder.endswith("'"):
-        msg = f"{context}: Invalid reference syntax: {value!r}"
+    if not path_text:
+        msg = f"{context}: Reference path cannot be empty"
         raise ValueBuildError(msg)
 
-    path = remainder[:-1].strip()
+    path_text = path_text.replace(":", ".")
+    outer = None
 
-    if not path or "'" in path:
-        msg = f"{context}: Invalid reference syntax: {value!r}"
+    if path_text.startswith("./"):
+        if reference_base is None or reference_base.is_none():
+            msg = f"{context}: Relative reference requires a containing object"
+            raise ValueBuildError(msg)
+
+        path_text = path_text[2:]
+        outer = reference_base
+
+    if "/" in path_text or "\\" in path_text:
+        msg = f"{context}: Invalid reference path: {value!r}"
         raise ValueBuildError(msg)
 
-    return annotation, path.replace(":", ".")
+    try:
+        annotation = ReferencePath(annotation_text) if annotation_text else None
+        path = ReferencePath(path_text, outer)
+    except ValueError as error:
+        msg = f"{context}: Invalid reference {value!r}: {error}"
+        raise ValueBuildError(msg) from error
+
+    return annotation, path

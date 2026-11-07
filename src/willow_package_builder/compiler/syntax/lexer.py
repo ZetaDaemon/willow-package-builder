@@ -1,7 +1,11 @@
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import override
 
+from willow_package_builder.compiler.syntax.keyword import Keyword
+from willow_package_builder.compiler.syntax.punctuation import Operator, Punctuation
 from willow_package_builder.logging import CompilationError
+from willow_package_builder.upackage import FName
 
 
 class TokenCategory(Enum):
@@ -14,12 +18,75 @@ class TokenCategory(Enum):
     EOF = auto()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Token:
     category: TokenCategory
-    text: str
+    _text: str
     line: int
     column: int
+
+    @override
+    def __str__(self) -> str:
+        return self._text
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        match other:
+            case Keyword():
+                return self.category is TokenCategory.IDENTIFIER and self.keyword == other
+
+            case Punctuation() | Operator():
+                return self.category is TokenCategory.SYMBOL and self._text == other.value
+
+            case Token():
+                return (
+                    self.category == other.category
+                    and self._text == other._text
+                    and self.line == other.line
+                    and self.column == other.column
+                )
+
+            case _:
+                return NotImplemented
+
+    def __len__(self) -> int:  # noqa: D105
+        return len(self._text)
+
+    def __float__(self) -> float:  # noqa: D105
+        return float(self._text)
+
+    def __int__(self) -> int:  # noqa: D105
+        base = 16 if self._text.startswith(("0x", "0X")) else 10
+        return int(self._text, base)
+
+    @property
+    def keyword(self) -> Keyword | None:
+        """Interpret an identifier as a keyword."""
+        if self.category is not TokenCategory.IDENTIFIER:
+            return None
+        return Keyword(self._text)
+
+    @property
+    def fname(self) -> FName:
+        """Interpret an identifier as an Unreal name."""
+        if self.category is not TokenCategory.IDENTIFIER:
+            msg = f"Expected an identifier, got {self} at {self.line}:{self.column}"
+            raise CompilationError(msg)
+
+        return FName(self._text)
+
+    @property
+    def operator_name(self) -> Operator | Keyword | None:
+        """Interpret a recognized symbol or identifier as an operator name."""
+        if self.category is TokenCategory.IDENTIFIER:
+            return self.keyword
+
+        if self.category is TokenCategory.SYMBOL:
+            for operator in Operator:
+                if self == operator:
+                    return operator
+
+        return None
 
 
 PUNCTUATION = frozenset("{}()[];,.")

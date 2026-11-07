@@ -1,7 +1,9 @@
-from enum import StrEnum
+from willow_package_builder.compiler.syntax.keyword import KeywordEnum
 
 
-class FunctionModifier(StrEnum):
+class FunctionModifier(KeywordEnum):
+    """Function modifier keywords."""
+
     # Implementation and dispatch
     NATIVE = "native"
     STATIC = "static"
@@ -26,7 +28,9 @@ class FunctionModifier(StrEnum):
     UNRELIABLE = "unreliable"
 
 
-class ParameterModifier(StrEnum):
+class ParameterModifier(KeywordEnum):
+    """Parameter modifier keywords."""
+
     OUT = "out"
     OPTIONAL = "optional"
     COERCE = "coerce"
@@ -35,7 +39,9 @@ class ParameterModifier(StrEnum):
     INIT = "init"
 
 
-class ClassModifierName(StrEnum):
+class ClassModifierName(KeywordEnum):
+    """Class modifier keywords."""
+
     # Implementation
     ABSTRACT = "abstract"
     NATIVE = "native"
@@ -70,7 +76,9 @@ class ClassModifierName(StrEnum):
     DONT_SORT_CATEGORIES = "dontsortcategories"
 
 
-class VariableModifier(StrEnum):
+class VariableModifier(KeywordEnum):
+    """Variable modifier keywords."""
+
     # Implementation
     NATIVE = "native"
     CONST = "const"
@@ -119,7 +127,9 @@ class VariableModifier(StrEnum):
     CROSS_LEVEL_ACTIVE = "crosslevelactive"
 
 
-class StructModifier(StrEnum):
+class StructModifier(KeywordEnum):
+    """Struct modifier keywords."""
+
     NATIVE = "native"
     EXPORT = "export"
     NO_EXPORT = "noexport"
@@ -131,6 +141,8 @@ class StructModifier(StrEnum):
     ATOMIC_WHEN_COOKED = "atomicwhencooked"
 
 
-class StateModifier(StrEnum):
+class StateModifier(KeywordEnum):
+    """State modifier keywords."""
+
     AUTO = "auto"
     SIMULATED = "simulated"

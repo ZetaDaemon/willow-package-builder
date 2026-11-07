@@ -5,9 +5,9 @@ from willow_package_builder.builder.defaults_builder import DefaultsBuilder
 from willow_package_builder.builder.value_builder import ValueBuilder
 from willow_package_builder.games import get_game
 from willow_package_builder.logging import info
-from willow_package_builder.objects.declarations import ObjectDeclaration, ObjectFlag
+from willow_package_builder.objects.declarations import ObjectDefinition, ObjectFlag
 from willow_package_builder.package_config import collect_visible_packages
-from willow_package_builder.upackage import FName, Package
+from willow_package_builder.upackage import Package, ReferencePath
 
 from .build_state import PackageBuildState
 from .classes.class_builder import ClassBuilder
@@ -55,18 +55,18 @@ class PackageBuilder:
         return self.state.package
 
     @property
-    def classes(self) -> dict[str, ClassExport]:
+    def classes(self) -> dict[ReferencePath, ClassExport]:
         """Access classes from state."""
         return self.state.classes
 
     @property
-    def structs(self) -> dict[str, StructExport]:
+    def structs(self) -> dict[ReferencePath, StructExport]:
         """Access structs from state."""
         return self.state.structs
 
     def __post_init__(self) -> None:  # noqa: D105
         game = get_game()
-        package = Package(FName(self.config.name), game.package_format(), game.PACKAGE_FLAGS)
+        package = Package(self.config.name, game.package_format(), game.PACKAGE_FLAGS)
 
         self.state = PackageBuildState(self.context, self.config, package)
         self.references = PackageReferences(self.state)
@@ -97,12 +97,12 @@ class PackageBuilder:
             "keep_alive": [
                 str(obj.reference())
                 for declaration, obj in self.object_builder.exports.items()
-                if isinstance(declaration, ObjectDeclaration)
+                if isinstance(declaration, ObjectDefinition)
                 and ObjectFlag.KEEP_ALIVE in declaration.flags
             ],
         }
 
-    def prepare_class_defaults(self, class_names: Iterable[str]) -> None:
+    def prepare_class_defaults(self, class_names: Iterable[ReferencePath]) -> None:
         """Build default records for classes needed by this package."""
         visible = collect_visible_packages(self.config, self.context.packages)
 
@@ -134,14 +134,16 @@ class PackageBuilder:
         self.object_builder.read_objects()
         declarations = [
             declaration
-            for declaration in self.object_builder.declarations
-            if isinstance(declaration, ObjectDeclaration)
+            for declaration in self.object_builder.definitions
+            if isinstance(declaration, ObjectDefinition)
         ]
 
         self.prepare_class_defaults(declaration.class_name for declaration in declarations)
 
         info("Constructing objects")
         self.object_builder.construct_objects()
+        self.object_builder.link_archetypes()
+        self.object_builder.validate_archetype_cycles()
         self.object_builder.build_all_properties()
 
         return self.package

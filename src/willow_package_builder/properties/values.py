@@ -44,13 +44,13 @@ class NameValue(Value):
 
 @dataclass
 class IdentifierValue(Value):
-    name: str
+    name: ReferencePath
 
 
 @dataclass
 class ObjectValue(Value):
-    class_name: str
-    path: str
+    class_name: ReferencePath
+    path: ReferencePath
 
     reference: ReferencePath | None = field(default=None, kw_only=True, repr=False, compare=False)
 
@@ -68,7 +68,7 @@ class EmptyValue(Value):
 @dataclass
 class StructValue(Value):
     values: dict[FName, Value] = field(default_factory=dict)
-    struct_path: str | None = field(default=None, kw_only=True)
+    struct_path: ReferencePath | None = field(default=None, kw_only=True)
 
 
 @dataclass

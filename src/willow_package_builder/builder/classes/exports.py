@@ -6,7 +6,7 @@ if TYPE_CHECKING:
         ClassDeclaration,
         StructDeclaration,
     )
-    from willow_package_builder.upackage import UObject
+    from willow_package_builder.upackage import ReferencePath, UObject
 
 
 @dataclass
@@ -18,6 +18,6 @@ class ClassExport:
 
 @dataclass
 class StructExport:
-    owner_class: str
+    owner_class: ReferencePath
     declaration: StructDeclaration
     struct_object: UObject

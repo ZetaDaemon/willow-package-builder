@@ -1,15 +1,23 @@
+import string
 from dataclasses import dataclass, field
-from typing import Self, cast
+from typing import TYPE_CHECKING, Self, cast
 
+from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
 from willow_package_builder.compiler.syntax.parser.token_parser import TokenParser
+from willow_package_builder.compiler.syntax.punctuation import Operator, Punctuation
 from willow_package_builder.logging import CompilationError, SourceLocation
-from willow_package_builder.upackage import Name
+from willow_package_builder.upackage import ReferencePath
+
+if TYPE_CHECKING:
+    from willow_package_builder.upackage import FName
+
+BYTE_LENGTH = 2
 
 
 @dataclass
 class DefaultOperation:
-    name: str
+    name: FName
     value: object
     array_index: int | None = None
     location: SourceLocation | None = None
@@ -28,8 +36,8 @@ class DefaultsParser(TokenParser):
     def _merge_value(self, previous: object, supplied: object) -> object:
         match previous, supplied:
             case dict(), dict():
-                fields = cast("dict[str, object]", previous).copy()
-                for name, value in cast("dict[str, object]", supplied).items():
+                fields = cast("dict[FName, object]", previous).copy()
+                for name, value in cast("dict[FName, object]", supplied).items():
                     self._apply_operation(fields, DefaultOperation(name, value))
                 return fields
 
@@ -42,8 +50,8 @@ class DefaultsParser(TokenParser):
             case _:
                 return supplied
 
-    def _apply_operation(self, values: dict[str, object], operation: DefaultOperation) -> None:
-        key = next((name for name in values if Name(name) == Name(operation.name)), operation.name)
+    def _apply_operation(self, values: dict[FName, object], operation: DefaultOperation) -> None:
+        key = next((name for name in values if name == operation.name), operation.name)
 
         if operation.array_index is None:
             values[key] = self._merge_value(values.get(key), operation.value)
@@ -64,42 +72,42 @@ class DefaultsParser(TokenParser):
         location = SourceLocation(token.line, token.column)
         array_index = None
 
-        if self.match("("):
+        if self.match(Punctuation.LEFT_PAREN):
             array_index = self.parse_integer()
-            self.expect(")")
-        elif self.match("["):
+            self.expect(Punctuation.RIGHT_PAREN)
+        elif self.match(Punctuation.LEFT_BRACKET):
             array_index = self.parse_integer()
-            self.expect("]")
+            self.expect(Punctuation.RIGHT_BRACKET)
 
-        self.expect("=")
+        self.expect(Operator.EQUAL)
 
-        return DefaultOperation(token.text, self.parse_value(), array_index, location)
+        return DefaultOperation(token.fname, self.parse_value(), array_index, location)
 
-    def _parse_struct_value(self) -> dict[str, object]:
-        self.expect("(")
-        values: dict[str, object] = {}
+    def _parse_struct_value(self) -> dict[FName, object]:
+        self.expect(Punctuation.LEFT_PAREN)
+        values: dict[FName, object] = {}
 
-        if self.match(")"):
+        if self.match(Punctuation.RIGHT_PAREN):
             return values
 
         while True:
             self._apply_operation(values, self.parse_operation())
-            if self.match(")"):
+            if self.match(Punctuation.RIGHT_PAREN):
                 return values
-            self.expect(",")
+            self.expect(Punctuation.COMMA)
 
     def parse_value(self) -> object:
         token = self.peek()
         location = SourceLocation(token.line, token.column)
 
-        if self.match("-"):
+        if self.match(Operator.SUBTRACT):
             number = self.peek()
             match number.category:
                 case TokenCategory.INTEGER:
                     return -self.parse_integer()
                 case TokenCategory.FLOAT:
                     self.advance()
-                    return -float(number.text)
+                    return -float(str(number))
                 case _:
                     msg = "Expected a numeric default after '-'"
                     raise CompilationError(msg, location)
@@ -110,28 +118,28 @@ class DefaultsParser(TokenParser):
 
             case TokenCategory.FLOAT:
                 self.advance()
-                return float(token.text)
+                return float(str(token))
 
             case TokenCategory.STRING:
                 return self.parse_string_value()
 
             case TokenCategory.NAME:
                 self.advance()
-                value = token.text[1:-1]
+                value = str(token)[1:-1]
                 if "\\" in value:
                     msg = f"Default literal escape decoding is not implemented at {location}"
                     raise NotImplementedError(msg)
                 return value
 
             case TokenCategory.IDENTIFIER:
-                match token.text.casefold():
-                    case "true":
+                match token:
+                    case ScriptKeywords.TRUE:
                         self.advance()
                         return True
-                    case "false":
+                    case ScriptKeywords.FALSE:
                         self.advance()
                         return False
-                    case "none":
+                    case ScriptKeywords.NONE:
                         self.advance()
                         return None
                     case _:
@@ -139,27 +147,29 @@ class DefaultsParser(TokenParser):
 
                 if self.peek().category is TokenCategory.NAME:
                     path_token = self.advance()
-                    if "\\" in path_token.text:
+                    if "\\" in str(path_token):
                         msg = f"Default reference escape decoding is not implemented at {location}"
                         raise NotImplementedError(msg)
-                    return f"{name}{path_token.text}"
+                    return f"{name}{path_token}"
 
-                return name
+                while self.match(Operator.COLON):
+                    child = self.parse_qualified_name()
+                    name = ReferencePath(str(child), name)
 
-            case TokenCategory.SYMBOL if token.text == "(":
+                return str(name)
+
+            case TokenCategory.SYMBOL if token == Punctuation.LEFT_PAREN:
                 return self._parse_parenthesized_value()
 
             case _:
-                msg = f"Expected a default value, got {token.text!r}"
+                msg = f"Expected a default value, got {token}"
                 raise CompilationError(msg, location)
 
-    def parse_defaults(
-        self, *, skip_object_definitions: bool = False, allow_dump_fixups: bool = False
-    ) -> dict[str, object]:
-        values: dict[str, object] = {}
+    def parse_defaults(self, *, skip_object_definitions: bool = False) -> dict[FName, object]:
+        values: dict[FName, object] = {}
 
         while self.peek().category is not TokenCategory.EOF:
-            if self.peek().text.casefold() == "begin" and self.peek(1).text.casefold() == "object":
+            if self.peek() == ScriptKeywords.BEGIN and self.peek(1) == ScriptKeywords.OBJECT:
                 if not skip_object_definitions:
                     token = self.peek()
                     msg = (
@@ -182,42 +192,47 @@ class DefaultsParser(TokenParser):
         if tokens:
             last = tokens[-1]
             line = last.line
-            column = last.column + len(last.text)
+            column = last.column + len(last)
         eof = Token(TokenCategory.EOF, "", line, column)
         return cls([*tokens, eof])
 
     def _parse_parenthesized_value(self) -> object:
-        if self.peek(1).text == ")":
-            self.expect("(")
-            self.expect(")")
+        if self.peek(1) == Punctuation.RIGHT_PAREN:
+            self.expect(Punctuation.LEFT_PAREN)
+            self.expect(Punctuation.RIGHT_PAREN)
             # The declared type will distinguish an empty struct from an array.
             return ()
 
         if self.peek(1).category is TokenCategory.IDENTIFIER:
-            if self.peek(2).text == "=":
+            if self.peek(2) == Operator.EQUAL:
                 return self._parse_struct_value()
             if (
-                self.peek(2).text in ("(", "[")
+                self.peek(2) in (Punctuation.LEFT_PAREN, Punctuation.LEFT_BRACKET)
                 and self.peek(3).category is TokenCategory.INTEGER
-                and self.peek(4).text == (")" if self.peek(2).text == "(" else "]")
-                and self.peek(5).text == "="
+                and self.peek(4)
+                == (
+                    Punctuation.RIGHT_PAREN
+                    if self.peek(2) == Punctuation.LEFT_PAREN
+                    else Punctuation.RIGHT_BRACKET
+                )
+                and self.peek(5) == Operator.EQUAL
             ):
                 return self._parse_struct_value()
         return self._parse_array_value()
 
     def _parse_array_value(self) -> list[object]:
-        self.expect("(")
+        self.expect(Punctuation.LEFT_PAREN)
         elements: list[object] = []
         while True:
             elements.append(self.parse_value())
-            if self.match(")"):
+            if self.match(Punctuation.RIGHT_PAREN):
                 return elements
-            self.expect(",")
+            self.expect(Punctuation.COMMA)
 
     def skip_object_definition(self) -> None:
         opening = self.peek()
-        self.expect("begin")
-        self.expect("object")
+        self.expect(ScriptKeywords.BEGIN)
+        self.expect(ScriptKeywords.OBJECT)
         depth = 1
 
         while depth:
@@ -229,21 +244,19 @@ class DefaultsParser(TokenParser):
 
             if (
                 token.category is TokenCategory.IDENTIFIER
-                and self.peek(1).text.casefold() == "object"
+                and self.peek(1) == ScriptKeywords.OBJECT
+                and token in (ScriptKeywords.BEGIN, ScriptKeywords.END)
             ):
-                keyword = token.text.casefold()
-
-                if keyword in ("begin", "end"):
-                    self.advance()
-                    self.advance()
-                    depth += 1 if keyword == "begin" else -1
-                    continue
+                self.advance()
+                self.advance()
+                depth += 1 if token == ScriptKeywords.BEGIN else -1
+                continue
 
             self.advance()
 
     def parse_string_value(self) -> str:
         token = self.advance()
-        value = token.text[1:-1]
+        value = str(token)[1:-1]
         result: list[str] = []
         index = 0
 
@@ -277,7 +290,7 @@ class DefaultsParser(TokenParser):
                 case _:
                     digits = value[index : index + 2]
 
-                    if len(digits) != 2 or any(c not in "0123456789abcdefABCDEF" for c in digits):
+                    if len(digits) != BYTE_LENGTH or any(c not in string.hexdigits for c in digits):
                         msg = (
                             f"Default string escape decoding for {escaped!r} "
                             f"is not implemented at {location}"

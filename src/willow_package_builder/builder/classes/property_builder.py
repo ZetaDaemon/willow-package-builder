@@ -59,17 +59,13 @@ ARRAY_INNER_FLAGS = (
 class PropertyBuilder(BuildComponent):
     references: PackageReferences
 
-    def struct_needs_ctor_link(self, struct_path: str) -> bool:
-        owner_path, _, name = struct_path.rpartition(".")
+    def struct_needs_ctor_link(self, struct_path: ReferencePath) -> bool:
+        owner_path, name = struct_path.split(require_outer=True)
 
         member = self.context.references.resolve_struct(owner_path, name, self.context.parents)
 
-        owner_package = member.owner_class.partition(".")[0]
-        config = next(
-            config
-            for config in self.context.packages
-            if config.name.casefold() == owner_package.casefold()
-        )
+        owner_package = member.owner_class.get_outer().name
+        config = next(config for config in self.context.packages if config.name == owner_package)
         visible = collect_visible_packages(config, self.context.packages)
 
         type_refs = [variable.type_ref for variable in member.declaration.variables]
@@ -98,13 +94,13 @@ class PropertyBuilder(BuildComponent):
     def create_property(
         self,
         owner: UObject,
-        name: str,
+        name: FName,
         type_ref: TypeReference,
-        class_path: str,
+        class_path: ReferencePath,
         flags: PropertyFlags,
         array_dimension: int = 1,
     ) -> UObject:
-        path = owner.reference() + FName(name)
+        path = owner.reference() + name
         flags |= self.variable_modifier_flags(type_ref.modifiers, path)
         resolved = self.context.references.resolve_type(
             type_ref,
@@ -152,7 +148,9 @@ class PropertyBuilder(BuildComponent):
                     raise ValueError(msg)
 
                 payload = UClassPropertyPayload(
-                    property_class=self.references.class_object_reference("Core.Class"),
+                    property_class=self.references.class_object_reference(
+                        ReferencePath("Core.Class")
+                    ),
                     meta_class=self.references.class_object_reference(bound.declaration_path),
                 )
 
@@ -200,11 +198,7 @@ class PropertyBuilder(BuildComponent):
         property_class = self.references.class_object_reference(definition.path)
 
         obj = UObject(
-            FName(name),
-            ObjectFlags.PUBLIC_EXPORT,
-            owner.reference(),
-            property_class,
-            payload=payload,
+            name, ObjectFlags.PUBLIC_EXPORT, owner.reference(), property_class, payload=payload
         )
 
         self.package.add_export(obj)
@@ -219,10 +213,10 @@ class PropertyBuilder(BuildComponent):
         self,
         owner: UObject,
         declaration: VariableDeclaration,
-        class_path: str,
+        class_path: ReferencePath,
         next_field: ReferencePath,
     ) -> UObject:
-        path = owner.reference() + FName(declaration.name)
+        path = owner.reference() + declaration.name
         flags = self.variable_modifier_flags(declaration.modifiers, path)
 
         category = FName("None")
@@ -236,7 +230,7 @@ class PropertyBuilder(BuildComponent):
                     msg = f"Unsupported category syntax on {path}"
                     raise CompilationError(msg)
 
-                category = FName(tokens[0].text)
+                category = tokens[0].fname
 
         obj = self.create_property(
             owner,
@@ -297,7 +291,7 @@ class PropertyBuilder(BuildComponent):
         return flags
 
     def array_enum_reference(
-        self, declaration: VariableDeclaration, class_path: str
+        self, declaration: VariableDeclaration, class_path: ReferencePath
     ) -> ReferencePath:
         name = declaration.array_dimension_name
 

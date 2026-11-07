@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, override
 
 from willow_package_builder.properties.value_serializer import ValueSerializer
-from willow_package_builder.upackage import FName, ObjectPayload, Package
+from willow_package_builder.upackage import FName, ObjectPayload, Package, ReferencePath
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.build_context import BuildContext
@@ -15,7 +15,7 @@ PROPERTY_LIST_END = FName("None")
 
 @dataclass
 class ObjectInstancePayload(ObjectPayload):
-    class_path: str
+    class_path: ReferencePath
     context: BuildContext
 
     properties: dict[FName, Value] = field(default_factory=dict)

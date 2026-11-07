@@ -12,7 +12,7 @@ from willow_package_builder.payloads.struct_payload import StructFlags, UScriptS
 from willow_package_builder.properties.construction import initial_scalar_value
 from willow_package_builder.properties.merge import merge_values
 from willow_package_builder.properties.values import ArrayValue, StructValue, Value
-from willow_package_builder.upackage import FName, ObjectFlags, UObject
+from willow_package_builder.upackage import FName, ObjectFlags, ReferencePath, UObject
 
 from .exports import StructExport
 
@@ -34,6 +34,8 @@ STRUCT_MODIFIER_FLAGS: dict[StructModifier, StructFlags] = {
     StructModifier.ATOMIC_WHEN_COOKED: StructFlags.ATOMIC_WHEN_COOKED,
 }
 
+CORE_SCRIPT_STRUCT = ReferencePath("Core.ScriptStruct")
+
 
 @dataclass
 class StructBuilder(BuildComponent):
@@ -41,10 +43,10 @@ class StructBuilder(BuildComponent):
     properties: PropertyBuilder
     enums: EnumBuilder
 
-    _constructing_structs: set[str] = field(default_factory=set, init=False, repr=False)
+    _constructing_structs: set[ReferencePath] = field(default_factory=set, init=False, repr=False)
 
     def reserve_structs(self) -> None:
-        struct_class = self.references.class_object_reference("Core.ScriptStruct")
+        struct_class = self.references.class_object_reference(CORE_SCRIPT_STRUCT)
 
         supported_modifiers = {
             StructModifier.EXPORT,
@@ -59,7 +61,7 @@ class StructBuilder(BuildComponent):
 
         for class_path, exports in self.classes.items():
             for declaration in exports.declaration.structs:
-                path = f"{class_path}.{declaration.name}".casefold()
+                path = class_path + declaration.name
 
                 if path in self.structs:
                     msg = f"Duplicate struct: {path}"
@@ -79,7 +81,7 @@ class StructBuilder(BuildComponent):
                     flags |= STRUCT_MODIFIER_FLAGS[modifier]
 
                 obj = UObject(
-                    FName(declaration.name),
+                    declaration.name,
                     ObjectFlags.PUBLIC_EXPORT,
                     exports.class_object.reference(),
                     struct_class,
@@ -96,7 +98,7 @@ class StructBuilder(BuildComponent):
 
     def link_structs(self) -> None:
         visible = collect_visible_packages(self.config, self.context.packages)
-        parents: dict[str, str | None] = {}
+        parents: dict[ReferencePath, ReferencePath | None] = {}
 
         for path, exports in self.structs.items():
             parent_name = exports.declaration.parent
@@ -117,26 +119,26 @@ class StructBuilder(BuildComponent):
                 msg = f"Resolved parent struct has no declaration path: {path}"
                 raise ValueError(msg)
 
-            parents[path] = parent.declaration_path.casefold()
+            parents[path] = parent.declaration_path
 
         # Reject inheritance cycles among structs built in this package.
-        completed: set[str] = set()
-        active: list[str] = []
+        completed: set[ReferencePath] = set()
+        active: list[ReferencePath] = []
 
-        def visit(path: str) -> None:
+        def visit(path: ReferencePath) -> None:
             if path in completed:
                 return
 
             if path in active:
                 start = active.index(path)
-                cycle = " -> ".join((*active[start:], path))
+                cycle = " -> ".join(str(c) for c in (*active[start:], path))
                 msg = f"Struct inheritance cycle: {cycle}"
                 raise CompilationError(msg)
 
             active.append(path)
             parent = parents[path]
 
-            if parent in parents:
+            if parent is not None and parent in parents:
                 visit(parent)
 
             active.pop()
@@ -183,27 +185,25 @@ class StructBuilder(BuildComponent):
                 payload.children = obj.reference()
 
     def validate_struct_layouts(self) -> None:
-        completed: set[str] = set()
-        active: list[str] = []
+        completed: set[ReferencePath] = set()
+        active: list[ReferencePath] = []
 
-        def visit(path: str) -> None:
+        def visit(path: ReferencePath) -> None:
             if path in completed:
                 return
 
             if path in active:
                 start = active.index(path)
-                cycle = " -> ".join((*active[start:], path))
+                cycle = " -> ".join(str(c) for c in (*active[start:], path))
                 msg = f"Recursive struct layout: {cycle}"
                 raise CompilationError(msg)
 
-            owner_path, _, name = path.rpartition(".")
+            owner_path, name = path.split(require_outer=True)
             member = self.context.references.resolve_struct(owner_path, name, self.context.parents)
 
-            owner_package = member.owner_class.partition(".")[0]
+            owner_package = member.owner_class.get_outer().name
             config = next(
-                config
-                for config in self.context.packages
-                if config.name.casefold() == owner_package.casefold()
+                config for config in self.context.packages if config.name == owner_package
             )
             visible = collect_visible_packages(config, self.context.packages)
 
@@ -224,7 +224,7 @@ class StructBuilder(BuildComponent):
                         msg = "Resolved struct type has no declaration path"
                         raise ValueError(msg)
 
-                    visit(resolved.declaration_path.casefold())
+                    visit(resolved.declaration_path)
 
             active.pop()
             completed.add(path)
@@ -251,33 +251,29 @@ class StructBuilder(BuildComponent):
 
     def make_struct(
         self,
-        struct_path: str,
+        struct_path: ReferencePath,
         values: dict[FName, Value] | None = None,
         existing: StructValue | None = None,
     ) -> StructValue:
         """Construct a struct from its defaults and typed overrides."""
-        key = struct_path.casefold()
-
-        if key in self._constructing_structs:
+        if struct_path in self._constructing_structs:
             msg = f"Recursive struct construction at {struct_path}"
             raise CompilationError(msg)
 
-        self._constructing_structs.add(key)
+        self._constructing_structs.add(struct_path)
 
         try:
             result: dict[FName, Value] = {}
 
             for owner, declaration in self.struct_hierarchy(struct_path):
-                package_name = owner.partition(".")[0]
+                package_name = owner.get_outer().name
                 config = next(
-                    config
-                    for config in self.context.packages
-                    if config.name.casefold() == package_name.casefold()
+                    config for config in self.context.packages if config.name == package_name
                 )
                 visible = collect_visible_packages(config, self.context.packages)
 
                 for variable in declaration.variables:
-                    name = FName(variable.name)
+                    name = variable.name
 
                     if name in result:
                         continue
@@ -303,9 +299,11 @@ class StructBuilder(BuildComponent):
 
             return StructValue(result, struct_path=struct_path)
         finally:
-            self._constructing_structs.remove(key)
+            self._constructing_structs.remove(struct_path)
 
-    def struct_hierarchy(self, struct_path: str) -> list[tuple[str, StructDeclaration]]:
+    def struct_hierarchy(
+        self, struct_path: ReferencePath
+    ) -> list[tuple[ReferencePath, StructDeclaration]]:
         return self.context.references.struct_hierarchy(
             struct_path, self.context.parents, self.context.packages
         )

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
         ParameterDeclaration,
         VariableDeclaration,
     )
+    from willow_package_builder.upackage import FName, ReferencePath
 
     from .reference_database import ReferenceDatabase
 
@@ -25,18 +26,18 @@ class VariableCategory(StrEnum):
 @dataclass(frozen=True)
 class VariableSymbol:
     category: VariableCategory
-    owner_class: str
+    owner_class: ReferencePath
     declaration: ParameterDeclaration | VariableDeclaration
 
 
 @dataclass
 class FunctionScope:
-    class_path: str
+    class_path: ReferencePath
     function: FunctionDeclaration
     references: ReferenceDatabase
-    parents: Mapping[str, str | None]
+    parents: Mapping[ReferencePath, ReferencePath | None]
 
-    _variables: dict[str, VariableSymbol] = field(default_factory=dict, init=False, repr=False)
+    _variables: dict[FName, VariableSymbol] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         for parameter in self.function.parameters:
@@ -47,12 +48,12 @@ class FunctionScope:
         declaration: ParameterDeclaration | VariableDeclaration,
         variable_category: VariableCategory,
     ) -> None:
-        key = declaration.name.casefold()
+        key = declaration.name
 
         for owner, class_declaration in self.references.iter_class_hierarchy(
             self.class_path, self.parents
         ):
-            if any(variable.name.casefold() == key for variable in class_declaration.variables):
+            if any(variable.name == key for variable in class_declaration.variables):
                 warn(
                     WarningCode.SHADOWED_INSTANCE_VARIABLE,
                     f"{declaration.name!r} in "
@@ -68,15 +69,13 @@ class FunctionScope:
             )
             raise CompilationError(msg)
 
-        self._variables[key] = VariableSymbol(
-            variable_category, self.class_path.casefold(), declaration
-        )
+        self._variables[key] = VariableSymbol(variable_category, self.class_path, declaration)
 
     def add_local(self, declaration: VariableDeclaration) -> None:
         self.add_variable(declaration, VariableCategory.LOCAL)
 
-    def resolve_variable(self, name: str) -> VariableSymbol:
-        local = self._variables.get(name.casefold())
+    def resolve_variable(self, name: FName) -> VariableSymbol:
+        local = self._variables.get(name)
 
         if local is not None:
             return local

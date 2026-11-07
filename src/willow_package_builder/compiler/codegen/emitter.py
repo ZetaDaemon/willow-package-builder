@@ -51,6 +51,8 @@ if TYPE_CHECKING:
 
     from .emission_context import EmissionContext
 
+RETURN_VALUE = FName("ReturnValue")
+
 
 @dataclass
 class FunctionEmitter:
@@ -150,7 +152,7 @@ class FunctionEmitter:
                 "Scripted unary operator calls are not supported yet: "
                 f"{member.owner_class}.{operator.name}"
             )
-            raise CompilationError(msg)
+            raise NotImplementedError(msg)
 
         with script.native_function(operator.native_index):
             script += self.emit_expression(expression.operand)
@@ -177,14 +179,14 @@ class FunctionEmitter:
             FunctionModifier.FINAL in function.modifiers
             or FunctionModifier.STATIC in function.modifiers
         ):
-            path = f"{member.owner_class}.{function.name}"
+            path = member.owner_class + function.name
             reference = self.builder.function_reference(path)
 
             script += self._opcodes.FINAL_FUNCTION
             script += BytecodeReference(reference)
         else:
             script += self._opcodes.VIRTUAL_FUNCTION
-            script += BytecodeName(FName(function.name))
+            script += BytecodeName(function.name)
 
         for argument in expression.arguments:
             if argument is None:
@@ -211,19 +213,26 @@ class FunctionEmitter:
         result_property = ReferencePath()
 
         if result_type.category is not TypeCategory.VOID:
-            path = f"{member.owner_class}.{function.name}"
+            path = member.owner_class + function.name
             function_reference = self.builder.function_reference(path)
-            owner_package = member.owner_class.partition(".")[0]
+            if member.owner_class.outer is None:
+                msg = f"Expected fully qualified class, got {member.owner_class}"
+                raise ValueError(msg)
+            owner_package = member.owner_class.outer.name
 
-            if owner_package.casefold() == self.builder.config.name.casefold():
-                reference = function_reference + FName("ReturnValue")
+            if owner_package == self.builder.config.name:
+                reference = function_reference + RETURN_VALUE
                 result_property = self.builder.package.lookup_object_by_path(reference).reference()
             else:
                 property_class = self.builder.context.references.property_class(result_type)
-                class_package, _, class_name = property_class.path.partition(".")
+                class_package, class_name = property_class.path.split()
+
+                if class_package is None:
+                    msg = f"Expected fully qualified class, got {property_class.path}"
+                    raise ValueError(msg)
 
                 result_property = self.builder.ensure_import(
-                    "ReturnValue", function_reference, class_package, class_name
+                    RETURN_VALUE, function_reference, class_package.name, class_name
                 )
 
         receiver = self.emit_expression(expression.callee.object)
@@ -298,27 +307,33 @@ class FunctionEmitter:
                 raise NotImplementedError(msg)
 
     def property_reference(
-        self, owner_class: str, declaration: VariableDeclaration
+        self, owner_class: ReferencePath, declaration: VariableDeclaration
     ) -> ReferencePath:
         outer = self.builder.class_object_reference(owner_class)
-        owner_package = owner_class.partition(".")[0]
+        if owner_class.outer is None:
+            msg = f"Expected fully qualified class, got {owner_class}"
+            raise ValueError(msg)
+        owner_package = owner_class.outer.name
 
-        if owner_package.casefold() == self.builder.config.name.casefold():
-            reference = outer + FName(declaration.name)
+        if owner_package == self.builder.config.name:
+            reference = outer + declaration.name
             return self.builder.package.lookup_object_by_path(reference).reference()
 
         resolved = self.resolver.resolve_declared_type(declaration.type_ref, owner_class)
         property_class = self.builder.context.references.property_class(resolved)
-        class_package, _, class_name = property_class.path.partition(".")
+        class_package, class_name = property_class.path.split()
+        if class_package is None:
+            msg = f"Expected fully qualified class, got {property_class.path}"
+            raise ValueError(msg)
 
-        return self.builder.ensure_import(declaration.name, outer, class_package, class_name)
+        return self.builder.ensure_import(declaration.name, outer, class_package.name, class_name)
 
-    def variable_reference(self, name: str) -> ReferencePath:
+    def variable_reference(self, name: FName) -> ReferencePath:
         symbol = self.resolver.scope.resolve_variable(name)
         declaration = symbol.declaration
 
         if symbol.category is not VariableCategory.INSTANCE:
-            reference = self.function_object.reference() + FName(declaration.name)
+            reference = self.function_object.reference() + declaration.name
             return self.builder.package.lookup_object_by_path(reference).reference()
 
         if not isinstance(declaration, VariableDeclaration):
@@ -370,19 +385,22 @@ class FunctionEmitter:
                 case CallExpression():
                     member = self.resolver.resolve_call(expression)
                     function = member.declaration
-                    path = f"{member.owner_class}.{function.name}"
+                    path = member.owner_class + function.name
                     function_reference = self.builder.function_reference(path)
-                    return_reference = function_reference + FName("ReturnValue")
+                    return_reference = function_reference + RETURN_VALUE
 
-                    owner_package = member.owner_class.partition(".")[0]
+                    if member.owner_class.outer is None:
+                        msg = f"Expected fully qualified class, got {member.owner_class}"
+                        raise ValueError(msg)
+                    owner_package = member.owner_class.outer.name
 
-                    if owner_package.casefold() == self.builder.config.name.casefold():
+                    if owner_package == self.builder.config.name:
                         property_reference = self.builder.package.lookup_object_by_path(
                             return_reference
                         ).reference()
                     else:
                         property_reference = self.builder.ensure_import(
-                            "ReturnValue", function_reference, "Core", "StrProperty"
+                            RETURN_VALUE, function_reference, FName("Core"), FName("StrProperty")
                         )
 
                 case _:
@@ -514,8 +532,7 @@ class FunctionEmitter:
 
     def emit_statement(self, statement: Statement) -> Bytecode:
         scope = self.resolver.scope
-        owner = self.resolver.context.references.display_class_path(scope.class_path)
-        path = f"{owner}.{scope.function.name}"
+        path = scope.class_path + scope.function.name
 
         with declaration_context(path, statement.location):
             return self._emit_statement(statement)

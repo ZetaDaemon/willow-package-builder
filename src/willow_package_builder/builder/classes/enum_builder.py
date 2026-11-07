@@ -6,11 +6,13 @@ from willow_package_builder.logging import CompilationError
 from willow_package_builder.payloads.class_payload import UClassPayload
 from willow_package_builder.payloads.enum_payload import UEnumPayload
 from willow_package_builder.properties.values import EnumValue, IdentifierValue, Value
-from willow_package_builder.upackage import FName, ObjectFlags, UObject
+from willow_package_builder.upackage import ObjectFlags, ReferencePath, UObject
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.references import PackageReferences
     from willow_package_builder.compiler.semantics.types import ResolvedType
+
+CORE_ENUM = ReferencePath("Core.Enum")
 
 
 @dataclass
@@ -18,7 +20,7 @@ class EnumBuilder(BuildComponent):
     references: PackageReferences
 
     def build_class_enums(self) -> None:
-        enum_class = self.references.class_object_reference("Core.Enum")
+        enum_class = self.references.class_object_reference(CORE_ENUM)
 
         for class_path, exports in self.classes.items():
             class_payload = exports.class_object.payload
@@ -29,12 +31,11 @@ class EnumBuilder(BuildComponent):
 
             for declaration in reversed(exports.declaration.enums):
                 payload = UEnumPayload(
-                    next_field=class_payload.children,
-                    names=[FName(member) for member in declaration.members],
+                    next_field=class_payload.children, names=list(declaration.members)
                 )
 
                 obj = UObject(
-                    FName(declaration.name),
+                    declaration.name,
                     ObjectFlags.PUBLIC_EXPORT,
                     exports.class_object.reference(),
                     enum_class,
@@ -51,26 +52,24 @@ class EnumBuilder(BuildComponent):
             msg = "Enum type has no declaration path"
             raise ValueError(msg)
 
-        owner, _, name = path.rpartition(".")
+        owner, name = path.split(require_outer=True)
         enum_member = self.context.references.resolve_enum(owner, name, self.context.parents)
         declaration = enum_member.declaration
-        canonical_path = f"{enum_member.owner_class}.{declaration.name}"
+        canonical_path = enum_member.owner_class + declaration.name
 
         match value:
             case IdentifierValue():
-                qualifier, separator, member_name = value.name.rpartition(".")
+                qualifier, member_name = value.name.split()
 
-                if separator:
-                    allowed = {declaration.name.casefold(), canonical_path.casefold()}
+                if qualifier is not None:
+                    allowed = {ReferencePath(declaration.name), canonical_path}
 
-                    if qualifier.casefold() not in allowed:
+                    if qualifier not in allowed:
                         msg = f"Expected enum {canonical_path}, got qualifier {qualifier!r}"
                         raise ValueError(msg)
-                else:
-                    member_name = value.name
 
             case EnumValue():
-                if value.enum_name != FName(declaration.name):
+                if value.enum_name != declaration.name:
                     msg = f"Expected enum {canonical_path}, got {value.enum_name}"
                     raise ValueError(msg)
 
@@ -80,11 +79,11 @@ class EnumBuilder(BuildComponent):
 
                 member = declaration.members[value.index]
 
-                if FName(member) != value.member_name:
+                if member != value.member_name:
                     msg = f"Enum member does not match index {value.index} in {canonical_path}"
                     raise ValueError(msg)
 
-                return EnumValue(FName(declaration.name), FName(member), value.index)
+                return EnumValue(declaration.name, member, value.index)
 
             case _:
                 msg = f"Expected a member of {canonical_path}, got {type(value).__name__}"
@@ -93,7 +92,7 @@ class EnumBuilder(BuildComponent):
         matches = [
             (index, member)
             for index, member in enumerate(declaration.members)
-            if member.casefold() == member_name.casefold()
+            if member == member_name
         ]
 
         if len(matches) > 1:
@@ -106,7 +105,7 @@ class EnumBuilder(BuildComponent):
 
         if matches:
             index, member = matches[0]
-            return EnumValue(FName(declaration.name), FName(member), index)
+            return EnumValue(declaration.name, member, index)
 
         msg = f"Unknown member {member_name!r} of enum {canonical_path}"
         raise ValueError(msg)
@@ -119,7 +118,7 @@ class EnumBuilder(BuildComponent):
             msg = "Enum type has no declaration path"
             raise ValueError(msg)
 
-        owner, _, name = path.rpartition(".")
+        owner, name = path.split(require_outer=True)
         declaration = self.context.references.resolve_enum(
             owner, name, self.context.parents
         ).declaration
@@ -128,4 +127,4 @@ class EnumBuilder(BuildComponent):
             msg = f"Enum {path} has no members"
             raise CompilationError(msg)
 
-        return EnumValue(FName(declaration.name), FName(declaration.members[0]), 0)
+        return EnumValue(declaration.name, declaration.members[0], 0)

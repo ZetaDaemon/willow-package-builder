@@ -1,11 +1,18 @@
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
+from willow_package_builder.builder.struct_layout import requires_binary_struct
 from willow_package_builder.compiler.semantics.intrinsics import IMPLICIT_EXPORT_CLASS_PATH
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
-from willow_package_builder.logging import CompilationError, ValueBuildError, declaration_context
+from willow_package_builder.logging import (
+    CompilationError,
+    ValueBuildError,
+    WarningCode,
+    declaration_context,
+    warn,
+)
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.properties.reference_text import parse_reference_text
 from willow_package_builder.properties.values import (
@@ -23,7 +30,7 @@ from willow_package_builder.properties.values import (
     StructValue,
     Value,
 )
-from willow_package_builder.upackage import INT32_MAX, UINT8_MAX, FName
+from willow_package_builder.upackage import INT32_MAX, UINT8_MAX, FName, ReferencePath
 
 from .build_component import BuildComponent
 
@@ -40,6 +47,9 @@ class ValueBuilder(BuildComponent):
     struct_builder: StructBuilder
     implicit_fixed_index: bool = field(default=False, kw_only=True)
     allow_dump_fixups: bool = field(default=False, kw_only=True)
+    reference_base: ReferencePath | None = field(default=None, kw_only=True)
+    external_archetype: ReferencePath | None = field(default=None, kw_only=True)
+    known_archetype_properties: frozenset[FName] = field(default_factory=frozenset)
 
     def _build_object_value(
         self, context: str, value: object, resolved_type: ResolvedType
@@ -57,7 +67,7 @@ class ValueBuilder(BuildComponent):
             msg = f"{context}: Object property has no declared class"
             raise ValueError(msg)
 
-        annotation, path = parse_reference_text(context, value)
+        annotation, path = parse_reference_text(context, value, self.reference_base)
         annotation = self.resolve_reference_annotation(context, annotation, class_path)
         return ObjectValue(annotation, path)
 
@@ -69,7 +79,7 @@ class ValueBuilder(BuildComponent):
             msg = f"{context}: Expected a class reference or null, got {value!r}"
             raise ValueBuildError(msg)
 
-        annotation, path = parse_reference_text(context, value)
+        annotation, path = parse_reference_text(context, value, None)
         annotation = self.resolve_reference_annotation(
             context, annotation, IMPLICIT_EXPORT_CLASS_PATH
         )
@@ -99,10 +109,11 @@ class ValueBuilder(BuildComponent):
             case list():
                 element_type = resolved_type.arguments[0]
                 elements = cast("list[object]", value)
+                values = replace(self, external_archetype=None)
 
                 return ArrayValue(
                     [
-                        self.build_value(f"{context}, element {index}", element, element_type)
+                        values.build_value(f"{context}, element {index}", element, element_type)
                         for index, element in enumerate(elements)
                     ]
                 )
@@ -139,13 +150,28 @@ class ValueBuilder(BuildComponent):
 
         # Establish the baseline for partially supplied nested fields.
         base = self.struct_builder.make_struct(path, existing=existing)
-        if not all(isinstance(name, str) for name in value):
-            msg = f"{context}: Struct field names must be strings"
-            raise ValueBuildError(msg)
 
-        supplied = self.build_struct_values(
-            context, path, cast("dict[str, object]", value), base.values
-        )
+        fields: dict[FName, object] = {}
+
+        for raw_name, raw_value in value.items():
+            if isinstance(raw_name, FName):
+                name = raw_name
+            elif isinstance(raw_name, str):
+                name = FName(raw_name)
+            else:
+                msg = f"{context}: Struct field names must be names or strings"
+                raise ValueBuildError(msg)
+
+            if name in fields:
+                msg = f"{context}: Duplicate struct field {name}"
+                raise ValueBuildError(msg)
+
+            fields[name] = raw_value
+
+        supplied = self.build_struct_values(context, path, fields, base.values)
+
+        if isinstance(existing, StructValue):
+            self._warn_external_binary_defaults(context, path, supplied)
 
         try:
             return self.struct_builder.make_struct(path, supplied, base)
@@ -187,7 +213,9 @@ class ValueBuilder(BuildComponent):
 
             case TypeCategory.ENUM, str():
                 try:
-                    return self.enums.construct_value(IdentifierValue(value), resolved_type)
+                    return self.enums.construct_value(
+                        IdentifierValue(ReferencePath(value)), resolved_type
+                    )
                 except ValueError as error:
                     msg = f"{context}: {error}"
                     raise ValueBuildError(msg) from error
@@ -263,23 +291,41 @@ class ValueBuilder(BuildComponent):
             msg = f"{context}: Expected {definition.array_dimension} elements, got {len(value)}"
             raise ValueBuildError(msg)
 
+        previous: list[Value] | None = None
+
+        if existing is not None:
+            if not isinstance(existing, ArrayValue):
+                msg = f"{context}: Existing fixed-array value is not an ArrayValue"
+                raise ValueError(msg)
+
+            if len(existing.elements) != definition.array_dimension:
+                msg = f"{context}: Existing fixed-array length does not match its declaration"
+                raise ValueError(msg)
+
+            previous = existing.elements
+
         return ArrayValue(
             [
-                self.build_value(f"{context}, element {index}", element, resolved_type)
+                self.build_value(
+                    f"{context}, element {index}",
+                    element,
+                    resolved_type,
+                    None if previous is None else previous[index],
+                )
                 for index, element in enumerate(value)
             ]
         )
 
-    def resolve_field_type(self, definition: VariableDeclaration, owner_class: str) -> ResolvedType:
-        package_name = owner_class.partition(".")[0]
-        config = next(
-            config
-            for config in self.context.packages
-            if config.name.casefold() == package_name.casefold()
-        )
+    def resolve_field_type(
+        self, definition: VariableDeclaration, owner_class: ReferencePath
+    ) -> ResolvedType:
+        if owner_class.outer is None:
+            msg = f"Expected fully qualified class, got {owner_class}"
+            raise ValueError(msg)
+        package_name = owner_class.outer.name
+        config = next(config for config in self.context.packages if config.name == package_name)
         visible = collect_visible_packages(config, self.context.packages)
-        owner = self.context.references.display_class_path(owner_class)
-        path = f"{owner}.{definition.name}"
+        path = owner_class + definition.name
 
         with declaration_context(path, definition.location):
             return self.context.references.resolve_type(
@@ -289,8 +335,8 @@ class ValueBuilder(BuildComponent):
     def build_class_values(
         self,
         context: str,
-        class_path: str,
-        properties: dict[str, object],
+        class_path: ReferencePath,
+        properties: dict[FName, object],
         defaults: dict[FName, Value] | None = None,
     ) -> dict[FName, Value]:
         """Convert supplied class properties into typed values."""
@@ -309,7 +355,7 @@ class ValueBuilder(BuildComponent):
                 msg = f"{field_context}: {error}"
                 raise ValueBuildError(msg) from error
 
-            name = FName(definition.name)
+            name = definition.name
 
             if name in result:
                 msg = f"{field_context}: Duplicate property"
@@ -317,7 +363,12 @@ class ValueBuilder(BuildComponent):
 
             existing = None if defaults is None else defaults.get(name)
 
-            result[name] = self.build_field_value(
+            values = self
+
+            if name in self.known_archetype_properties:
+                values = replace(self, external_archetype=None)
+
+            result[name] = values.build_field_value(
                 field_context, definition, raw_value, resolved, existing
             )
 
@@ -326,18 +377,17 @@ class ValueBuilder(BuildComponent):
     def build_struct_values(
         self,
         context: str,
-        struct_path: str,
-        properties: dict[str, object],
+        struct_path: ReferencePath,
+        properties: dict[FName, object],
         defaults: dict[FName, Value] | None = None,
     ) -> dict[FName, Value]:
         """Convert supplied struct fields into typed values."""
-        owner_class = struct_path.rpartition(".")[0]
-        package_name = owner_class.partition(".")[0]
-        config = next(
-            config
-            for config in self.context.packages
-            if config.name.casefold() == package_name.casefold()
-        )
+        if struct_path.outer is None or struct_path.outer.outer is None:
+            msg = f"Expected fully qualified struct, got {struct_path}"
+            raise ValueError(msg)
+
+        package_name = struct_path.base
+        config = next(config for config in self.context.packages if config.name == package_name)
         visible = collect_visible_packages(config, self.context.packages)
         result: dict[FName, Value] = {}
 
@@ -354,7 +404,7 @@ class ValueBuilder(BuildComponent):
                 msg = f"{field_context}: {error}"
                 raise ValueBuildError(msg) from error
 
-            name = FName(definition.name)
+            name = definition.name
 
             if name in result:
                 msg = f"{field_context}: Duplicate struct field"
@@ -369,8 +419,8 @@ class ValueBuilder(BuildComponent):
         return result
 
     def resolve_reference_annotation(
-        self, context: str, annotation: str | None, expected_class: str
-    ) -> str:
+        self, context: str, annotation: ReferencePath | None, expected_class: ReferencePath
+    ) -> ReferencePath:
         if annotation is None:
             return expected_class
 
@@ -447,3 +497,52 @@ class ValueBuilder(BuildComponent):
             )
 
         return result
+
+    def _warn_external_binary_defaults(
+        self, context: str, struct_path: ReferencePath, supplied: dict[FName, Value]
+    ) -> None:
+        """Warn about unavailable defaults needed by serialized binary structs."""
+        if self.external_archetype is None:
+            return
+
+        hierarchy = self.struct_builder.struct_hierarchy(struct_path)
+        binary = any(
+            requires_binary_struct(declaration, self.package.flags) for _, declaration in hierarchy
+        )
+        fields = {
+            variable.name: (owner, variable)
+            for owner, declaration in hierarchy
+            for variable in declaration.variables
+        }
+        missing = fields.keys() - supplied.keys()
+
+        if binary:
+            if missing:
+                omitted = ", ".join(sorted(str(name) for name in missing))
+                msg = (
+                    f"{context}: Values from external archetype "
+                    f"{self.external_archetype} are unavailable; omitted binary struct "
+                    f"fields use the available class/struct defaults: {omitted}"
+                )
+                warn(WarningCode.EXTERNAL_ARCHETYPE_DEFAULTS, msg)
+
+            return
+
+        # Supplied nested structs are checked during their own construction.
+        # Check omitted nested structs that will be serialized from the baseline.
+        for name, (owner, definition) in fields.items():
+            if name not in missing:
+                continue
+
+            resolved = self.resolve_field_type(definition, owner)
+
+            if resolved.category is not TypeCategory.STRUCT:
+                continue
+
+            nested_path = resolved.declaration_path
+
+            if nested_path is None:
+                msg = f"Struct field {name} has no declaration path"
+                raise ValueError(msg)
+
+            self._warn_external_binary_defaults(f"{context}, field {str(name)!r}", nested_path, {})

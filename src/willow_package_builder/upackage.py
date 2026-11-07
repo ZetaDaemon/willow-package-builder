@@ -1,25 +1,27 @@
 from __future__ import annotations
 
+import re
 import struct
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import IntFlag
-from typing import overload, override
+from typing import Literal, overload, override
 from uuid import UUID, uuid4
 from warnings import deprecated
 
 PACKAGE_SIGNATURE = 0x9E2A83C1
 
 
+# fmt: off
 class NameEntryFlags(IntFlag):
     """NameEntryFlags."""
 
-    NONE = 0
+    NONE            = 0x0
 
-    TAG_EXPORT = 0x0000001000000000
-    LOAD_FOR_CLIENT = 0x0001000000000000
-    LOAD_FOR_SERVER = 0x0002000000000000
-    LOAD_FOR_EDITOR = 0x0004000000000000
+    TAG_EXPORT      = 0x1000000000
+    LOAD_FOR_CLIENT = 0x1000000000000
+    LOAD_FOR_SERVER = 0x2000000000000
+    LOAD_FOR_EDITOR = 0x4000000000000
 
     DEFAULT = TAG_EXPORT | LOAD_FOR_CLIENT | LOAD_FOR_SERVER | LOAD_FOR_EDITOR
 
@@ -27,7 +29,6 @@ class NameEntryFlags(IntFlag):
 class ObjectFlags(IntFlag):
     """ObjectFlags."""
 
-    # fmt: off
     NONE                 = 0x0
 
     PROTECTED            = 0x100
@@ -46,12 +47,11 @@ class ObjectFlags(IntFlag):
     NOT_FOR_EDITOR       = 0x40000000000000
     NATIVE               = 0x400000000000000
 
-    LOAD_CONTEXT = LOAD_FOR_CLIENT | LOAD_FOR_SERVER | LOAD_FOR_EDITOR
-
-    DEFAULT_EXPORT = LOAD_CONTEXT
-    PUBLIC_EXPORT = DEFAULT_EXPORT | PUBLIC
-    CLASS_EXPORT = PUBLIC_EXPORT | STANDALONE
-    CDO_EXPORT = PUBLIC_EXPORT | CLASS_DEFAULT_OBJECT
+    LOAD_CONTEXT    = LOAD_FOR_CLIENT | LOAD_FOR_SERVER | LOAD_FOR_EDITOR
+    DEFAULT_EXPORT  = LOAD_CONTEXT
+    PUBLIC_EXPORT   = DEFAULT_EXPORT | PUBLIC
+    CLASS_EXPORT    = PUBLIC_EXPORT | STANDALONE
+    CDO_EXPORT      = PUBLIC_EXPORT | CLASS_DEFAULT_OBJECT
 
 
 # fmt: on
@@ -175,6 +175,13 @@ class FName:
             return NotImplemented
         return self.name == other.name and self.number == other.number
 
+    def __contains__(self, other: str) -> bool:  # noqa: D105
+        return other in str(self)
+
+    # So a list of names can be sorted.
+    def __lt__(self, other: FName) -> bool:  # noqa: D105
+        return str(self) < str(other)
+
     def serialize(self, package: Package) -> bytes:
         """Convert to bytes."""
         return struct.pack("<ii", package.name_index(self.name), self.number)
@@ -194,15 +201,15 @@ class ReferencePath:
     @overload
     def __init__(self) -> None: ...
     @overload
-    def __init__(self, name: str | Name | FName) -> None: ...
+    def __init__(self, name: str | Name | FName | list[FName]) -> None: ...
     @overload
     def __init__(self, name: str | Name | FName, outer: ReferencePath | None) -> None: ...
     def __init__(
-        self, name: str | Name | FName = "None", outer: ReferencePath | None = None
+        self, name: str | Name | FName | list[FName] = "None", outer: ReferencePath | None = None
     ) -> None:
 
         if isinstance(name, str):
-            segments = name.split(".")
+            segments = re.split(r"[:.]", name)
 
             if any(not segment for segment in segments):
                 msg = f"Path contains an empty segment: {name!r}"
@@ -213,6 +220,14 @@ class ReferencePath:
                 outer = ReferencePath(FName(segment), outer)
 
             name = FName(last)
+
+        if isinstance(name, list):
+            *parents, last = name
+            for segment in parents:
+                outer = ReferencePath(segment, outer)
+
+            name = last
+
         if isinstance(name, Name):
             name = FName(name)
 
@@ -251,6 +266,10 @@ class ReferencePath:
             return ReferencePath(other)
         return ReferencePath(other, self)
 
+    # So a list of ReferencePaths can be sorted.
+    def __lt__(self, other: ReferencePath) -> bool:  # noqa: D105
+        return str(self) < str(other)
+
     def is_none(self) -> bool:
         """Check if the path is none."""
         return self.outer is None and self.name.is_none()
@@ -259,6 +278,38 @@ class ReferencePath:
         """Serialize the referenced object's package index."""
         index = 0 if self.is_none() else package.object_index(package.lookup_object_by_path(self))
         return struct.pack("<i", index)
+
+    @overload
+    def split(self, require_outer: Literal[True]) -> tuple[ReferencePath, FName]: ...
+    @overload
+    def split(self) -> tuple[ReferencePath | None, FName]: ...
+    def split(self, require_outer: bool = False) -> tuple[ReferencePath | None, FName]:
+        """Split into outer and name."""
+        if require_outer:
+            return self.get_outer(), self.name
+        return self.outer, self.name
+
+    def full_split(self) -> tuple[FName, ...]:
+        """Split an entire reference path into names."""
+        if self.outer is not None:
+            return (*self.outer.full_split(), self.name)
+        return (self.name,)
+
+    @property
+    def base(self) -> FName:
+        """Get the outermost FName."""
+        if self.outer is not None:
+            return self.outer.base
+        return self.name
+
+    def get_outer(self) -> ReferencePath:
+        """Get the outer path, raise an error if missing."""
+        outer = self.outer
+        if outer is not None:
+            return outer
+
+        msg = f"Expected a qualified path, got {self}"
+        raise ValueError(msg)
 
 
 @dataclass(eq=False)
@@ -586,10 +637,10 @@ class Package:
         )
 
     def ensure_import(
-        self, name: str, outer: ReferencePath, class_package: str, class_name: str
+        self, name: FName, outer: ReferencePath, class_package: FName, class_name: FName
     ) -> ReferencePath:
         """Register an import or reuse its existing definition."""
-        obj = ExternalReference(FName(name), FName(class_package), FName(class_name), outer)
+        obj = ExternalReference(name, class_package, class_name, outer)
         reference = obj.reference()
 
         try:
@@ -606,6 +657,49 @@ class Package:
             raise ValueError(msg)
 
         return reference
+
+    def is_package_object(self, obj: UObject | ExternalReference) -> bool:
+        """Check whether an object represents a package."""
+        if isinstance(obj, ExternalReference):
+            return obj.class_package == FName("Core") and obj.class_name == FName("Package")
+
+        return obj.object_class == ReferencePath("Core.Package")
+
+    def object_path(self, obj: UObject | ExternalReference) -> str:
+        """Format an object's path using Unreal's separators."""
+        if obj.outer.is_none():
+            if isinstance(obj, UObject) and not self.is_package_object(obj):
+                return f"{self.name}.{obj.name}"
+
+            return str(obj.name)
+
+        outer = self.lookup_object_by_path(obj.outer)
+        separator = "."
+
+        if not self.is_package_object(outer):
+            if outer.outer.is_none():
+                # A root export has the physical package as its implicit outer.
+                if isinstance(outer, UObject):
+                    separator = ":"
+            else:
+                grandparent = self.lookup_object_by_path(outer.outer)
+
+                if self.is_package_object(grandparent):
+                    separator = ":"
+
+        return f"{self.object_path(outer)}{separator}{obj.name}"
+
+    def format_object(self, obj: UObject | ExternalReference) -> str:
+        """Format an object as ClassName'ObjectPath'."""
+        if isinstance(obj, ExternalReference):
+            class_name = obj.class_name
+        elif obj.object_class.is_none():
+            class_name = FName("Class")
+        else:
+            class_object = self.lookup_object_by_path(obj.object_class)
+            class_name = class_object.name
+
+        return f"{class_name}'{self.object_path(obj)}'"
 
 
 def serialize_fstring(value: str | ReferencePath | Name) -> bytes:

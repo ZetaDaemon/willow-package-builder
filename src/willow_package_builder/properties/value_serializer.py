@@ -8,9 +8,9 @@ from willow_package_builder.compiler.semantics.intrinsics import (
     IntrinsicDefinition,
 )
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
-from willow_package_builder.compiler.syntax.modifiers import StructModifier, VariableModifier
-from willow_package_builder.logging import ObjectDefinitionError
+from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.package_config import collect_visible_packages
+from willow_package_builder.properties.object_references import import_external_object
 from willow_package_builder.properties.property_tags import PropertyTag
 
 from .values import (
@@ -63,10 +63,10 @@ class ValueSerializer:
     package: Package
     context: BuildContext
 
-    def object_class_path(self, target: UObject | ExternalReference) -> str:
+    def object_class_path(self, target: UObject | ExternalReference) -> ReferencePath:
         """Get the declared class of a registered object."""
         if isinstance(target, ExternalReference):
-            return f"{target.class_package}.{target.class_name}"
+            return ReferencePath(target.class_package) + target.class_name
 
         if target.object_class.is_none():
             return IMPLICIT_EXPORT_CLASS_PATH
@@ -74,9 +74,9 @@ class ValueSerializer:
         class_object = self.package.lookup_object_by_path(target.object_class)
 
         if isinstance(class_object, ExternalReference):
-            return str(class_object.reference())
+            return class_object.reference()
 
-        return f"{self.package.name}.{class_object.reference()}"
+        return class_object.reference()
 
     def validate_object_reference(
         self, value: ObjectValue, target: UObject | ExternalReference, resolved_type: ResolvedType
@@ -113,13 +113,11 @@ class ValueSerializer:
 
         return b"".join(self.serialize_value(element, resolved_type) for element in value.elements)
 
-    def resolve_field_type(self, definition: VariableDeclaration, owner_class: str) -> ResolvedType:
-        package_name = owner_class.partition(".")[0]
-        config = next(
-            config
-            for config in self.context.packages
-            if config.name.casefold() == package_name.casefold()
-        )
+    def resolve_field_type(
+        self, definition: VariableDeclaration, owner_class: ReferencePath
+    ) -> ResolvedType:
+        package_name = owner_class.get_outer().name
+        config = next(config for config in self.context.packages if config.name == package_name)
         visible = collect_visible_packages(config, self.context.packages)
 
         return self.context.references.resolve_type(
@@ -151,11 +149,11 @@ class ValueSerializer:
                     msg = f"Struct property {name} has no struct type"
                     raise ValueError(msg)
 
-                owner_class, _, lookup_name = value.struct_path.rpartition(".")
+                owner_class, lookup_name = value.struct_path.split(require_outer=True)
                 member = self.context.references.resolve_struct(
                     owner_class, lookup_name, self.context.parents
                 )
-                struct_name = FName(member.declaration.name)
+                struct_name = member.declaration.name
                 metadata = struct_name.serialize(self.package)
                 data = self.serialize_value(value, resolved_type)
 
@@ -230,7 +228,7 @@ class ValueSerializer:
                     msg = f"Binary field layout is not implemented: {path}.{definition.name}"
                     raise NotImplementedError(msg)
 
-                name = FName(definition.name)
+                name = definition.name
 
                 if name not in value.values:
                     msg = f"Binary struct {path} is missing field {name}"
@@ -253,11 +251,7 @@ class ValueSerializer:
             value, IMPLICIT_EXPORT_CLASS_PATH, IMPLICIT_EXPORT_CLASS_PATH
         )
         path = value.path
-        package_name, separator, class_name = path.partition(".")
-
-        if not separator:
-            msg = f"Unqualified class literal resolution is not implemented: {path}"
-            raise NotImplementedError(msg)
+        package_path, class_name = path.split(require_outer=True)
 
         definition = self.context.references.lookup_class(path)
         bound = resolved_type.arguments[0].declaration_path
@@ -271,27 +265,27 @@ class ValueSerializer:
             raise ValueError(msg)
 
         if isinstance(definition, IntrinsicDefinition):
-            package_name, _, class_name = definition.path.partition(".")
+            package_path, class_name = definition.path.split(require_outer=True)
             class_package = definition.class_package
             object_class = definition.class_name
         else:
             class_name = definition.name
-            class_package = "Core"
-            object_class = "Class"
+            class_package = FName("Core")
+            object_class = FName("Class")
 
-            if package_name.casefold() == str(self.package.name).casefold():
-                reference = ReferencePath(class_name)
+            if package_path.name == self.package.name:
+                reference = package_path + class_name
                 target = self.package.lookup_object_by_path(reference)
                 return target.reference().serialize(self.package)
 
             config = next(
-                config
-                for config in self.context.packages
-                if config.name.casefold() == package_name.casefold()
+                config for config in self.context.packages if config.name == package_path.name
             )
-            package_name = config.name
+            package_path = ReferencePath(config.name)
 
-        outer = self.package.ensure_import(package_name, ReferencePath(), "Core", "Package")
+        outer = self.package.ensure_import(
+            package_path.name, ReferencePath(), FName("Core"), FName("Package")
+        )
         reference = self.package.ensure_import(class_name, outer, class_package, object_class)
 
         return reference.serialize(self.package)
@@ -306,13 +300,13 @@ class ValueSerializer:
             self.validate_object_reference(value, target, resolved_type)
             return target.reference().serialize(self.package)
 
-        path = value.path.replace(":", ".")
-        candidates = [ReferencePath(path)]
+        path = value.path
+        candidates = [path]
 
         # Local exports are registered without the physical UPK package prefix.
-        package_name, separator, relative_path = path.partition(".")
+        package_name, *relative_path = path.full_split()
 
-        if separator and package_name.casefold() == str(self.package.name).casefold():
+        if package_name and package_name == self.package.name:
             candidates.append(ReferencePath(relative_path))
 
         for candidate in candidates:
@@ -324,7 +318,7 @@ class ValueSerializer:
             self.validate_object_reference(value, target, resolved_type)
             return target.reference().serialize(self.package)
 
-        reference = self.import_external_object(value)
+        reference = import_external_object(value, self.package, self.context)
         target = self.package.lookup_object_by_path(reference)
         self.validate_object_reference(value, target, resolved_type)
         return reference.serialize(self.package)
@@ -376,13 +370,13 @@ class ValueSerializer:
                 msg = f"Raw serialization for {type(value).__name__} is not implemented"
                 raise NotImplementedError(msg)
 
-    def serialize_properties(self, class_path: str, values: dict[FName, Value]) -> bytes:
+    def serialize_properties(self, class_path: ReferencePath, values: dict[FName, Value]) -> bytes:
         """Serialize tagged object properties and their terminator."""
         data: list[bytes] = []
 
         for name, value in values.items():
             member = self.context.references.resolve_variable(
-                class_path, str(name), self.context.parents
+                class_path, name, self.context.parents
             )
             resolved = self.resolve_field_type(member.declaration, member.owner_class)
 
@@ -390,20 +384,18 @@ class ValueSerializer:
 
         return b"".join(data) + FName("None").serialize(self.package)
 
-    def serialize_struct_fields(self, struct_path: str, values: dict[FName, Value]) -> bytes:
-        owner = struct_path.rpartition(".")[0]
-        package_name = owner.partition(".")[0]
-        config = next(
-            config
-            for config in self.context.packages
-            if config.name.casefold() == package_name.casefold()
-        )
+    def serialize_struct_fields(
+        self, struct_path: ReferencePath, values: dict[FName, Value]
+    ) -> bytes:
+        owner = struct_path.get_outer()
+        package_name = owner.get_outer().name
+        config = next(config for config in self.context.packages if config.name == package_name)
         visible = collect_visible_packages(config, self.context.packages)
         data: list[bytes] = []
 
         for name, value in values.items():
             member = self.context.references.resolve_struct_variable(
-                struct_path, str(name), self.context.parents, visible
+                struct_path, name, self.context.parents, visible
             )
             resolved = self.resolve_field_type(member.declaration, member.owner_class)
 
@@ -412,7 +404,7 @@ class ValueSerializer:
         return b"".join(data) + FName("None").serialize(self.package)
 
     def validate_reference_annotation(
-        self, value: ObjectValue, expected_class: str, actual_class: str
+        self, value: ObjectValue, expected_class: ReferencePath, actual_class: ReferencePath
     ) -> None:
         annotation = value.class_name
 
@@ -428,62 +420,3 @@ class ValueSerializer:
                 f"which does not extend annotation {annotation}"
             )
             raise ValueError(msg)
-
-    def import_external_object(self, value: ObjectValue) -> ReferencePath:
-        """Import an external object, assuming unknown nested outers are Objects."""
-        path = value.path.replace(":", ".")
-        segments = path.split(".")
-
-        if len(segments) < 2 or any(not segment for segment in segments):
-            msg = f"External object reference requires a full path: {value.path}"
-            raise ValueError(msg)
-
-        package_name, *nested_names, object_name = segments
-
-        package_reference = ReferencePath(package_name)
-
-        try:
-            existing_package = self.package.lookup_object_by_path(package_reference)
-        except KeyError:
-            existing_package = None
-
-        if isinstance(existing_package, UObject):
-            msg = (
-                f"Unknown object reference {value.path!r}; "
-                f"package {package_name!r} is defined in this build"
-            )
-            raise ObjectDefinitionError(msg)
-
-        outer = self.package.ensure_import(package_name, ReferencePath(), "Core", "Package")
-
-        for name in nested_names:
-            reference = outer + FName(name)
-
-            try:
-                existing = self.package.lookup_object_by_path(reference)
-            except KeyError:
-                outer = self.package.ensure_import(name, outer, "Core", "Object")
-            else:
-                # Preserve class information for already registered outers.
-                outer = existing.reference()
-
-        package_key, separator, _ = value.class_name.partition(".")
-
-        if not separator:
-            msg = f"External reference class is not qualified: {value.class_name}"
-            raise ValueError(msg)
-
-        definition = self.context.references.lookup_class(value.class_name)
-
-        if isinstance(definition, IntrinsicDefinition):
-            class_package, _, class_name = definition.path.partition(".")
-        else:
-            config = next(
-                config
-                for config in self.context.packages
-                if config.name.casefold() == package_key.casefold()
-            )
-            class_package = config.name
-            class_name = definition.name
-
-        return self.package.ensure_import(object_name, outer, class_package, class_name)

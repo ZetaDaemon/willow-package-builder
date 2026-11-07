@@ -4,10 +4,12 @@ from time import perf_counter
 from typing import TYPE_CHECKING, cast
 
 from willow_package_builder.compiler.source import decode_source
+from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
 from willow_package_builder.compiler.syntax.lexer import Lexer, TokenCategory
 from willow_package_builder.compiler.syntax.modifiers import StructModifier
 from willow_package_builder.compiler.syntax.parser import FunctionParser
 from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
+from willow_package_builder.compiler.syntax.punctuation import Punctuation
 from willow_package_builder.logging import (
     CompilationError,
     UnknownPropertyError,
@@ -19,10 +21,17 @@ from willow_package_builder.logging import (
 )
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.properties.reference_text import parse_reference_text
+from willow_package_builder.upackage import FName, ReferencePath
 
 from .cache.cache import load_or_parse_class
 from .semantics.intrinsics import IMPLICIT_EXPORT_CLASS_PATH
-from .semantics.reference_database import PRIMITIVE_TYPES
+from .semantics.reference_database import (
+    ARRAY_TYPE,
+    CLASS_TYPE,
+    DELEGATE_TYPE,
+    MAP_TYPE,
+    PRIMITIVE_TYPES,
+)
 from .semantics.types import ResolvedType, TypeCategory
 from .syntax.declarations import (
     ClassDeclaration,
@@ -54,21 +63,17 @@ class ClassLoader:
     build_packages: set[Path]
     references: ReferenceDatabase
 
-    sources: dict[str, ClassSource] = field(default_factory=dict, init=False, repr=False)
-    _member_type_sources: dict[str, list[str]] = field(default_factory=dict, init=False, repr=False)
-    _indexed_member_packages: set[str] = field(default_factory=set, init=False, repr=False)
-    _pending_classes: deque[str] = field(default_factory=deque, init=False, repr=False)
-    _queued_classes: set[str] = field(default_factory=set, init=False, repr=False)
-    _discovery_work: deque[str] = field(default_factory=deque, init=False, repr=False)
-    _dimension_work: deque[str] = field(default_factory=deque, init=False, repr=False)
-    _default_work: deque[str] = field(default_factory=deque, init=False, repr=False)
-    _processing_classes: bool = field(default=False, init=False, repr=False)
+    sources: dict[ReferencePath, ClassSource] = field(default_factory=dict, init=False, repr=False)
+    _member_type_sources: dict[FName, list[ReferencePath]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _indexed_member_packages: set[FName] = field(default_factory=set, init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Index source paths without parsing their contents."""
         for config in self.packages:
             for source_path in config.source_files():
-                key = f"{config.name}.{source_path.stem}".casefold()
+                key = ReferencePath(f"{config.name}.{source_path.stem}")
 
                 if key in self.sources:
                     msg = f"Duplicate class source: {key}"
@@ -76,69 +81,15 @@ class ClassLoader:
 
                 self.sources[key] = ClassSource(config, source_path)
 
-    def class_names(self, package_name: str) -> tuple[str, ...]:
+    def class_names(self, package_name: FName) -> tuple[ReferencePath, ...]:
         """Return indexed class names belonging to a package."""
-        package_key = package_name.casefold()
-
-        return tuple(path for path in self.sources if path.partition(".")[0] == package_key)
-
-    def _drain_class_work(self) -> None:
-        """Load declarations, discover dependencies, then resolve metadata."""
-        while (
-            self._pending_classes
-            or self._discovery_work
-            or self._dimension_work
-            or self._default_work
-        ):
-            if self._pending_classes:
-                key = self._pending_classes.popleft()
-                self._queued_classes.remove(key)
-                declaration = self._load_class_declaration(key)
-
-                if declaration is None:
-                    continue
-
-                self._discovery_work.append(key)
-                self._dimension_work.append(key)
-                self._default_work.append(key)
-
-                source = self.sources[key]
-                parent = self.references.parent_class_name(key, declaration)
-
-                if parent is not None:
-                    visible = collect_visible_packages(source.config, self.packages)
-                    path = self.references.display_class_path(key)
-
-                    with declaration_context(path, declaration.location):
-                        self.load_classes((parent,), source.config.name, visible)
-
-                continue
-
-            if self._discovery_work:
-                key = self._discovery_work.popleft()
-                self._load_declaration_dependencies(
-                    key, self.references.classes[key], self.sources[key].config
-                )
-                continue
-
-            if self._dimension_work:
-                key = self._dimension_work.popleft()
-                self._resolve_declaration_dimensions(
-                    key, self.references.classes[key], self.sources[key].config
-                )
-                continue
-
-            key = self._default_work.popleft()
-            self._load_declared_default_dependencies(
-                key, self.references.classes[key], self.sources[key].config
-            )
-
-            if self._pending_classes:
-                # Retry after newly requested declarations have been processed.
-                self._default_work.appendleft(key)
+        return tuple(path for path in self.sources if path.get_outer().name == package_name)
 
     def load_classes(
-        self, class_names: Iterable[str], current_package: str, visible_packages: set[str]
+        self,
+        class_names: Iterable[ReferencePath],
+        current_package: FName,
+        visible_packages: set[FName],
     ) -> None:
         """Validate class names against the prepared declaration registry."""
         for name in class_names:
@@ -146,17 +97,18 @@ class ClassLoader:
                 name, current_package, visible_packages, include_intrinsics=True
             )
 
-    def _load_known_class(self, name: str, config: PackageConfig, visible: set[str]) -> bool:
+    def _load_known_class(
+        self, name: ReferencePath, config: PackageConfig, visible: set[FName]
+    ) -> bool:
         """Load a name if it identifies an indexed class or an intrinsic."""
-        key = name.casefold()
         available = (
             self.sources.keys() | self.references.classes.keys() | self.references.intrinsics.keys()
         )
 
-        if "." in key:
-            known = key in available
+        if name.outer is not None:
+            known = name in available
         else:
-            known = any(path.rpartition(".")[2] == key for path in available)
+            known = any(path.name == name.name for path in available)
 
         if not known:
             return False
@@ -167,22 +119,22 @@ class ClassLoader:
     def _load_type_dependencies(
         self,
         type_ref: TypeReference,
-        owner_class: str,
+        owner_class: ReferencePath,
         config: PackageConfig,
-        visible: set[str],
-        parents: dict[str, str | None],
+        visible: set[FName],
+        parents: dict[ReferencePath, ReferencePath | None],
     ) -> None:
-        key = type_ref.name.casefold()
+        key = type_ref.name
 
-        if key == "map":
+        if key == MAP_TYPE:
             return
 
-        if key == "delegate":
+        if key == DELEGATE_TYPE:
             if len(type_ref.arguments) == 1:
                 signature = type_ref.arguments[0]
-                owner_name, separator, _ = signature.name.rpartition(".")
+                owner_name = signature.name.outer
 
-                if separator:
+                if owner_name:
                     self._load_known_class(owner_name, config, visible)
 
             return
@@ -190,16 +142,16 @@ class ClassLoader:
         for argument in type_ref.arguments:
             self._load_type_dependencies(argument, owner_class, config, visible, parents)
 
-        if key in PRIMITIVE_TYPES or key in (TypeCategory.ARRAY.value, TypeCategory.CLASS.value):
+        if key in PRIMITIVE_TYPES or key in (ARRAY_TYPE, CLASS_TYPE):
             return
 
-        if "." not in key:
-            member = self.references.find_member_type(owner_class, type_ref.name, parents)
+        if key.outer is None:
+            member = self.references.find_member_type(owner_class, type_ref.name.name, parents)
 
             if member is not None:
                 return
 
-            if self._load_known_member_type(type_ref.name, config, visible):
+            if self._load_known_member_type(type_ref.name.name, config, visible):
                 return
 
             self._load_known_class(type_ref.name, config, visible)
@@ -209,12 +161,12 @@ class ClassLoader:
             return
 
         # Object.Vector and Core.Object.Vector reference a class member type.
-        owner_name = type_ref.name.rpartition(".")[0]
+        owner_name = type_ref.name.get_outer()
         self._load_known_class(owner_name, config, visible)
 
     def _load_function_body_dependencies(
         self,
-        class_path: str,
+        class_path: ReferencePath,
         function: FunctionDeclaration | OperatorDeclaration,
         config: PackageConfig,
     ) -> None:
@@ -224,8 +176,8 @@ class ClassLoader:
         if function.body_tokens is None:
             return
 
-        owner = self.references.display_class_path(class_path)
-        function_path = f"{owner}.{function.name}"
+        owner = class_path
+        function_path = owner + function.fname
 
         with declaration_context(function_path, function.location):
             parser = FunctionParser.from_tokens(function.body_tokens)
@@ -235,7 +187,7 @@ class ClassLoader:
             parents = self.references.resolve_parent_classes(self.packages)
 
             for variable in variables:
-                variable_path = f"{function_path}.{variable.name}"
+                variable_path = function_path + variable.name
 
                 with declaration_context(variable_path, variable.location):
                     self._load_dimension_dependencies(variable, class_path, config, visible)
@@ -244,21 +196,19 @@ class ClassLoader:
                     )
 
     def _load_declaration_dependencies(
-        self, class_path: str, declaration: ClassDeclaration, config: PackageConfig
+        self, class_path: ReferencePath, declaration: ClassDeclaration, config: PackageConfig
     ) -> None:
         visible = collect_visible_packages(config, self.packages)
 
-        owner = self.references.display_class_path(class_path)
-
         if declaration.within is not None:
-            with declaration_context(owner, declaration.location):
+            with declaration_context(class_path, declaration.location):
                 self.load_classes((declaration.within,), config.name, visible)
 
         parents = self.references.resolve_parent_classes(self.packages)
         self.references.inheritance_order(parents)
 
         for variable in declaration.variables:
-            path = f"{owner}.{variable.name}"
+            path = class_path + variable.name
 
             with declaration_context(path, variable.location):
                 self._load_dimension_dependencies(variable, class_path, config, visible)
@@ -267,7 +217,7 @@ class ClassLoader:
                 )
 
         for struct in declaration.structs:
-            struct_path = f"{owner}.{struct.name}"
+            struct_path = class_path + struct.name
 
             with declaration_context(struct_path, struct.location):
                 if struct.parent is not None:
@@ -276,7 +226,7 @@ class ClassLoader:
                     )
 
                 for variable in struct.variables:
-                    path = f"{struct_path}.{variable.name}"
+                    path = struct_path + variable.name
 
                     with declaration_context(path, variable.location):
                         self._load_dimension_dependencies(variable, class_path, config, visible)
@@ -284,10 +234,8 @@ class ClassLoader:
                             variable.type_ref, class_path, config, visible, parents
                         )
 
-        owner = self.references.display_class_path(class_path)
-
         for function in (*declaration.functions, *declaration.operators):
-            function_path = f"{owner}.{function.name}"
+            function_path = class_path + function.fname
 
             with declaration_context(function_path, function.location):
                 if function.return_type is not None:
@@ -296,7 +244,7 @@ class ClassLoader:
                     )
 
                 for parameter in function.parameters:
-                    parameter_path = f"{function_path}.{parameter.name}"
+                    parameter_path = function_path + parameter.name
 
                     with declaration_context(parameter_path, parameter.location):
                         self._load_dimension_dependencies(parameter, class_path, config, visible)
@@ -308,10 +256,10 @@ class ClassLoader:
 
     def _load_default_dependencies(
         self,
-        properties: dict[str, object],
-        owner_class: str,
+        properties: dict[FName, object],
+        owner_class: ReferencePath,
         config: PackageConfig,
-        struct_path: str | None = None,
+        struct_path: ReferencePath | None = None,
     ) -> None:
         visible = collect_visible_packages(config, self.packages)
 
@@ -329,10 +277,7 @@ class ClassLoader:
                 if config.directory in self.build_packages:
                     raise
 
-                if struct_path is None:
-                    display_path = self.references.display_class_path(owner_class)
-                else:
-                    display_path = self.references.display_type_path(struct_path, parents)
+                display_path = owner_class if struct_path is None else struct_path
 
                 msg = f"{display_path}: Skipped default for {name!r}: {error}"
                 warn(WarningCode.INVALID_REFERENCE_DEFAULT, msg)
@@ -343,17 +288,14 @@ class ClassLoader:
             field_config = next(
                 package
                 for package in self.packages
-                if package.name.casefold() == member.owner_class.partition(".")[0]
+                if package.name == member.owner_class.get_outer().name
             )
             field_visible = collect_visible_packages(field_config, self.packages)
             definition = member.declaration
 
-            if struct_path is None:
-                owner = self.references.display_class_path(member.owner_class)
-            else:
-                owner = self.references.display_type_path(struct_path, parents)
+            owner = member.owner_class if struct_path is None else struct_path
 
-            path = f"{owner}.{definition.name}"
+            path = owner + definition.name
 
             with declaration_context(path, definition.location):
                 self._load_type_dependencies(
@@ -379,18 +321,29 @@ class ClassLoader:
 
             case TypeCategory.STRUCT:
                 if isinstance(value, dict):
-                    if not all(isinstance(name, str) for name in value):
-                        msg = "Default struct field names must be strings"
+                    if not all(isinstance(name, (str, FName)) for name in value):
+                        msg = "Default struct field names must be strings or FNames"
                         raise CompilationError(msg)
+
+                    raw_properties = cast("dict[str|FName, object]", value)
+                    properties: dict[FName, object] = {}
+                    for raw_key, raw_value in raw_properties.items():
+                        key = FName(raw_key) if isinstance(raw_key, str) else raw_key
+
+                        if key in properties:
+                            msg = f"Duplicate property {key}"
+                            raise CompilationError(msg)
+
+                        properties[key] = raw_value
 
                     path = resolved.declaration_path
                     if path is None:
                         msg = "Resolved struct has no declaration path"
                         raise ValueError(msg)
 
-                    self._load_default_dependencies(
-                        cast("dict[str, object]", value), path.rpartition(".")[0], config, path
-                    )
+                    self._load_default_dependencies(properties, path.get_outer(), config, path)
+                    value.clear()
+                    value.update(properties)  # pyright: ignore[reportUnknownMemberType]
 
             case TypeCategory.OBJECT | TypeCategory.CLASS:
                 if not isinstance(value, str):
@@ -398,7 +351,7 @@ class ClassLoader:
 
                 context = f"Default reference in {config.name}"
                 try:
-                    annotation, path = parse_reference_text(context, value)
+                    annotation, path = parse_reference_text(context, value, None)
                 except ValueBuildError as error:
                     msg = str(error)
                     raise CompilationError(msg) from error
@@ -430,14 +383,10 @@ class ClassLoader:
                 pass
 
     def load_property_dependencies(
-        self, class_path: str, properties: dict[str, object], current_package: str
+        self, class_path: ReferencePath, properties: dict[FName, object], current_package: FName
     ) -> None:
         """Load classes referenced by supplied property values."""
-        config = next(
-            config
-            for config in self.packages
-            if config.name.casefold() == current_package.casefold()
-        )
+        config = next(config for config in self.packages if config.name == current_package)
 
         self._load_default_dependencies(properties, class_path, config)
 
@@ -474,17 +423,15 @@ class ClassLoader:
             # UC may assign element zero of a fixed array without an index.
             self._load_default_value_dependencies(raw_value, resolved, config)
 
-    def index_member_types(self, package_name: str) -> None:
+    def index_member_types(self, package_name: FName) -> None:
         """Index struct and enum owners in a package without parsing classes."""
-        package_key = package_name.casefold()
-
-        if package_key in self._indexed_member_packages:
+        if package_name in self._indexed_member_packages:
             return
 
-        discovered: dict[str, list[str]] = {}
+        discovered: dict[ReferencePath, list[ReferencePath]] = {}
 
         for owner, source in self.sources.items():
-            if owner.partition(".")[0] != package_key:
+            if owner.get_outer().name != package_name:
                 continue
 
             source_text = decode_source(source.path.read_bytes(), source.path)
@@ -493,23 +440,23 @@ class ClassLoader:
 
             for index, token in enumerate(tokens):
                 if token.category is TokenCategory.SYMBOL:
-                    if token.text == "{":
+                    if token == Punctuation.LEFT_BRACE:
                         depth += 1
-                    elif token.text == "}":
+                    elif token == Punctuation.RIGHT_BRACE:
                         depth -= 1
 
                 if depth or token.category is not TokenCategory.IDENTIFIER:
                     continue
 
-                keyword = token.text.casefold()
+                keyword = token.keyword
 
-                if keyword not in ("struct", "enum"):
+                if keyword not in (ScriptKeywords.STRUCT, ScriptKeywords.ENUM):
                     continue
 
                 position = index + 1
 
-                if keyword == "struct":
-                    while tokens[position].text.casefold() in StructModifier:
+                if keyword == ScriptKeywords.STRUCT:
+                    while tokens[position].keyword in StructModifier:
                         position += 1
 
                 name = tokens[position]
@@ -518,38 +465,40 @@ class ClassLoader:
                     msg = f"{source.path}: Expected {keyword} name at {name.line}:{name.column}"
                     raise CompilationError(msg)
 
-                owners = discovered.setdefault(name.text.casefold(), [])
+                owners = discovered.setdefault(ReferencePath(name.fname), [])
 
                 if owner not in owners:
                     owners.append(owner)
 
         for name, owners in discovered.items():
-            self._member_type_sources.setdefault(name, []).extend(owners)
+            self._member_type_sources.setdefault(name.name, []).extend(owners)
 
-        self._indexed_member_packages.add(package_key)
+        self._indexed_member_packages.add(package_name)
 
-    def _load_known_member_type(self, name: str, config: PackageConfig, visible: set[str]) -> bool:
+    def _load_known_member_type(
+        self, name: FName, config: PackageConfig, visible: set[FName]
+    ) -> bool:
         """Find an unqualified struct or enum and load its declaring class."""
-        package_key = config.name.casefold()
-        allowed = {package_key, *(package.casefold() for package in visible)}
+        package_key = config.name
+        allowed = {package_key, *(package for package in visible)}
 
         for package in sorted(allowed):
             self.index_member_types(package)
 
         candidates = [
             owner
-            for owner in self._member_type_sources.get(name.casefold(), ())
-            if owner.partition(".")[0] in allowed
+            for owner in self._member_type_sources.get(name, ())
+            if owner.get_outer().name in allowed
         ]
 
-        local = [owner for owner in candidates if owner.partition(".")[0] == package_key]
+        local = [owner for owner in candidates if owner.get_outer().name == package_key]
         candidates = local or candidates
 
         if not candidates:
             return False
 
         if len(candidates) > 1:
-            paths = ", ".join(f"{owner}.{name}" for owner in candidates)
+            paths = ", ".join(str(owner + name) for owner in candidates)
             msg = f"Ambiguous struct or enum {name!r}: {paths}"
             raise CompilationError(msg)
 
@@ -559,9 +508,9 @@ class ClassLoader:
     def _load_dimension_dependencies(
         self,
         declaration: VariableDeclaration | ParameterDeclaration,
-        owner_class: str,
+        owner_class: ReferencePath,
         config: PackageConfig,
-        visible: set[str],
+        visible: set[FName],
     ) -> None:
         name = declaration.array_dimension_name
 
@@ -574,9 +523,9 @@ class ClassLoader:
     def _resolve_declaration_dimension(
         self,
         declaration: VariableDeclaration | ParameterDeclaration,
-        owner_class: str,
-        visible: set[str],
-        parents: dict[str, str | None],
+        owner_class: ReferencePath,
+        visible: set[FName],
+        parents: dict[ReferencePath, ReferencePath | None],
     ) -> None:
         name = declaration.array_dimension_name
 
@@ -587,7 +536,7 @@ class ClassLoader:
             name, owner_class, visible, parents
         )
 
-    def _load_class_declaration(self, key: str) -> ClassDeclaration | None:
+    def _load_class_declaration(self, key: ReferencePath) -> ClassDeclaration | None:
         """Parse and register one class without traversing dependencies."""
         if key in self.references.classes or key in self.references.intrinsics:
             return None
@@ -598,7 +547,7 @@ class ClassLoader:
             msg = f"No class source found: {key}"
             raise CompilationError(msg)
 
-        with declaration_context(str(source.path), None):
+        with declaration_context(source.path, None):
             cached = load_or_parse_class(
                 source.config,
                 source.path,
@@ -606,7 +555,7 @@ class ClassLoader:
             )
         declaration = cached.declaration
 
-        if declaration.name.casefold() != source.path.stem.casefold():
+        if declaration.name != FName(source.path.stem):
             msg = (
                 f"{source.path}: Declared class {declaration.name!r} "
                 "does not match the source filename"
@@ -637,36 +586,35 @@ class ClassLoader:
         return declaration
 
     def _load_declared_default_dependencies(
-        self, class_path: str, declaration: ClassDeclaration, config: PackageConfig
+        self, class_path: ReferencePath, declaration: ClassDeclaration, config: PackageConfig
     ) -> None:
         """Discover dependencies referenced by class and struct defaults."""
         self._load_default_dependencies(declaration.parsed_defaults, class_path, config)
 
         for struct in declaration.structs:
             self._load_default_dependencies(
-                struct.parsed_defaults, class_path, config, f"{class_path}.{struct.name}"
+                struct.parsed_defaults, class_path, config, class_path + struct.name
             )
 
     def _resolve_declaration_dimensions(
-        self, class_path: str, declaration: ClassDeclaration, config: PackageConfig
+        self, class_path: ReferencePath, declaration: ClassDeclaration, config: PackageConfig
     ) -> None:
-        owner = self.references.display_class_path(class_path)
+        owner = class_path
         visible = collect_visible_packages(config, self.packages)
         parents = self.references.resolve_parent_classes(self.packages)
 
-        targets: list[tuple[str, VariableDeclaration | ParameterDeclaration]] = [
-            (f"{owner}.{variable.name}", variable) for variable in declaration.variables
+        targets: list[tuple[ReferencePath, VariableDeclaration | ParameterDeclaration]] = [
+            (owner + variable.name, variable) for variable in declaration.variables
         ]
 
         for struct in declaration.structs:
             targets.extend(
-                (f"{owner}.{struct.name}.{variable.name}", variable)
-                for variable in struct.variables
+                (owner + struct.name + variable.name, variable) for variable in struct.variables
             )
 
         for function in (*declaration.functions, *declaration.operators):
             targets.extend(
-                (f"{owner}.{function.name}.{parameter.name}", parameter)
+                (owner + function.fname + parameter.name, parameter)
                 for parameter in function.parameters
             )
 
@@ -684,14 +632,14 @@ class ClassLoader:
             start = perf_counter()
             count = 0
 
-            for key in sorted(self.class_names(config.name)):
+            for key in sorted((self.class_names(config.name))):
                 if self._load_class_declaration(key) is not None:
                     count += 1
 
             elapsed = perf_counter() - start
             info(f"Loaded {count} class declarations from {config.name} in {elapsed:.3f}s")
 
-    def resolve_dimensions(self, class_order: Iterable[str]) -> None:
+    def resolve_dimensions(self, class_order: Iterable[ReferencePath]) -> None:
         """Resolve named dimensions after all declarations are registered."""
         info("Resolving named array dimensions")
         start = perf_counter()

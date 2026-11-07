@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from willow_package_builder.logging.diagnostics import ConfigError
+from willow_package_builder.upackage import FName
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -13,7 +14,7 @@ class PackageConfig:
     """Package configuration data."""
 
     directory: Path
-    name: str
+    name: FName
     references: tuple[Path, ...]
     required: tuple[Path, ...]
 
@@ -48,7 +49,7 @@ class PackageConfig:
 
         return cls(
             directory=directory,
-            name=name,
+            name=FName(name),
             references=tuple((directory / reference).resolve() for reference in references),
             required=tuple((directory / r).resolve() for r in required),
         )
@@ -71,7 +72,7 @@ def load_package_graph(directory: Path) -> tuple[PackageConfig, ...]:
     ordered: list[PackageConfig] = []
     completed: set[Path] = set()
     active: list[Path] = []
-    package_names: dict[str, Path] = {}
+    package_names: dict[FName, Path] = {}
 
     def visit(package_directory: Path) -> None:
         package_directory = package_directory.resolve()
@@ -88,7 +89,7 @@ def load_package_graph(directory: Path) -> tuple[PackageConfig, ...]:
 
         config = PackageConfig.load(package_directory)
 
-        name_key = config.name.casefold()
+        name_key = config.name
         existing_directory = package_names.get(name_key)
 
         if existing_directory is not None and existing_directory != package_directory:
@@ -135,11 +136,11 @@ def collect_build_packages(target: Path, packages: tuple[PackageConfig, ...]) ->
 
 def collect_visible_packages(
     config: PackageConfig, packages: tuple[PackageConfig, ...]
-) -> set[str]:
+) -> set[FName]:
     configs = {package.directory: package for package in packages}
 
     visited: set[Path] = {config.directory}
-    visible: set[str] = set()
+    visible: set[FName] = set()
 
     def visit(directory: Path) -> None:
         if directory in visited:

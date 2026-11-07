@@ -4,10 +4,13 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from willow_package_builder.compiler.syntax.declarations import OperatorCategory
+    from willow_package_builder.compiler.syntax.keyword import Keyword
+    from willow_package_builder.compiler.syntax.punctuation import Operator
+    from willow_package_builder.upackage import FName
 
 
 class Expression(ABC):
-    pass
+    """Representation of code that produces or refers to a value."""
 
 
 @dataclass
@@ -17,19 +20,19 @@ class IntegerExpression(Expression):
 
 @dataclass
 class IdentifierExpression(Expression):
-    name: str
+    name: FName
 
 
 @dataclass
 class BinaryExpression(Expression):
     left: Expression
-    operator: str
+    operator: Operator | Keyword
     right: Expression
 
 
 @dataclass
 class UnaryExpression(Expression):
-    operator: str
+    operator: Operator | Keyword
     operand: Expression
     op_category: Literal[OperatorCategory.PREFIX, OperatorCategory.POSTFIX]
 
@@ -58,7 +61,7 @@ class CallExpression(Expression):
 @dataclass
 class MemberExpression(Expression):
     object: Expression
-    name: str
+    name: FName
 
 
 @dataclass

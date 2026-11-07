@@ -15,7 +15,7 @@ from willow_package_builder.logging import (
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.properties.merge import merge_values
 from willow_package_builder.properties.values import Value
-from willow_package_builder.upackage import FName
+from willow_package_builder.upackage import FName, ReferencePath
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.classes.struct_builder import StructBuilder
@@ -30,24 +30,23 @@ class DefaultsBuilder(BuildComponent):
     struct: StructBuilder
     objects: ObjectBuilder
 
-    _completed: set[str] = field(default_factory=set, init=False, repr=False)
-    _active: list[str] = field(default_factory=list, init=False, repr=False)
+    _completed: set[ReferencePath] = field(default_factory=set, init=False, repr=False)
+    _active: list[ReferencePath] = field(default_factory=list, init=False, repr=False)
 
-    def _begin(self, path: str) -> None:
+    def _begin(self, path: ReferencePath) -> None:
         if path in self._active:
-            cycle = " -> ".join((*self._active, path))
+            cycle = " -> ".join(str(c) for c in (*self._active, path))
             msg = f"Cyclic default dependencies are not implemented: {cycle}"
             raise NotImplementedError(msg)
         self._active.append(path)
 
-    def _values_for(self, owner_class: str) -> ValueBuilder:
+    def _values_for(self, owner_class: ReferencePath) -> ValueBuilder:
         """Resolve defaults in the declaring package's scope."""
-        package_name = owner_class.partition(".")[0]
-        config = next(
-            config
-            for config in self.context.packages
-            if config.name.casefold() == package_name.casefold()
-        )
+        if owner_class.outer is None:
+            msg = f"Expected a qualified class, got {owner_class}"
+            raise ValueError(msg)
+        package_name = owner_class.outer.name
+        config = next(config for config in self.context.packages if config.name == package_name)
         state = replace(self.state, config=config)
 
         return replace(
@@ -57,7 +56,7 @@ class DefaultsBuilder(BuildComponent):
             allow_dump_fixups=config.directory not in self.context.build_packages,
         )
 
-    def _prepare_type(self, resolved: ResolvedType, raw_value: object = None) -> None:
+    def _prepare_type(self, resolved: ResolvedType, data: object = None) -> None:
         match resolved.category:
             case TypeCategory.STRUCT:
                 path = resolved.declaration_path
@@ -68,14 +67,33 @@ class DefaultsBuilder(BuildComponent):
                 self.build_struct_defaults(path)
 
                 # Overrides can supply arrays of structs absent from declaration defaults.
-                if isinstance(raw_value, dict):
-                    owner = path.rpartition(".")[0]
+                if isinstance(data, dict):
+                    owner = path.outer
+                    if owner is None:
+                        msg = f"Expected qualified struct, got {path}"
+                        raise ValueError(msg)
                     values = self._values_for(owner)
                     visible = collect_visible_packages(values.config, self.context.packages)
-                    for name, value in cast("dict[object, object]", raw_value).items():
-                        if not isinstance(name, str):
-                            msg = f"Struct defaults {path}: Field names must be strings"
-                            raise CompilationError(msg)
+
+                    data = cast("dict[object, object]", data)
+                    fields: dict[FName, object] = {}
+
+                    for raw_name, raw_value in data.items():
+                        if isinstance(raw_name, FName):
+                            name = raw_name
+                        elif isinstance(raw_name, str):
+                            name = FName(raw_name)
+                        else:
+                            msg = "Struct field names must be names or strings"
+                            raise ValueBuildError(msg)
+
+                        if name in fields:
+                            msg = f"Duplicate struct field {name}"
+                            raise ValueBuildError(msg)
+
+                        fields[name] = raw_value
+
+                    for name, value in fields.items():
                         member = self.context.references.resolve_struct_variable(
                             path, name, self.context.parents, visible
                         )
@@ -86,16 +104,22 @@ class DefaultsBuilder(BuildComponent):
 
             case TypeCategory.ARRAY:
                 # An empty dynamic array does not instantiate its element type.
-                if isinstance(raw_value, list):
-                    for element in cast("list[object]", raw_value):
+                if isinstance(data, list):
+                    for element in cast("list[object]", data):
                         inner_type, *_ = resolved.arguments
                         self._prepare_type(inner_type, element)
 
-    def build_struct_defaults(self, struct_path: str) -> None:
-        owner, _, name = struct_path.rpartition(".")
+            case _:
+                pass
+
+    def build_struct_defaults(self, struct_path: ReferencePath) -> None:
+        owner, name = struct_path.split()
+        if owner is None:
+            msg = f"Expected a qualified struct, gort {struct_path}"
+            raise ValueError(msg)
         member = self.context.references.resolve_struct(owner, name, self.context.parents)
         declaration = member.declaration
-        path = f"{member.owner_class}.{declaration.name}".casefold()
+        path = member.owner_class + declaration.name
 
         if path in self._completed:
             return
@@ -105,7 +129,7 @@ class DefaultsBuilder(BuildComponent):
             values = self._values_for(member.owner_class)
 
             for parent_owner, parent in self.struct.struct_hierarchy(path)[:-1]:
-                self.build_struct_defaults(f"{parent_owner}.{parent.name}")
+                self.build_struct_defaults(parent_owner + parent.name)
 
             # Inline fields need their type defaults even when not explicitly assigned.
             for variable in declaration.variables:
@@ -127,8 +151,8 @@ class DefaultsBuilder(BuildComponent):
         finally:
             self._active.pop()
 
-    def build_class_defaults(self, class_path: str) -> None:
-        path = class_path.casefold()
+    def build_class_defaults(self, class_path: ReferencePath) -> None:
+        path = class_path
         if path in self._completed:
             return
 
@@ -143,7 +167,7 @@ class DefaultsBuilder(BuildComponent):
 
             # Exported struct definitions need their records even if unused by fields.
             for struct in declaration.structs:
-                self.build_struct_defaults(f"{path}.{struct.name}")
+                self.build_struct_defaults(path + struct.name)
 
             for variable in declaration.variables:
                 if VariableModifier.NATIVE in variable.modifiers:
@@ -194,8 +218,8 @@ class DefaultsBuilder(BuildComponent):
 
     def _build_default_assignments(
         self,
-        path: str,
-        properties: dict[str, object],
+        path: ReferencePath,
+        properties: dict[FName, object],
         values: ValueBuilder,
         existing: dict[FName, Value],
         *,
@@ -203,7 +227,6 @@ class DefaultsBuilder(BuildComponent):
     ) -> dict[FName, Value]:
         result: dict[FName, Value] = {}
         visible = collect_visible_packages(values.config, self.context.packages)
-        display_path = self.context.references.display_type_path(path, self.context.parents)
         reference_only = values.config.directory not in self.context.build_packages
 
         for supplied_name, raw_value in properties.items():
@@ -224,18 +247,18 @@ class DefaultsBuilder(BuildComponent):
 
                 if is_struct:
                     built = values.build_struct_values(
-                        f"Struct defaults {display_path}", path, supplied, existing
+                        f"Struct defaults {path}", path, supplied, existing
                     )
                 else:
                     built = values.build_class_values(
-                        f"Class defaults {display_path}", path, supplied, existing
+                        f"Class defaults {path}", path, supplied, existing
                     )
 
             except (ValueBuildError, UnknownPropertyError) as error:
                 if not reference_only:
                     raise
 
-                msg = f"{display_path}: Skipped default for {supplied_name!r}: {error}"
+                msg = f"{path}: Skipped default for {supplied_name!r}: {error}"
                 warn(WarningCode.INVALID_REFERENCE_DEFAULT, msg)
                 continue
 
