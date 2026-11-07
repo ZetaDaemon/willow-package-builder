@@ -1,4 +1,3 @@
-from collections import deque
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import TYPE_CHECKING, cast
@@ -21,10 +20,9 @@ from willow_package_builder.logging import (
 )
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.properties.reference_text import parse_reference_text
-from willow_package_builder.upackage import FName, ReferencePath
+from willow_package_builder.upackage import CORE_CLASS_PATH, FName, ReferencePath
 
 from .cache.cache import load_or_parse_class
-from .semantics.intrinsics import IMPLICIT_EXPORT_CLASS_PATH
 from .semantics.reference_database import (
     ARRAY_TYPE,
     CLASS_TYPE,
@@ -373,7 +371,7 @@ class ClassLoader:
 
                     parents = self.references.resolve_parent_classes(self.packages)
                     is_class_reference |= self.references.is_subclass(
-                        annotation_path, IMPLICIT_EXPORT_CLASS_PATH, parents
+                        annotation_path, CORE_CLASS_PATH, parents
                     )
 
                 if is_class_reference:

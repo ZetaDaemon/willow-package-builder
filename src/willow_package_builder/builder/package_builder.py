@@ -5,7 +5,7 @@ from willow_package_builder.builder.defaults_builder import DefaultsBuilder
 from willow_package_builder.builder.value_builder import ValueBuilder
 from willow_package_builder.games import get_game
 from willow_package_builder.logging import info
-from willow_package_builder.objects.declarations import ObjectDefinition, ObjectFlag
+from willow_package_builder.objects.definitions import ObjectDefinition, ObjectDefinitionFlag
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.upackage import Package, ReferencePath
 
@@ -98,7 +98,7 @@ class PackageBuilder:
                 str(obj.reference())
                 for declaration, obj in self.object_builder.exports.items()
                 if isinstance(declaration, ObjectDefinition)
-                and ObjectFlag.KEEP_ALIVE in declaration.flags
+                and ObjectDefinitionFlag.KEEP_ALIVE in declaration.flags
             ],
         }
 

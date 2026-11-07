@@ -12,7 +12,13 @@ from willow_package_builder.payloads.struct_payload import StructFlags, UScriptS
 from willow_package_builder.properties.construction import initial_scalar_value
 from willow_package_builder.properties.merge import merge_values
 from willow_package_builder.properties.values import ArrayValue, StructValue, Value
-from willow_package_builder.upackage import FName, ObjectFlags, ReferencePath, UObject
+from willow_package_builder.upackage import (
+    CORE_SCRIPT_STRUCT_PATH,
+    FName,
+    ObjectFlags,
+    ReferencePath,
+    UObject,
+)
 
 from .exports import StructExport
 
@@ -34,8 +40,6 @@ STRUCT_MODIFIER_FLAGS: dict[StructModifier, StructFlags] = {
     StructModifier.ATOMIC_WHEN_COOKED: StructFlags.ATOMIC_WHEN_COOKED,
 }
 
-CORE_SCRIPT_STRUCT = ReferencePath("Core.ScriptStruct")
-
 
 @dataclass
 class StructBuilder(BuildComponent):
@@ -46,7 +50,7 @@ class StructBuilder(BuildComponent):
     _constructing_structs: set[ReferencePath] = field(default_factory=set, init=False, repr=False)
 
     def reserve_structs(self) -> None:
-        struct_class = self.references.class_object_reference(CORE_SCRIPT_STRUCT)
+        struct_class = self.references.class_object_reference(CORE_SCRIPT_STRUCT_PATH)
 
         supported_modifiers = {
             StructModifier.EXPORT,

@@ -22,15 +22,14 @@ from willow_package_builder.logging import (
     declaration_context,
 )
 from willow_package_builder.package_config import PackageConfig, collect_visible_packages
-from willow_package_builder.upackage import FName, ReferencePath
-
-from .intrinsics import (
-    CORE_INTERFACE,
-    CORE_OBJECT,
-    INTRINSICS,
-    PROPERTY_CLASS_PATHS,
-    IntrinsicDefinition,
+from willow_package_builder.upackage import (
+    CORE_INTERFACE_PATH,
+    CORE_OBJECT_PATH,
+    FName,
+    ReferencePath,
 )
+
+from .intrinsics import INTRINSICS, PROPERTY_CLASS_PATHS, IntrinsicDefinition
 from .types import ResolvedType, TypeCategory
 
 if TYPE_CHECKING:
@@ -154,10 +153,10 @@ class ReferenceDatabase:
             return declaration.parent
 
         if declaration.is_interface:
-            if class_path == CORE_INTERFACE:
-                return CORE_OBJECT
+            if class_path == CORE_INTERFACE_PATH:
+                return CORE_OBJECT_PATH
 
-            return CORE_INTERFACE
+            return CORE_INTERFACE_PATH
 
         return None
 
@@ -366,7 +365,9 @@ class ReferenceDatabase:
                 msg = "class accepts at most one type argument"
                 raise CompilationError(msg)
 
-            bound_ref = type_ref.arguments[0] if type_ref.arguments else TypeReference(CORE_OBJECT)
+            bound_ref = (
+                type_ref.arguments[0] if type_ref.arguments else TypeReference(CORE_OBJECT_PATH)
+            )
             bound = self.resolve_type(bound_ref, current_class, visible_packages, parents)
 
             if bound.category is not TypeCategory.OBJECT:
@@ -718,7 +719,7 @@ class ReferenceDatabase:
                 declaration.within, config.name, visible, include_intrinsics=True
             )
 
-        return CORE_OBJECT
+        return CORE_OBJECT_PATH
 
     def find_visible_member_type(
         self, name: FName, current_package: FName, visible_packages: set[FName]

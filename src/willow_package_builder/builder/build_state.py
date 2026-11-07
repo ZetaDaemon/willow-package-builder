@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-
 if TYPE_CHECKING:
     from willow_package_builder.builder.build_context import BuildContext
     from willow_package_builder.package_config import PackageConfig

@@ -6,7 +6,13 @@ from yaml.constructor import ConstructorError
 from willow_package_builder.logging.diagnostics import ObjectDefinitionError
 from willow_package_builder.upackage import FName, ReferencePath
 
-from .declarations import Definition, FolderDefinition, ObjectDefinition, ObjectFlag
+from .definitions import (
+    Definition,
+    FolderDefinition,
+    ObjectDefinition,
+    ObjectDefinitionFlag,
+    ObjectField,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
@@ -37,21 +43,21 @@ class ObjectLoader(yaml.SafeLoader):
         return mapping
 
 
-def parse_object_flags(value: object, context: str) -> frozenset[ObjectFlag]:
+def parse_object_flags(value: object, context: str) -> frozenset[ObjectDefinitionFlag]:
     """Parse the supported object flags."""
     if not isinstance(value, list):
         msg = f"{context}: Flags must be a list"
         raise ObjectDefinitionError(msg)
 
-    flags: set[ObjectFlag] = set()
+    flags: set[ObjectDefinitionFlag] = set()
 
     for item in value:
-        if not isinstance(item, str) or item not in ObjectFlag:
-            supported = ", ".join(flag.value for flag in ObjectFlag)
+        if not isinstance(item, str) or item not in ObjectDefinitionFlag:
+            supported = ", ".join(flag.value for flag in ObjectDefinitionFlag)
             msg = f"{context}: Unknown object flag {item!r}; supported flags: {supported}"
             raise ObjectDefinitionError(msg)
 
-        flags.add(ObjectFlag(item))
+        flags.add(ObjectDefinitionFlag(item))
 
     return frozenset(flags)
 
@@ -72,13 +78,13 @@ def read_object_file(source: Path, root: Definition | None) -> list[ObjectDefini
                 data = cast("dict[str, object]", data)
 
                 if document == 1:
-                    if "Name" in data:
+                    if ObjectField.NAME in data:
                         msg = f"{context}: First object must omit Name; it comes from the filename"
                         raise ObjectDefinitionError(msg)
 
                     name = source.stem
                 else:
-                    name = data.pop("Name", None)
+                    name = data.pop(ObjectField.NAME, None)
 
                 if not isinstance(name, str) or not name.strip() or "." in name or ":" in name:
                     msg = (
@@ -88,14 +94,14 @@ def read_object_file(source: Path, root: Definition | None) -> list[ObjectDefini
                     raise ObjectDefinitionError(msg)
                 name = FName(name)
 
-                class_name = data.pop("Class", None)
+                class_name = data.pop(ObjectField.CLASS, None)
                 if not isinstance(class_name, str) or not class_name.strip():
                     msg = f"{context}: Class must be a nonempty string"
                     raise ObjectDefinitionError(msg)
                 class_name = ReferencePath(class_name)
 
                 if not declarations:
-                    if "Outer" in data:
+                    if ObjectField.OUTER in data:
                         msg = f"{context}: First object cannot specify Outer"
                         raise ObjectDefinitionError(msg)
 
@@ -105,9 +111,7 @@ def read_object_file(source: Path, root: Definition | None) -> list[ObjectDefini
                     primary = declarations[0]
                     outer = primary
 
-                    if "Outer" in data:
-                        outer_name = data.pop("Outer")
-
+                    if (outer_name := data.pop(ObjectField.OUTER, None)) is not None:
                         if (
                             not isinstance(outer_name, str)
                             or not outer_name.strip()
@@ -146,13 +150,11 @@ def read_object_file(source: Path, root: Definition | None) -> list[ObjectDefini
                     )
                     raise ObjectDefinitionError(msg)
 
-                flags = parse_object_flags(data.pop("Flags", []), context)
+                flags = parse_object_flags(data.pop(ObjectField.FLAGS, []), context)
 
                 archetype: str | None = None
 
-                if "Archetype" in data:
-                    raw_archetype = data.pop("Archetype")
-
+                if (raw_archetype := data.pop(ObjectField.ARCHETYPE, None)) is not None:
                     if not isinstance(raw_archetype, str) or not raw_archetype.strip():
                         msg = f"{context}: Archetype must be a nonempty reference string"
                         raise ObjectDefinitionError(msg)

@@ -661,9 +661,9 @@ class Package:
     def is_package_object(self, obj: UObject | ExternalReference) -> bool:
         """Check whether an object represents a package."""
         if isinstance(obj, ExternalReference):
-            return obj.class_package == FName("Core") and obj.class_name == FName("Package")
+            return ReferencePath(obj.class_package) + obj.class_name == CORE_PACKAGE_CLASS_PATH
 
-        return obj.object_class == ReferencePath("Core.Package")
+        return obj.object_class == CORE_PACKAGE_CLASS_PATH
 
     def object_path(self, obj: UObject | ExternalReference) -> str:
         """Format an object's path using Unreal's separators."""
@@ -694,7 +694,7 @@ class Package:
         if isinstance(obj, ExternalReference):
             class_name = obj.class_name
         elif obj.object_class.is_none():
-            class_name = FName("Class")
+            class_name = CLASS_CLASS_NAME
         else:
             class_object = self.lookup_object_by_path(obj.object_class)
             class_name = class_object.name
@@ -712,3 +712,29 @@ def serialize_fstring(value: str | ReferencePath | Name) -> bytes:
         length = -(len(encoded) // 2)
 
     return struct.pack("<i", length) + encoded
+
+
+NONE_NAME = FName("None")
+CORE_PACKAGE_NAME = FName("Core")
+
+OBJECT_CLASS_NAME = FName("Object")
+PACKAGE_CLASS_NAME = FName("Package")
+CLASS_CLASS_NAME = FName("Class")
+INTERFACE_CLASS_NAME = FName("Interface")
+ENUM_CLASS_NAME = FName("Enum")
+FUNCTION_CLASS_NAME = FName("Function")
+SCRIPT_STRUCT_CLASS_NAME = FName("ScriptStruct")
+STRING_PROPERTY_CLASS_NAME = FName("StrProperty")
+
+CORE_PACKAGE_PATH = ReferencePath(CORE_PACKAGE_NAME)
+CORE_OBJECT_PATH = CORE_PACKAGE_PATH + OBJECT_CLASS_NAME
+CORE_PACKAGE_CLASS_PATH = CORE_PACKAGE_PATH + PACKAGE_CLASS_NAME
+CORE_CLASS_PATH = CORE_PACKAGE_PATH + CLASS_CLASS_NAME
+CORE_INTERFACE_PATH = CORE_PACKAGE_PATH + INTERFACE_CLASS_NAME
+CORE_ENUM_PATH = CORE_PACKAGE_PATH + ENUM_CLASS_NAME
+CORE_FUNCTION_PATH = CORE_PACKAGE_PATH + FUNCTION_CLASS_NAME
+CORE_SCRIPT_STRUCT_PATH = CORE_PACKAGE_PATH + SCRIPT_STRUCT_CLASS_NAME
+CORE_STRING_PROPERTY_CLASS_PATH = CORE_PACKAGE_PATH + STRING_PROPERTY_CLASS_NAME
+
+RETURN_VALUE_NAME = FName("ReturnValue")
+DEFAULT_OBJECT_PREFIX = "Default__"

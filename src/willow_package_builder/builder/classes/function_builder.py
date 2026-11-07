@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from willow_package_builder.builder.build_component import BuildComponent
-from willow_package_builder.compiler.codegen.emitter import RETURN_VALUE, FunctionEmitter
+from willow_package_builder.compiler.codegen.emitter import FunctionEmitter
 from willow_package_builder.compiler.semantics.expression_resolver import ExpressionResolver
 from willow_package_builder.compiler.semantics.function_body_validator import FunctionBodyValidator
 from willow_package_builder.compiler.semantics.scope import FunctionScope
@@ -21,7 +21,13 @@ from willow_package_builder.payloads.class_payload import (
     UFunctionPayload,
 )
 from willow_package_builder.payloads.property_payloads import PropertyFlags, UPropertyPayload
-from willow_package_builder.upackage import FName, ObjectFlags, ReferencePath, UObject
+from willow_package_builder.upackage import (
+    CORE_FUNCTION_PATH,
+    RETURN_VALUE_NAME,
+    ObjectFlags,
+    ReferencePath,
+    UObject,
+)
 
 from .prepared_function import PreparedFunction
 
@@ -138,7 +144,7 @@ class FunctionBuilder(BuildComponent):
         class_payload: UClassPayload,
         class_object_reference: ReferencePath,
     ) -> PreparedFunction:
-        function_class = self.references.class_object_reference(ReferencePath("Core.Function"))
+        function_class = self.references.class_object_reference(CORE_FUNCTION_PATH)
         supported_modifiers = {FunctionModifier.STATIC, FunctionModifier.PROTECTED}
 
         if function.func_category is not FunctionCategory.FUNCTION:
@@ -231,7 +237,7 @@ class FunctionBuilder(BuildComponent):
             properties.append(
                 self.properties.create_property(
                     function_object,
-                    RETURN_VALUE,
+                    RETURN_VALUE_NAME,
                     function.return_type,
                     class_path,
                     PropertyFlags.PARAM | PropertyFlags.OUT_PARAM | PropertyFlags.RETURN_PARAM,

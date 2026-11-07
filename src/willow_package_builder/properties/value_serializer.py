@@ -3,10 +3,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from willow_package_builder.builder.struct_layout import requires_binary_struct
-from willow_package_builder.compiler.semantics.intrinsics import (
-    IMPLICIT_EXPORT_CLASS_PATH,
-    IntrinsicDefinition,
-)
+from willow_package_builder.compiler.semantics.intrinsics import IntrinsicDefinition
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.package_config import collect_visible_packages
@@ -35,6 +32,9 @@ if TYPE_CHECKING:
     from willow_package_builder.upackage import Package
 
 from willow_package_builder.upackage import (
+    CORE_CLASS_PATH,
+    CORE_PACKAGE_CLASS_PATH,
+    NONE_NAME,
     ExternalReference,
     FName,
     ReferencePath,
@@ -69,7 +69,7 @@ class ValueSerializer:
             return ReferencePath(target.class_package) + target.class_name
 
         if target.object_class.is_none():
-            return IMPLICIT_EXPORT_CLASS_PATH
+            return CORE_CLASS_PATH
 
         class_object = self.package.lookup_object_by_path(target.object_class)
 
@@ -141,7 +141,7 @@ class ValueSerializer:
                 data = value.member_name.serialize(self.package)
 
             case PropertyTag.BYTE, ByteValue():
-                metadata = FName("None").serialize(self.package)
+                metadata = NONE_NAME.serialize(self.package)
                 data = self.serialize_value(value, resolved_type)
 
             case PropertyTag.STRUCT, StructValue():
@@ -247,9 +247,7 @@ class ValueSerializer:
 
     def serialize_class_reference(self, value: ObjectValue, resolved_type: ResolvedType) -> bytes:
         """Resolve a qualified class literal and serialize its package index."""
-        self.validate_reference_annotation(
-            value, IMPLICIT_EXPORT_CLASS_PATH, IMPLICIT_EXPORT_CLASS_PATH
-        )
+        self.validate_reference_annotation(value, CORE_CLASS_PATH, CORE_CLASS_PATH)
         path = value.path
         package_path, class_name = path.split(require_outer=True)
 
@@ -270,8 +268,7 @@ class ValueSerializer:
             object_class = definition.class_name
         else:
             class_name = definition.name
-            class_package = FName("Core")
-            object_class = FName("Class")
+            class_package, object_class = CORE_CLASS_PATH.full_split()
 
             if package_path.name == self.package.name:
                 reference = package_path + class_name
@@ -284,7 +281,7 @@ class ValueSerializer:
             package_path = ReferencePath(config.name)
 
         outer = self.package.ensure_import(
-            package_path.name, ReferencePath(), FName("Core"), FName("Package")
+            package_path.name, ReferencePath(), *CORE_PACKAGE_CLASS_PATH.full_split()
         )
         reference = self.package.ensure_import(class_name, outer, class_package, object_class)
 
@@ -382,7 +379,7 @@ class ValueSerializer:
 
             data.append(self.serialize_field(name, value, member.declaration, resolved))
 
-        return b"".join(data) + FName("None").serialize(self.package)
+        return b"".join(data) + NONE_NAME.serialize(self.package)
 
     def serialize_struct_fields(
         self, struct_path: ReferencePath, values: dict[FName, Value]
@@ -401,7 +398,7 @@ class ValueSerializer:
 
             data.append(self.serialize_field(name, value, member.declaration, resolved))
 
-        return b"".join(data) + FName("None").serialize(self.package)
+        return b"".join(data) + NONE_NAME.serialize(self.package)
 
     def validate_reference_annotation(
         self, value: ObjectValue, expected_class: ReferencePath, actual_class: ReferencePath

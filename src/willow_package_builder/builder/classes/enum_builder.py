@@ -6,13 +6,11 @@ from willow_package_builder.logging import CompilationError
 from willow_package_builder.payloads.class_payload import UClassPayload
 from willow_package_builder.payloads.enum_payload import UEnumPayload
 from willow_package_builder.properties.values import EnumValue, IdentifierValue, Value
-from willow_package_builder.upackage import ObjectFlags, ReferencePath, UObject
+from willow_package_builder.upackage import CORE_ENUM_PATH, ObjectFlags, ReferencePath, UObject
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.references import PackageReferences
     from willow_package_builder.compiler.semantics.types import ResolvedType
-
-CORE_ENUM = ReferencePath("Core.Enum")
 
 
 @dataclass
@@ -20,7 +18,7 @@ class EnumBuilder(BuildComponent):
     references: PackageReferences
 
     def build_class_enums(self) -> None:
-        enum_class = self.references.class_object_reference(CORE_ENUM)
+        enum_class = self.references.class_object_reference(CORE_ENUM_PATH)
 
         for class_path, exports in self.classes.items():
             class_payload = exports.class_object.payload

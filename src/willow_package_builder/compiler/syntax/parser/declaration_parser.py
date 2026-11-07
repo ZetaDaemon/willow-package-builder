@@ -10,7 +10,7 @@ from willow_package_builder.compiler.syntax.declarations import (
     ParameterDeclaration,
     StructDeclaration,
 )
-from willow_package_builder.compiler.syntax.keyword import Keyword, ScriptKeywords
+from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
 from willow_package_builder.compiler.syntax.modifiers import (
     ClassModifierName,
@@ -23,7 +23,7 @@ from willow_package_builder.compiler.syntax.modifiers import (
 from willow_package_builder.compiler.syntax.parser.defaults_parser import DefaultsParser
 from willow_package_builder.compiler.syntax.punctuation import Operator, Punctuation
 from willow_package_builder.logging import CompilationError, SourceLocation, WarningCode, warn
-from willow_package_builder.upackage import FName, Name
+from willow_package_builder.upackage import FName
 
 from .declaration_syntax_parser import DeclarationSyntaxParser
 

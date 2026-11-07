@@ -2,7 +2,13 @@ from typing import TYPE_CHECKING
 
 from willow_package_builder.compiler.semantics.intrinsics import IntrinsicDefinition
 from willow_package_builder.logging import ObjectDefinitionError
-from willow_package_builder.upackage import FName, Package, ReferencePath, UObject
+from willow_package_builder.upackage import (
+    CORE_OBJECT_PATH,
+    CORE_PACKAGE_CLASS_PATH,
+    Package,
+    ReferencePath,
+    UObject,
+)
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.build_context import BuildContext
@@ -36,7 +42,9 @@ def import_external_object(
         )
         raise ObjectDefinitionError(msg)
 
-    outer = package.ensure_import(package_name, ReferencePath(), FName("Core"), FName("Package"))
+    outer = package.ensure_import(
+        package_name, ReferencePath(), *CORE_PACKAGE_CLASS_PATH.full_split()
+    )
 
     for name in nested_names:
         reference = outer + name
@@ -44,7 +52,7 @@ def import_external_object(
         try:
             existing = package.lookup_object_by_path(reference)
         except KeyError:
-            outer = package.ensure_import(name, outer, FName("Core"), FName("Object"))
+            outer = package.ensure_import(name, outer, *CORE_OBJECT_PATH.full_split())
         else:
             # Preserve class information for already registered outers.
             outer = existing.reference()

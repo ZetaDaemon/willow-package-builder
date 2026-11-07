@@ -11,11 +11,21 @@ if TYPE_CHECKING:
     from willow_package_builder.upackage import FName
 
 
-class ObjectFlag(StrEnum):
+class ObjectDefinitionFlag(StrEnum):
     """Optional flags supported by object definitions."""
 
     PUBLIC = "PUBLIC"
     KEEP_ALIVE = "KEEP_ALIVE"
+
+
+class ObjectField(StrEnum):
+    """Reserved fields in an object definition."""
+
+    NAME = "Name"
+    CLASS = "Class"
+    OUTER = "Outer"
+    FLAGS = "Flags"
+    ARCHETYPE = "Archetype"
 
 
 @dataclass(eq=False)
@@ -46,5 +56,5 @@ class ObjectDefinition(Definition):
     properties: dict[FName, object]
     source: Path
     document: int
-    flags: frozenset[ObjectFlag] = field(default_factory=frozenset)
+    flags: frozenset[ObjectDefinitionFlag] = field(default_factory=frozenset)
     archetype: str | None = None

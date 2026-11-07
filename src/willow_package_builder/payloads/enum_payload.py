@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import override
 
 from willow_package_builder.logging import WarningCode, warn
-from willow_package_builder.upackage import FName, Package
+from willow_package_builder.upackage import NONE_NAME, FName, Package
 
 from .class_payload import UFieldPayload
 
@@ -45,6 +45,6 @@ class UEnumPayload(UFieldPayload):
     def serialize(self, package: Package) -> bytes:
         return (
             struct.pack("<i", self.net_index)
-            + FName("None").serialize(package)
+            + NONE_NAME.serialize(package)
             + self.serialize_body(package)
         )

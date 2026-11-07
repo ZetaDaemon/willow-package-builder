@@ -7,6 +7,7 @@ from typing import ClassVar, override
 from willow_package_builder.bytecode import Bytecode
 from willow_package_builder.games import get_game
 from willow_package_builder.upackage import (
+    NONE_NAME,
     FName,
     ObjectPayload,
     Package,
@@ -186,7 +187,7 @@ class UClassPayload(UStatePayload):
 
     class_flags: ClassFlags = ClassFlags.COMPILED | ClassFlags.PARSED
     within: ReferencePath = field(default_factory=ReferencePath)
-    config_name: FName = field(default_factory=lambda: FName("None"))
+    config_name: FName = field(default_factory=lambda: NONE_NAME)
 
     component_defaults: dict[FName, ReferencePath] = field(default_factory=dict)
 
@@ -198,7 +199,7 @@ class UClassPayload(UStatePayload):
     force_script_order: bool = False
     class_groups: list[FName] = field(default_factory=list)
     native_class_name: str = ""
-    dll_bind_name: FName = field(default_factory=lambda: FName("None"))
+    dll_bind_name: FName = field(default_factory=lambda: NONE_NAME)
 
     default_object: ReferencePath = field(default_factory=ReferencePath)
 
@@ -286,6 +287,6 @@ class UFunctionPayload(UStructPayload):
 
         return (
             struct.pack("<Hi", 0, self.net_index)  # Empty BL2 simple-locals table.
-            + FName("None").serialize(package)  # Empty property list.
+            + NONE_NAME.serialize(package)  # Empty property list.
             + self.serialize_body(package)
         )

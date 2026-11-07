@@ -4,7 +4,7 @@ from enum import IntFlag
 from typing import TYPE_CHECKING, override
 
 from willow_package_builder.properties.value_serializer import ValueSerializer
-from willow_package_builder.upackage import FName, Package, ReferencePath
+from willow_package_builder.upackage import NONE_NAME, FName, Package, ReferencePath
 
 from .class_payload import UStructPayload
 
@@ -52,6 +52,6 @@ class UScriptStructPayload(UStructPayload):
     def serialize(self, package: Package) -> bytes:
         return (
             struct.pack("<i", self.net_index)
-            + FName("None").serialize(package)
+            + NONE_NAME.serialize(package)
             + self.serialize_body(package)
         )

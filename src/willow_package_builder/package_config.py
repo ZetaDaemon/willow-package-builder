@@ -8,6 +8,10 @@ from willow_package_builder.upackage import FName
 if TYPE_CHECKING:
     from pathlib import Path
 
+PACKAGE_CONFIG_FILENAME = "package.toml"
+CLASSES_DIRECTORY_NAME = "Classes"
+OBJECTS_DIRECTORY_NAME = "Objects"
+
 
 @dataclass(frozen=True)
 class PackageConfig:
@@ -36,7 +40,7 @@ class PackageConfig:
         """Load the configuration for a package directory."""
         directory = directory.resolve()
 
-        with (directory / "package.toml").open("rb") as file:
+        with (directory / PACKAGE_CONFIG_FILENAME).open("rb") as file:
             data = tomllib.load(file)
 
         name = data.get("name")
@@ -56,7 +60,7 @@ class PackageConfig:
 
     def source_files(self) -> tuple[Path, ...]:
         """Get all .uc files."""
-        classes = self.directory / "Classes"
+        classes = self.directory / CLASSES_DIRECTORY_NAME
 
         if not classes.is_dir():
             msg = f"Package has no Classes directory: {self.directory}"

@@ -4,7 +4,7 @@ from dataclasses import KW_ONLY, dataclass, field
 from enum import IntFlag
 from typing import ClassVar, override
 
-from willow_package_builder.upackage import FName, Package, ReferencePath
+from willow_package_builder.upackage import NONE_NAME, FName, Package, ReferencePath
 
 from .class_payload import UFieldPayload
 
@@ -44,7 +44,7 @@ class UPropertyPayload(UFieldPayload, ABC):
     net_index: int = -1
     array_dimension: int = 1
     property_flags: PropertyFlags = PropertyFlags.NONE
-    category: FName = field(default_factory=lambda: FName("None"))
+    category: FName = field(default_factory=lambda: NONE_NAME)
     array_enum: ReferencePath = field(default_factory=ReferencePath)
 
     @override
@@ -71,7 +71,7 @@ class UPropertyPayload(UFieldPayload, ABC):
 
         return (
             struct.pack("<i", self.net_index)
-            + FName("None").serialize(package)
+            + NONE_NAME.serialize(package)
             + self.serialize_body(package)
         )
 

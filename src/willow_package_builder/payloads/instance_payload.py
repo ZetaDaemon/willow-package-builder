@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from willow_package_builder.properties.values import Value
 
 INDEX_NONE = -1
-PROPERTY_LIST_END = FName("None")
 
 
 @dataclass

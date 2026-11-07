@@ -1,7 +1,7 @@
 from abc import ABC
 from dataclasses import dataclass, field
 
-from willow_package_builder.upackage import FName, ReferencePath
+from willow_package_builder.upackage import NONE_NAME, FName, ReferencePath
 
 
 class Value(ABC):
@@ -39,7 +39,7 @@ class StringValue(Value):
 
 @dataclass
 class NameValue(Value):
-    value: FName = field(default_factory=lambda: FName("None"))
+    value: FName = field(default_factory=lambda: NONE_NAME)
 
 
 @dataclass
@@ -81,4 +81,4 @@ class EnumValue(Value):
 @dataclass
 class DelegateValue(Value):
     target: ReferencePath = field(default_factory=ReferencePath)
-    function_name: FName = field(default_factory=lambda: FName("None"))
+    function_name: FName = field(default_factory=lambda: NONE_NAME)

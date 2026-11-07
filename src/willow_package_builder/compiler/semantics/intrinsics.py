@@ -1,20 +1,21 @@
 from dataclasses import dataclass, field
 
-from willow_package_builder.upackage import FName, ReferencePath
+from willow_package_builder.upackage import (
+    CLASS_CLASS_NAME,
+    CORE_PACKAGE_NAME,
+    FName,
+    ReferencePath,
+)
 
 from .types import TypeCategory
-
-IMPLICIT_EXPORT_CLASS_PATH = ReferencePath("Core.Class")
-CORE_OBJECT = ReferencePath("Core.Object")
-CORE_INTERFACE = ReferencePath("Core.Interface")
 
 
 @dataclass(frozen=True)
 class IntrinsicDefinition:
     path: ReferencePath
     parent: ReferencePath
-    class_package: FName = field(default_factory=lambda: FName("Core"))
-    class_name: FName = field(default_factory=lambda: FName("Class"))
+    class_package: FName = field(default_factory=lambda: CORE_PACKAGE_NAME)
+    class_name: FName = field(default_factory=lambda: CLASS_CLASS_NAME)
 
 
 _INTRINSIC_PARENTS: dict[ReferencePath, ReferencePath] = {

@@ -2,7 +2,16 @@ from dataclasses import dataclass
 
 from willow_package_builder.compiler.semantics.intrinsics import IntrinsicDefinition
 from willow_package_builder.logging import CompilationError
-from willow_package_builder.upackage import FName, ReferencePath
+from willow_package_builder.upackage import (
+    CORE_CLASS_PATH,
+    CORE_ENUM_PATH,
+    CORE_FUNCTION_PATH,
+    CORE_PACKAGE_CLASS_PATH,
+    CORE_SCRIPT_STRUCT_PATH,
+    DEFAULT_OBJECT_PREFIX,
+    FName,
+    ReferencePath,
+)
 
 from .build_component import BuildComponent
 
@@ -33,7 +42,7 @@ class PackageReferences(BuildComponent):
                 raise ValueError(msg)
 
             package_reference = self.ensure_import(
-                package.name, ReferencePath(), FName("Core"), FName("Package")
+                package.name, ReferencePath(), *CORE_PACKAGE_CLASS_PATH.full_split()
             )
 
             return self.ensure_import(
@@ -60,18 +69,18 @@ class PackageReferences(BuildComponent):
         config = next(config for config in self.context.packages if config.name == package_key)
 
         package_reference = self.ensure_import(
-            config.name, ReferencePath(), FName("Core"), FName("Package")
+            config.name, ReferencePath(), *CORE_PACKAGE_CLASS_PATH.full_split()
         )
 
         if default_object:
             return self.ensure_import(
-                FName(f"Default__{definition.name}"),
+                FName(f"{DEFAULT_OBJECT_PREFIX}{definition.name}"),
                 package_reference,
                 config.name,
                 definition.name,
             )
 
-        return self.ensure_import(definition.name, package_reference, FName("Core"), FName("Class"))
+        return self.ensure_import(definition.name, package_reference, *CORE_CLASS_PATH.full_split())
 
     def enum_reference(self, enum_path: ReferencePath) -> ReferencePath:
         owner_path, name = enum_path.split()
@@ -94,7 +103,7 @@ class PackageReferences(BuildComponent):
             # Local enum exports must already have been built.
             return self.package.lookup_object_by_path(reference).reference()
 
-        return self.ensure_import(member.declaration.name, outer, FName("Core"), FName("Enum"))
+        return self.ensure_import(member.declaration.name, outer, *CORE_ENUM_PATH.full_split())
 
     def struct_reference(self, struct_path: ReferencePath) -> ReferencePath:
         owner_path, name = struct_path.split()
@@ -116,7 +125,7 @@ class PackageReferences(BuildComponent):
         outer = self.class_object_reference(member.owner_class)
 
         return self.ensure_import(
-            member.declaration.name, outer, FName("Core"), FName("ScriptStruct")
+            member.declaration.name, outer, *CORE_SCRIPT_STRUCT_PATH.full_split()
         )
 
     def function_reference(self, function_path: ReferencePath) -> ReferencePath:
@@ -138,4 +147,4 @@ class PackageReferences(BuildComponent):
             reference = outer + member.declaration.name
             return self.package.lookup_object_by_path(reference).reference()
 
-        return self.ensure_import(member.declaration.name, outer, FName("Core"), FName("Function"))
+        return self.ensure_import(member.declaration.name, outer, *CORE_FUNCTION_PATH.full_split())

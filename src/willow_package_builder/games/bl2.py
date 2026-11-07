@@ -1,7 +1,7 @@
-from typing import ClassVar, final
+from typing import final
 
 from willow_package_builder.opcode import Opcode
-from willow_package_builder.upackage import PackageFlags, PackageFormat
+from willow_package_builder.upackage import PackageFlags
 
 from .game import Game
 

@@ -1,3 +1,4 @@
+from willow_package_builder.compiler.semantics.reference_database import MAP_TYPE
 from willow_package_builder.compiler.syntax.declarations import (
     MAX_FIXED_ARRAY_DIMENSION,
     TypeReference,
@@ -13,7 +14,6 @@ from willow_package_builder.upackage import ReferencePath
 from .token_parser import TokenParser
 
 PARAMETERIZED_TYPES = frozenset(ReferencePath(name) for name in ("array", "class", "delegate"))
-MAP_TYPE = ReferencePath("map")
 
 
 class DeclarationSyntaxParser(TokenParser):

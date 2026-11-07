@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from willow_package_builder.compiler.semantics.intrinsics import CORE_OBJECT
 from willow_package_builder.compiler.syntax.declarations import (
     ParameterDeclaration,
     VariableDeclaration,
@@ -35,6 +34,7 @@ from willow_package_builder.compiler.syntax.statements import (
     WhileStatement,
 )
 from willow_package_builder.logging import CompilationError, declaration_context
+from willow_package_builder.upackage import CORE_OBJECT_PATH
 
 from .scope import VariableCategory
 from .types import ResolvedType, TypeCategory
@@ -450,7 +450,7 @@ class FunctionBodyValidator:
         current = self.resolver.scope.class_path
         visited: set[ReferencePath] = set()
 
-        while current != CORE_OBJECT:
+        while current != CORE_OBJECT_PATH:
             key = current
 
             if key in visited:

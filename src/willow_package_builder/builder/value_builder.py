@@ -3,7 +3,6 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
 from willow_package_builder.builder.struct_layout import requires_binary_struct
-from willow_package_builder.compiler.semantics.intrinsics import IMPLICIT_EXPORT_CLASS_PATH
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
 from willow_package_builder.logging import (
@@ -30,7 +29,13 @@ from willow_package_builder.properties.values import (
     StructValue,
     Value,
 )
-from willow_package_builder.upackage import INT32_MAX, UINT8_MAX, FName, ReferencePath
+from willow_package_builder.upackage import (
+    CORE_CLASS_PATH,
+    INT32_MAX,
+    UINT8_MAX,
+    FName,
+    ReferencePath,
+)
 
 from .build_component import BuildComponent
 
@@ -80,9 +85,7 @@ class ValueBuilder(BuildComponent):
             raise ValueBuildError(msg)
 
         annotation, path = parse_reference_text(context, value, None)
-        annotation = self.resolve_reference_annotation(
-            context, annotation, IMPLICIT_EXPORT_CLASS_PATH
-        )
+        annotation = self.resolve_reference_annotation(context, annotation, CORE_CLASS_PATH)
 
         visible = collect_visible_packages(self.config, self.context.packages)
 

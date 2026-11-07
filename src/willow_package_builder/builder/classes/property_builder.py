@@ -22,7 +22,14 @@ from willow_package_builder.payloads.property_payloads import (
     UStrPropertyPayload,
     UStructPropertyPayload,
 )
-from willow_package_builder.upackage import FName, ObjectFlags, ReferencePath, UObject
+from willow_package_builder.upackage import (
+    CORE_PACKAGE_CLASS_PATH,
+    NONE_NAME,
+    FName,
+    ObjectFlags,
+    ReferencePath,
+    UObject,
+)
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.references import PackageReferences
@@ -148,9 +155,7 @@ class PropertyBuilder(BuildComponent):
                     raise ValueError(msg)
 
                 payload = UClassPropertyPayload(
-                    property_class=self.references.class_object_reference(
-                        ReferencePath("Core.Class")
-                    ),
+                    property_class=self.references.class_object_reference(CORE_PACKAGE_CLASS_PATH),
                     meta_class=self.references.class_object_reference(bound.declaration_path),
                 )
 
@@ -219,7 +224,7 @@ class PropertyBuilder(BuildComponent):
         path = owner.reference() + declaration.name
         flags = self.variable_modifier_flags(declaration.modifiers, path)
 
-        category = FName("None")
+        category = NONE_NAME
         tokens = declaration.category_tokens
 
         if tokens is not None:

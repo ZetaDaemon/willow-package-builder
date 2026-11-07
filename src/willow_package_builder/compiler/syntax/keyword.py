@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import final, override
+from typing import override
 
 
 @dataclass(frozen=True, eq=False)

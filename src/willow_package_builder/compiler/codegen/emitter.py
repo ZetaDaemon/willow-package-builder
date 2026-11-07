@@ -42,7 +42,13 @@ from willow_package_builder.compiler.syntax.statements import (
 )
 from willow_package_builder.games import get_game
 from willow_package_builder.logging import CompilationError, declaration_context
-from willow_package_builder.upackage import FName, ReferencePath, UObject
+from willow_package_builder.upackage import (
+    CORE_STRING_PROPERTY_CLASS_PATH,
+    RETURN_VALUE_NAME,
+    FName,
+    ReferencePath,
+    UObject,
+)
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.classes.prepared_function import PreparedFunction
@@ -50,8 +56,6 @@ if TYPE_CHECKING:
     from willow_package_builder.opcode import Opcodes
 
     from .emission_context import EmissionContext
-
-RETURN_VALUE = FName("ReturnValue")
 
 
 @dataclass
@@ -221,7 +225,7 @@ class FunctionEmitter:
             owner_package = member.owner_class.outer.name
 
             if owner_package == self.builder.config.name:
-                reference = function_reference + RETURN_VALUE
+                reference = function_reference + RETURN_VALUE_NAME
                 result_property = self.builder.package.lookup_object_by_path(reference).reference()
             else:
                 property_class = self.builder.context.references.property_class(result_type)
@@ -232,7 +236,7 @@ class FunctionEmitter:
                     raise ValueError(msg)
 
                 result_property = self.builder.ensure_import(
-                    RETURN_VALUE, function_reference, class_package.name, class_name
+                    RETURN_VALUE_NAME, function_reference, class_package.name, class_name
                 )
 
         receiver = self.emit_expression(expression.callee.object)
@@ -387,7 +391,7 @@ class FunctionEmitter:
                     function = member.declaration
                     path = member.owner_class + function.name
                     function_reference = self.builder.function_reference(path)
-                    return_reference = function_reference + RETURN_VALUE
+                    return_reference = function_reference + RETURN_VALUE_NAME
 
                     if member.owner_class.outer is None:
                         msg = f"Expected fully qualified class, got {member.owner_class}"
@@ -400,7 +404,9 @@ class FunctionEmitter:
                         ).reference()
                     else:
                         property_reference = self.builder.ensure_import(
-                            RETURN_VALUE, function_reference, FName("Core"), FName("StrProperty")
+                            RETURN_VALUE_NAME,
+                            function_reference,
+                            *CORE_STRING_PROPERTY_CLASS_PATH.full_split(),
                         )
 
                 case _:

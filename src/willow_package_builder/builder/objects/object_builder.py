@@ -7,20 +7,22 @@ from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.logging import CompilationError, ValueBuildError, info
 from willow_package_builder.logging.diagnostics import ObjectDefinitionError
-from willow_package_builder.objects.declarations import (
+from willow_package_builder.objects.definitions import (
     Definition,
     FolderDefinition,
     ObjectDefinition,
-    ObjectFlag,
+    ObjectDefinitionFlag,
 )
 from willow_package_builder.objects.reader import walk_objects_directory
-from willow_package_builder.package_config import collect_visible_packages
+from willow_package_builder.package_config import OBJECTS_DIRECTORY_NAME, collect_visible_packages
 from willow_package_builder.payloads.instance_payload import ObjectInstancePayload
 from willow_package_builder.properties.merge import merge_values
 from willow_package_builder.properties.object_references import import_external_object
 from willow_package_builder.properties.reference_text import parse_reference_text
 from willow_package_builder.properties.values import ArrayValue, ObjectValue, Value
 from willow_package_builder.upackage import (
+    CORE_PACKAGE_CLASS_PATH,
+    DEFAULT_OBJECT_PREFIX,
     ExportFlags,
     ExternalReference,
     FName,
@@ -45,7 +47,7 @@ class ObjectBuilder(BuildComponent):
     exports: dict[Definition, UObject] = field(default_factory=dict, init=False)
 
     def read_objects(self) -> None:
-        directory = self.config.directory / "Objects"
+        directory = self.config.directory / OBJECTS_DIRECTORY_NAME
 
         if not directory.exists():
             self.definitions = []
@@ -56,7 +58,7 @@ class ObjectBuilder(BuildComponent):
             if isinstance(definition, ObjectDefinition) and isinstance(
                 definition.outer, FolderDefinition
             ):
-                definition.flags |= {ObjectFlag.PUBLIC, ObjectFlag.KEEP_ALIVE}
+                definition.flags |= {ObjectDefinitionFlag.PUBLIC, ObjectDefinitionFlag.KEEP_ALIVE}
 
     def construct_objects(self) -> None:
         visible = collect_visible_packages(self.config, self.context.packages)
@@ -73,7 +75,7 @@ class ObjectBuilder(BuildComponent):
             match definition:
                 case FolderDefinition():
                     flags |= ObjectFlags.PUBLIC
-                    class_path = ReferencePath("Core.Package")
+                    class_path = CORE_PACKAGE_CLASS_PATH
                     object_class = self.references.class_object_reference(class_path)
                     archetype = ReferencePath()
 
@@ -81,7 +83,7 @@ class ObjectBuilder(BuildComponent):
                         export_flags = ExportFlags.FORCED_EXPORT
 
                 case ObjectDefinition():
-                    if ObjectFlag.PUBLIC in definition.flags:
+                    if ObjectDefinitionFlag.PUBLIC in definition.flags:
                         flags |= ObjectFlags.PUBLIC
 
                     if definition.outer is None:
@@ -294,7 +296,7 @@ class ObjectBuilder(BuildComponent):
         return self.construct_object(
             class_path,
             class_object.reference(),
-            FName(f"Default__{class_object.name}"),
+            FName(f"{DEFAULT_OBJECT_PREFIX}{class_object.name}"),
             class_object.outer,
             ObjectFlags.CDO_EXPORT,
             archetype,
