@@ -23,7 +23,7 @@ from willow_package_builder.payloads.property_payloads import (
     UStructPropertyPayload,
 )
 from willow_package_builder.upackage import (
-    CORE_PACKAGE_CLASS_PATH,
+    CORE_CLASS_PATH,
     NONE_NAME,
     FName,
     ObjectFlags,
@@ -155,7 +155,7 @@ class PropertyBuilder(BuildComponent):
                     raise ValueError(msg)
 
                 payload = UClassPropertyPayload(
-                    property_class=self.references.class_object_reference(CORE_PACKAGE_CLASS_PATH),
+                    property_class=self.references.class_object_reference(CORE_CLASS_PATH),
                     meta_class=self.references.class_object_reference(bound.declaration_path),
                 )
 
