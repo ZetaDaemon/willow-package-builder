@@ -66,10 +66,9 @@ class ClassBuilder(BuildComponent):
 
             info(f"Compiling class {class_path}")
             class_object = UObject(declaration.name, ObjectFlags.CLASS_EXPORT)
+            self.package.add_export(class_object)
 
             default_object = self.objects.construct_cdo(class_path, class_object)
-
-            self.package.add_export(default_object)
 
             self.classes[class_path] = ClassExport(declaration, class_object, default_object)
 
