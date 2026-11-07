@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -9,7 +10,38 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
+
+
+def release_notes(version: Version, changelog: Path) -> str:
+    """Extract one version's Markdown section from the changelog."""
+    text = changelog.read_text(encoding="utf-8")
+    headings = list(re.finditer(r"^##[ \t]+(.+)$", text, re.MULTILINE))
+    matches: list[str] = []
+
+    for index, heading in enumerate(headings):
+        label = re.match(r"\[([^\]]+)\]", heading.group(1))
+        if label is None:
+            continue
+        try:
+            section_version = Version(label.group(1))
+        except InvalidVersion:
+            continue
+        if section_version != version:
+            continue
+
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(text)
+        matches.append(text[heading.end() : end].strip())
+
+    if len(matches) != 1:
+        msg = (
+            f"{changelog}: Expected exactly one section for version {version}, found {len(matches)}"
+        )
+        raise RuntimeError(msg)
+    if not matches[0]:
+        msg = f"{changelog}: Release notes for {version} are empty"
+        raise RuntimeError(msg)
+    return matches[0] + "\n"
 
 
 def main() -> None:
@@ -34,6 +66,9 @@ def main() -> None:
 
     publish = release is None or release["draft"]
     if publish:
+        notes = release_notes(version, Path("CHANGELOG.md"))
+        Path("release-notes.md").write_text(notes, encoding="utf-8")
+
         existing_tag = subprocess.run(
             ["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"],
             capture_output=True,

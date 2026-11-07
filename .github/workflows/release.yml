@@ -59,9 +59,10 @@ jobs:
                     gh release create "$RELEASE_TAG" \
                       --target "$GITHUB_SHA" \
                       --title "$RELEASE_TAG" \
-                      --generate-notes \
+                      --notes-file release-notes.md \
                       --draft
                   fi
+                  gh release edit "$RELEASE_TAG" --notes-file release-notes.md
                   gh release upload "$RELEASE_TAG" dist/*.whl dist/*.tar.gz --clobber
                   gh release edit "$RELEASE_TAG" --draft=false --prerelease="$IS_PRERELEASE"
 
