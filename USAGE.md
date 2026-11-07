@@ -99,6 +99,8 @@ This produces `MyPackage.MyClass` and its class default object. Class paths auto
 
 The UnrealScript compiler is currently incomplete, so only a subset is currently supported. Reference declarations can describe native classes, but WPB does/will not compile native implementations.
 
+See [UNREALSCRIPT.md](UNREALSCRIPT.md) for current compiler support and limitations.
+
 ## Define an object
 
 Create `Objects/MyObjects/Example.yaml`:

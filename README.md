@@ -2,6 +2,8 @@
 
 Willow Package Builder (WPB) builds Unreal packages (`.upk`). Currently supporting Borderlands 2 and Borderlands The Presequel.
 
+See [UNREALSCRIPT.md](UNREALSCRIPT.md) for current compiler support and limitations.
+
 ## Requirements
 
 - Python **3.14 or newer**.
