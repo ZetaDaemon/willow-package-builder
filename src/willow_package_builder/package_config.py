@@ -39,6 +39,18 @@ class PackageConfig:
     def load(cls, directory: Path) -> PackageConfig:
         """Load the configuration for a package directory."""
         directory = directory.resolve()
+        source_directories = (
+            directory / CLASSES_DIRECTORY_NAME,
+            directory / OBJECTS_DIRECTORY_NAME,
+        )
+        for source_directory in source_directories:
+            if source_directory.exists() and not source_directory.is_dir():
+                msg = f"Expected a directory: {source_directory}"
+                raise ConfigError(msg)
+
+        if not any(path.is_dir() for path in source_directories):
+            msg = f"{directory}: Package must contain Classes or Objects"
+            raise ConfigError(msg)
 
         with (directory / PACKAGE_CONFIG_FILENAME).open("rb") as file:
             data = tomllib.load(file)
@@ -59,12 +71,11 @@ class PackageConfig:
         )
 
     def source_files(self) -> tuple[Path, ...]:
-        """Get all .uc files."""
+        """Get all UnrealScript source files, if Classes is present."""
         classes = self.directory / CLASSES_DIRECTORY_NAME
 
-        if not classes.is_dir():
-            msg = f"Package has no Classes directory: {self.directory}"
-            raise ConfigError(msg)
+        if not classes.exists():
+            return ()
 
         return tuple(sorted(classes.rglob("*.uc")))
 
