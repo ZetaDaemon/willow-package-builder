@@ -8,6 +8,7 @@ from willow_package_builder.upackage import ReferencePath
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from willow_package_builder.handlers.classes.class_handler import ClassHandler
     from willow_package_builder.upackage import FName
 
 
@@ -58,3 +59,5 @@ class ObjectDefinition(Definition):
     document: int
     flags: frozenset[ObjectDefinitionFlag] = field(default_factory=frozenset)
     archetype: str | None = None
+
+    handler: ClassHandler | None = field(default=None)

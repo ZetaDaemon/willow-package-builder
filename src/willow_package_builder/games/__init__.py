@@ -1,25 +1,22 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from willow_package_builder.games.tps import TPS
+from willow_package_builder.games.game import TargetGame as TargetGame
 
 from .bl2 import Bl2
+from .tps import TPS
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from .game import Game
 
+__all__ = ["TargetGame", "get_game", "select_game"]
 
-class TargetGame(StrEnum):
-    BL1 = "bl1"
-    BL2 = "bl2"
-    TPS = "tps"
+GAMES: tuple[type[Game], ...] = (Bl2, TPS)
 
-
-GAME_DICT: dict[TargetGame, type[Game]] = {TargetGame.BL2: Bl2, TargetGame.TPS: TPS}
+GAME_DICT = {g.TARGET: g for g in GAMES}
 
 _active_game: ContextVar[Game | None] = ContextVar("active_game", default=None)
 

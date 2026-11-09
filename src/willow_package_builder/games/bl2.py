@@ -3,7 +3,7 @@ from typing import final
 from willow_package_builder.opcode import Opcode
 from willow_package_builder.upackage import PackageFlags
 
-from .game import Game
+from .game import Game, TargetGame
 
 
 @final
@@ -136,6 +136,8 @@ class Bl2Opcode:
 
 @final
 class Bl2(Game):
+    TARGET = TargetGame.BL2
+
     PACKAGE_VERSION = 832
     LICENSE_VERSION = 46
     ENGINE_VERSION = 1712575

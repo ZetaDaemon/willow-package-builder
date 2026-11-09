@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "willow-package-builder"
-version = "0.1.1"
+version = "0.2"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = ["pyyaml>=6.0.3"]
+dependencies = ["pillow>=13.0.0", "pyyaml>=6.0.3"]
 
 [project.optional-dependencies]
 dev = ["build", "pytest"]

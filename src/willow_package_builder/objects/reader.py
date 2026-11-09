@@ -63,7 +63,7 @@ def parse_object_flags(value: object, context: str) -> frozenset[ObjectDefinitio
 
 
 def read_object_file(source: Path, root: Definition | None) -> list[ObjectDefinition]:
-    declarations: list[ObjectDefinition] = []
+    definitions: list[ObjectDefinition] = []
     registered: dict[ReferencePath, ObjectDefinition] = {}
 
     try:
@@ -100,7 +100,7 @@ def read_object_file(source: Path, root: Definition | None) -> list[ObjectDefini
                     raise ObjectDefinitionError(msg)
                 class_name = ReferencePath(class_name)
 
-                if not declarations:
+                if not definitions:
                     if ObjectField.OUTER in data:
                         msg = f"{context}: First object cannot specify Outer"
                         raise ObjectDefinitionError(msg)
@@ -108,7 +108,7 @@ def read_object_file(source: Path, root: Definition | None) -> list[ObjectDefini
                     outer = root
                     local_path = ReferencePath(name) if outer is None else outer.reference + name
                 else:
-                    primary = declarations[0]
+                    primary = definitions[0]
                     outer = primary
 
                     if (outer_name := data.pop(ObjectField.OUTER, None)) is not None:
@@ -171,25 +171,25 @@ def read_object_file(source: Path, root: Definition | None) -> list[ObjectDefini
 
                     properties[key] = raw_value
 
-                declaration = ObjectDefinition(
+                definition = ObjectDefinition(
                     name, outer, source, class_name, properties, document, flags, archetype
                 )
 
-                registered[local_path] = declaration
-                declarations.append(declaration)
+                registered[local_path] = definition
+                definitions.append(definition)
 
                 if outer is not None:
-                    outer.children.append(declaration)
+                    outer.children.append(definition)
 
     except yaml.YAMLError as error:
         msg = f"{source}: Invalid object YAML: {error}"
         raise ObjectDefinitionError(msg) from error
 
-    if not declarations:
+    if not definitions:
         msg = f"{source}: Object file contains no documents"
         raise ObjectDefinitionError(msg)
 
-    return declarations
+    return definitions
 
 
 def walk_objects_directory(directory: Path) -> list[Definition]:

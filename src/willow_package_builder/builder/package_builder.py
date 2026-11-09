@@ -132,6 +132,7 @@ class PackageBuilder:
 
         info("Reading objects")
         self.object_builder.read_objects()
+        self.object_builder.prepare_definitions()
         declarations = [
             declaration
             for declaration in self.object_builder.definitions
@@ -145,5 +146,6 @@ class PackageBuilder:
         self.object_builder.link_archetypes()
         self.object_builder.validate_archetype_cycles()
         self.object_builder.build_all_properties()
+        self.object_builder.prepare_handlers()
 
         return self.package

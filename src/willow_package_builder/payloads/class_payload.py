@@ -116,7 +116,7 @@ class UStructPayload(UFieldPayload, ABC):
 
     super_struct: ReferencePath = field(default_factory=ReferencePath)
     script_text: ReferencePath = field(default_factory=ReferencePath)
-    children: ReferencePath = field(default_factory=ReferencePath)
+    children: ReferencePath = field(default_factory=ReferencePath, init=False)
     cpp_text: ReferencePath = field(default_factory=ReferencePath)
 
     source_line: int = -1
@@ -156,7 +156,7 @@ class UStatePayload(UStructPayload, ABC):
     label_table_offset: int = NO_LABEL_TABLE
     state_flags: StateFlags = StateFlags.NONE
 
-    function_map: dict[FName, ReferencePath] = field(default_factory=dict)
+    function_map: dict[FName, ReferencePath] = field(default_factory=dict, init=False)
 
     @override
     def serialize_body(self, package: Package) -> bytes:
@@ -189,21 +189,20 @@ class UClassPayload(UStatePayload):
     within: ReferencePath = field(default_factory=ReferencePath)
     config_name: FName = field(default_factory=lambda: NONE_NAME)
 
-    component_defaults: dict[FName, ReferencePath] = field(default_factory=dict)
-
-    dont_sort_categories: list[FName] = field(default_factory=list)
-    hide_categories: list[FName] = field(default_factory=list)
-    auto_expand_categories: list[FName] = field(default_factory=list)
-    auto_collapse_categories: list[FName] = field(default_factory=list)
-
     force_script_order: bool = False
-    class_groups: list[FName] = field(default_factory=list)
     native_class_name: str = ""
     dll_bind_name: FName = field(default_factory=lambda: NONE_NAME)
 
     default_object: ReferencePath = field(default_factory=ReferencePath)
 
-    memory_tag: int = 1
+    component_defaults: dict[FName, ReferencePath] = field(default_factory=dict, init=False)
+    dont_sort_categories: list[FName] = field(default_factory=list, init=False)
+    hide_categories: list[FName] = field(default_factory=list, init=False)
+    auto_expand_categories: list[FName] = field(default_factory=list, init=False)
+    auto_collapse_categories: list[FName] = field(default_factory=list, init=False)
+    class_groups: list[FName] = field(default_factory=list, init=False)
+
+    _MEMORY_TAG: ClassVar[int] = 1
 
     @override
     def serialize_body(self, package: Package) -> bytes:
@@ -238,7 +237,7 @@ class UClassPayload(UStatePayload):
             + serialize_names(self.class_groups)
             + serialize_fstring(self.native_class_name)
             + self.dll_bind_name.serialize(package)
-            + struct.pack("<B", self.memory_tag)
+            + struct.pack("<B", self._MEMORY_TAG)
             + self.default_object.serialize(package)
         )
 

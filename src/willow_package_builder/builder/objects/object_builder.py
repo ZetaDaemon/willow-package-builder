@@ -1,11 +1,19 @@
+from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import TYPE_CHECKING
 
 from willow_package_builder.builder.build_component import BuildComponent
 from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.modifiers import VariableModifier
-from willow_package_builder.logging import CompilationError, ValueBuildError, info
+from willow_package_builder.handlers.registry import get_class_handler
+from willow_package_builder.logging import (
+    CompilationError,
+    UnknownPropertyError,
+    ValueBuildError,
+    info,
+)
 from willow_package_builder.logging.diagnostics import ObjectDefinitionError
 from willow_package_builder.objects.definitions import (
     Definition,
@@ -16,6 +24,7 @@ from willow_package_builder.objects.definitions import (
 from willow_package_builder.objects.reader import walk_objects_directory
 from willow_package_builder.package_config import OBJECTS_DIRECTORY_NAME, collect_visible_packages
 from willow_package_builder.payloads.instance_payload import ObjectInstancePayload
+from willow_package_builder.properties.conversion import value_to_python
 from willow_package_builder.properties.merge import merge_values
 from willow_package_builder.properties.object_references import import_external_object
 from willow_package_builder.properties.reference_text import parse_reference_text
@@ -35,6 +44,7 @@ if TYPE_CHECKING:
     from willow_package_builder.builder.classes.struct_builder import StructBuilder
     from willow_package_builder.builder.references import PackageReferences
     from willow_package_builder.builder.value_builder import ValueBuilder
+    from willow_package_builder.handlers.classes.class_handler import ClassHandler
 
 
 @dataclass
@@ -46,6 +56,65 @@ class ObjectBuilder(BuildComponent):
     definitions: list[Definition] = field(default_factory=list, init=False)
     exports: dict[Definition, UObject] = field(default_factory=dict, init=False)
 
+    def _register_generated_object(
+        self, definition: ObjectDefinition, registered: dict[ReferencePath, Definition]
+    ) -> None:
+        """Register a generated definition before object construction."""
+        outer = definition.outer
+
+        if outer is None or registered.get(outer.reference) is not outer:
+            msg = (
+                f"Generated object {definition.name} requires "
+                "an already registered outer definition"
+            )
+            raise ValueError(msg)
+
+        path = definition.reference
+
+        if path in registered:
+            msg = f"Generated object duplicates an existing definition: {path}"
+            raise ValueError(msg)
+
+        registered[path] = definition
+        self.definitions.append(definition)
+
+        if definition not in outer.children:
+            outer.children.append(definition)
+
+    def prepare_definitions(self) -> None:
+        """Attach handlers and discover additional object definitions."""
+        visible = collect_visible_packages(self.config, self.context.packages)
+        pending = deque(self.definitions)
+        registered = {definition.reference: definition for definition in self.definitions}
+
+        while pending:
+            definition = pending.popleft()
+
+            if not isinstance(definition, ObjectDefinition):
+                continue
+
+            if isinstance(definition.outer, FolderDefinition):
+                definition.flags |= {ObjectDefinitionFlag.PUBLIC, ObjectDefinitionFlag.KEEP_ALIVE}
+
+            class_path, _ = self.context.references.resolve_class(
+                definition.class_name, self.config.name, visible
+            )
+            handler_type = get_class_handler(
+                class_path, self.context.references, self.context.parents
+            )
+
+            if handler_type is None:
+                definition.handler = None
+                continue
+
+            self._validate_handler_fields(class_path, handler_type)
+            handler = handler_type(definition, self.state)
+            definition.handler = handler
+
+            for generated in handler.discover():
+                self._register_generated_object(generated, registered)
+                pending.append(generated)
+
     def read_objects(self) -> None:
         directory = self.config.directory / OBJECTS_DIRECTORY_NAME
 
@@ -54,11 +123,6 @@ class ObjectBuilder(BuildComponent):
             return
 
         self.definitions = walk_objects_directory(directory)
-        for definition in self.definitions:
-            if isinstance(definition, ObjectDefinition) and isinstance(
-                definition.outer, FolderDefinition
-            ):
-                definition.flags |= {ObjectDefinitionFlag.PUBLIC, ObjectDefinitionFlag.KEEP_ALIVE}
 
     def construct_objects(self) -> None:
         visible = collect_visible_packages(self.config, self.context.packages)
@@ -157,10 +221,17 @@ class ObjectBuilder(BuildComponent):
             definition.class_name, self.config.name, visible_packages
         )
 
+        properties = definition.properties
+
+        if definition.handler is not None:
+            handler = definition.handler
+            handled = handler.EXTRA_FIELDS.keys() | handler.HANDLED_PROPERTIES
+            properties = {name: value for name, value in properties.items() if name not in handled}
+
         defaults: dict[FName, Value] = {}
 
         # Obtain defaults only for supplied scalar struct properties.
-        for supplied_name in definition.properties:
+        for supplied_name in properties:
             member = self.context.references.resolve_variable(
                 class_path, supplied_name, self.context.parents
             )
@@ -180,7 +251,27 @@ class ObjectBuilder(BuildComponent):
             external_archetype=self.external_archetype(obj),
             known_archetype_properties=self.known_archetype_properties(obj),
         )
-        return values.build_class_values(context, class_path, definition.properties, defaults)
+        return values.build_class_values(context, class_path, properties, defaults)
+
+    def _build_handler_extras(self, handler: ClassHandler, obj: UObject) -> dict[FName, Value]:
+        """Convert typed handler inputs without adding them to object properties."""
+        definition = handler.definition
+        values = replace(
+            self.values,
+            reference_base=obj.reference(),
+            external_archetype=None,
+            known_archetype_properties=frozenset(),
+        )
+        result: dict[FName, Value] = {}
+
+        for name, resolved_type in handler.EXTRA_FIELDS.items():
+            if resolved_type is None or name not in definition.properties:
+                continue
+
+            context = f"{definition.source}, document {definition.document}, extra field {name}"
+            result[name] = values.build_value(context, definition.properties[name], resolved_type)
+
+        return result
 
     def build_all_properties(self) -> None:
         """Build properties in archetype dependency order."""
@@ -207,15 +298,28 @@ class ObjectBuilder(BuildComponent):
                 current = self.exports[definitions[current]].archetype
 
             for reference in reversed(chain):
-                declaration = definitions[reference]
-                payload = self.exports[declaration].payload
+                definition = definitions[reference]
+                obj = self.exports[definition]
+                payload = obj.payload
 
                 if not isinstance(payload, ObjectInstancePayload):
-                    msg = f"Object has an invalid payload: {declaration.source}"
+                    msg = f"Object has an invalid payload: {definition.source}"
                     raise ValueError(msg)  # noqa: TRY004
 
                 try:
-                    payload.properties = self._build_properties(declaration, visible)
+                    payload.properties = self._build_properties(definition, visible)
+
+                    if definition.handler is not None:
+                        handler = definition.handler
+                        handler.extra_values = self._build_handler_extras(handler, obj)
+                        payload.handler = handler
+                        payload.owner = obj
+                        handler.object_reference.bind(
+                            partial(self._read_handler_field, handler, obj),
+                            partial(self._write_handler_field, handler, obj),
+                        )
+                        handler.initialize(obj)
+
                 except ValueBuildError as error:
                     msg = str(error)
                     raise ObjectDefinitionError(msg) from error
@@ -525,3 +629,146 @@ class ObjectBuilder(BuildComponent):
             current = target.archetype
 
         return frozenset(known)
+
+    def _validate_handler_fields(
+        self, class_path: ReferencePath, handler: type[ClassHandler]
+    ) -> None:
+        """Validate the handler's extra fields and claimed class properties."""
+        references = self.context.references
+        parents = self.context.parents
+
+        for name in handler.HANDLED_PROPERTIES:
+            try:
+                references.resolve_variable(class_path, name, parents)
+            except UnknownPropertyError as error:
+                msg = (
+                    f"{handler.__name__} claims property {name}, "
+                    f"but it does not exist on {class_path}"
+                )
+                raise ValueError(msg) from error
+
+        for name in handler.EXTRA_FIELDS:
+            try:
+                references.resolve_variable(class_path, name, parents)
+            except UnknownPropertyError:
+                continue
+
+            msg = (
+                f"{handler.__name__} declares extra field {name}, "
+                f"but it is already a property of {class_path}"
+            )
+            raise ValueError(msg)
+
+    def prepare_handlers(self) -> None:
+        """Prepare handler data after all objects have been initialized."""
+        for definition in self.definitions:
+            if not isinstance(definition, ObjectDefinition):
+                continue
+
+            if definition.handler is None:
+                continue
+
+            obj = self.exports[definition]
+            definition.handler.prepare(obj)
+
+    @staticmethod
+    def _handler_payload(obj: UObject) -> ObjectInstancePayload:
+        """Get the instance payload used by handler property access."""
+        payload = obj.payload
+
+        if not isinstance(payload, ObjectInstancePayload):
+            msg = f"Object has no instance payload: {obj.reference()}"
+            raise TypeError(msg)
+
+        return payload
+
+    def _read_handler_field(self, handler: ClassHandler, obj: UObject, name: FName) -> object:
+        """Read handler input or an effective constructed property."""
+        definition = handler.definition
+
+        if name in handler.EXTRA_FIELDS:
+            try:
+                if handler.EXTRA_FIELDS[name] is None:
+                    return deepcopy(definition.properties[name])
+
+                return value_to_python(handler.extra_values[name])
+            except KeyError:
+                msg = f"Object {definition.reference} has no extra field {name}"
+                raise AttributeError(msg) from None
+
+        payload = self._handler_payload(obj)
+        member = self.context.references.resolve_variable(
+            payload.class_path, name, self.context.parents
+        )
+        name = member.declaration.name
+
+        if name in payload.properties:
+            return value_to_python(payload.properties[name])
+
+        if name in handler.HANDLED_PROPERTIES and name in definition.properties:
+            return deepcopy(definition.properties[name])
+
+        external = self.external_archetype(obj)
+
+        if external is not None and name not in self.known_archetype_properties(obj):
+            msg = (
+                f"Cannot determine {obj.reference()}.{name}: "
+                f"external archetype values are unavailable for {external}"
+            )
+            raise NotImplementedError(msg)
+
+        value = self.archetype_property_value(obj, payload.class_path, name)
+        return value_to_python(value)
+
+    def _write_handler_field(
+        self, handler: ClassHandler, obj: UObject, name: FName, value: object
+    ) -> None:
+        """Update handler input or construct an explicit property override."""
+        definition = handler.definition
+
+        if name in handler.EXTRA_FIELDS:
+            resolved = handler.EXTRA_FIELDS[name]
+
+            if resolved is not None:
+                values = replace(
+                    self.values,
+                    reference_base=obj.reference(),
+                    external_archetype=None,
+                    known_archetype_properties=frozenset(),
+                )
+                context = f"{definition.source}, document {definition.document}, extra field {name}"
+                handler.extra_values[name] = values.build_value(context, value, resolved)
+
+            definition.properties[name] = deepcopy(value)
+            return
+
+        payload = self._handler_payload(obj)
+        member = self.context.references.resolve_variable(
+            payload.class_path, name, self.context.parents
+        )
+        variable = member.declaration
+        name = variable.name
+        resolved = self.values.resolve_field_type(variable, member.owner_class)
+
+        existing = payload.properties.get(name)
+
+        if existing is None and resolved.category is TypeCategory.STRUCT:
+            existing = self.archetype_property_value(obj, payload.class_path, name)
+
+        known = self.known_archetype_properties(obj)
+        external = self.external_archetype(obj)
+
+        if name in payload.properties or name in known:
+            external = None
+
+        values = replace(
+            self.values,
+            reference_base=obj.reference(),
+            external_archetype=external,
+            known_archetype_properties=known,
+        )
+        context = f"{definition.source}, document {definition.document}, property {name}"
+
+        payload.properties[name] = values.build_field_value(
+            context, variable, value, resolved, existing
+        )

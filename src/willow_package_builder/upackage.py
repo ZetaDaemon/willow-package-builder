@@ -36,6 +36,7 @@ class ObjectFlags(IntFlag):
     ARCHETYPE_OBJECT     = 0x400
     ROOT_SET             = 0x4000
     PUBLIC               = 0x400000000
+    DISREGARD_GC         = 0x8000000000
     PER_OBJECT_LOCALIZED = 0x10000000000
     TRANSIENT            = 0x400000000000
     LOAD_FOR_CLIENT      = 0x1000000000000
@@ -47,11 +48,11 @@ class ObjectFlags(IntFlag):
     NOT_FOR_EDITOR       = 0x40000000000000
     NATIVE               = 0x400000000000000
 
-    LOAD_CONTEXT    = LOAD_FOR_CLIENT | LOAD_FOR_SERVER | LOAD_FOR_EDITOR
-    DEFAULT_EXPORT  = LOAD_CONTEXT
-    PUBLIC_EXPORT   = DEFAULT_EXPORT | PUBLIC
-    CLASS_EXPORT    = PUBLIC_EXPORT | STANDALONE
-    CDO_EXPORT      = PUBLIC_EXPORT | CLASS_DEFAULT_OBJECT
+    LOAD_CONTEXT         = LOAD_FOR_CLIENT | LOAD_FOR_SERVER | LOAD_FOR_EDITOR
+    DEFAULT_EXPORT       = LOAD_CONTEXT
+    PUBLIC_EXPORT        = DEFAULT_EXPORT | PUBLIC
+    CLASS_EXPORT         = PUBLIC_EXPORT | STANDALONE
+    CDO_EXPORT           = PUBLIC_EXPORT | CLASS_DEFAULT_OBJECT
 
 
 # fmt: on
@@ -341,6 +342,10 @@ class ObjectPayload(ABC):
     def serialize(self, package: Package) -> bytes:
         """Convert to bytes."""
 
+    def serialize_at(self, package: Package, payload_offset: int | None) -> bytes:
+        """Serialize a payload with an optional final file offset."""
+        return self.serialize(package)
+
 
 @dataclass(eq=False)
 class UObject:
@@ -519,8 +524,8 @@ class Package:
 
         return b"".join(entries)
 
-    def serialize_payloads(self) -> list[bytes]:
-        """Serialize payloads in export-table order."""
+    def serialize_payloads(self, data_offset: int | None = None) -> list[bytes]:
+        """Serialize payloads in export-table order using optional file offsets."""
         payloads: list[bytes] = []
 
         for obj in self._exports:
@@ -529,12 +534,15 @@ class Package:
                 raise ValueError(msg)
 
             try:
-                payload = obj.payload.serialize(self)
-            except ValueError as exc:
-                msg = f"Failed to serialize {obj.reference()}: {exc}"
-                raise ValueError(msg) from exc
+                payload = obj.payload.serialize_at(self, data_offset)
+            except ValueError as error:
+                msg = f"Failed to serialize {obj.reference()}: {error}"
+                raise ValueError(msg) from error
 
             payloads.append(payload)
+
+            if data_offset is not None:
+                data_offset += len(payload)
 
         return payloads
 
@@ -623,6 +631,18 @@ class Package:
         layout = PackageLayout(
             names_offset, imports_offset, exports_offset, dependencies_offset, payload_offset
         )
+
+        expected_sizes = tuple(len(payload) for payload in payloads)
+        expected_counts = (len(self._imports), len(self._exports))
+        payloads = self.serialize_payloads(layout.payload_offset)
+
+        if tuple(len(payload) for payload in payloads) != expected_sizes:
+            msg = "Payload sizes changed after package layout was finalized"
+            raise RuntimeError(msg)
+
+        if (len(self._imports), len(self._exports)) != expected_counts:
+            msg = "Object tables changed after package layout was finalized"
+            raise RuntimeError(msg)
 
         header_data = self.serialize_header(layout)
         export_data = self.serialize_exports(payloads, data_offset=layout.payload_offset)

@@ -62,7 +62,15 @@ class ValueBuilder(BuildComponent):
         if value is None:
             return NullValue()
 
-        if not isinstance(value, str) or not value.strip():
+        if isinstance(value, ReferencePath):
+            if value.is_none():
+                return NullValue()
+
+            annotation = None
+            path = value
+        elif isinstance(value, str) and value.strip():
+            annotation, path = parse_reference_text(context, value, self.reference_base)
+        else:
             msg = f"{context}: Expected an object reference or null, got {value!r}"
             raise ValueBuildError(msg)
 
@@ -72,7 +80,6 @@ class ValueBuilder(BuildComponent):
             msg = f"{context}: Object property has no declared class"
             raise ValueError(msg)
 
-        annotation, path = parse_reference_text(context, value, self.reference_base)
         annotation = self.resolve_reference_annotation(context, annotation, class_path)
         return ObjectValue(annotation, path)
 
@@ -80,13 +87,19 @@ class ValueBuilder(BuildComponent):
         if value is None:
             return NullValue()
 
-        if not isinstance(value, str) or not value.strip():
+        if isinstance(value, ReferencePath):
+            if value.is_none():
+                return NullValue()
+
+            annotation = None
+            path = value
+        elif isinstance(value, str) and value.strip():
+            annotation, path = parse_reference_text(context, value, None)
+        else:
             msg = f"{context}: Expected a class reference or null, got {value!r}"
             raise ValueBuildError(msg)
 
-        annotation, path = parse_reference_text(context, value, None)
         annotation = self.resolve_reference_annotation(context, annotation, CORE_CLASS_PATH)
-
         visible = collect_visible_packages(self.config, self.context.packages)
 
         try:
@@ -211,10 +224,13 @@ class ValueBuilder(BuildComponent):
             case TypeCategory.NAME, None:
                 return NameValue()
 
+            case TypeCategory.NAME, FName():
+                return NameValue(value)
+
             case TypeCategory.NAME, str():
                 return NameValue(FName(value))
 
-            case TypeCategory.ENUM, str():
+            case TypeCategory.ENUM, (str() | FName()):
                 try:
                     return self.enums.construct_value(
                         IdentifierValue(ReferencePath(value)), resolved_type
