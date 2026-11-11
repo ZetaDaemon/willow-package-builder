@@ -191,7 +191,6 @@ Implemented default handling includes:
 
 Limits:
 
-- `Begin Object ... End Object` construction in compiled default blocks is not yet implemented. Use YAML object definitions where applicable.
 - Reference-only object-definition blocks are skipped rather than constructed.
 - Defaults are parsed as literal/reference data, not arbitrary executable expressions.
 - General escape decoding for quoted name/reference literals is not yet implemented.

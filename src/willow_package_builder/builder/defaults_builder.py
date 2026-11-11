@@ -2,7 +2,9 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
 from willow_package_builder.builder.build_component import BuildComponent
+from willow_package_builder.builder.classes.default_objects import DefaultObjectTemplate
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
+from willow_package_builder.compiler.syntax.declarations import DefaultObjectDeclaration
 from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
 from willow_package_builder.logging import (
@@ -15,7 +17,7 @@ from willow_package_builder.logging import (
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.properties.merge import merge_values
 from willow_package_builder.properties.values import Value
-from willow_package_builder.upackage import FName, ReferencePath
+from willow_package_builder.upackage import DEFAULT_OBJECT_PREFIX, FName, ReferencePath
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.classes.struct_builder import StructBuilder
@@ -40,20 +42,41 @@ class DefaultsBuilder(BuildComponent):
             raise NotImplementedError(msg)
         self._active.append(path)
 
+    def _default_object_scope(self, class_path: ReferencePath) -> dict[FName, ReferencePath]:
+        """Resolve root template names beneath the current class's CDO."""
+        declaration = self.context.references.classes[class_path]
+        cdo_path = ReferencePath(
+            FName(f"{DEFAULT_OBJECT_PREFIX}{declaration.name}"), class_path.get_outer()
+        )
+        return {
+            child.name: cdo_path + child.name
+            for _, ancestor in self.context.references.iter_class_hierarchy(
+                class_path, self.context.parents
+            )
+            for child in ancestor.default_objects
+        }
+
     def _values_for(self, owner_class: ReferencePath) -> ValueBuilder:
         """Resolve defaults in the declaring package's scope."""
         if owner_class.outer is None:
             msg = f"Expected a qualified class, got {owner_class}"
             raise ValueError(msg)
+
         package_name = owner_class.outer.name
         config = next(config for config in self.context.packages if config.name == package_name)
         state = replace(self.state, config=config)
+        declaration = self.context.references.classes[owner_class]
+        cdo_path = ReferencePath(
+            FName(f"{DEFAULT_OBJECT_PREFIX}{declaration.name}"), owner_class.get_outer()
+        )
 
         return replace(
             self.values,
             state=state,
             implicit_fixed_index=True,
             allow_dump_fixups=config.directory not in self.context.build_packages,
+            reference_base=cdo_path,
+            reference_scope=self._default_object_scope(owner_class),
         )
 
     def _prepare_type(self, resolved: ResolvedType, data: object = None) -> None:
@@ -266,3 +289,100 @@ class DefaultsBuilder(BuildComponent):
             existing = merge_values(existing, built)
 
         return result
+
+    def prepare_default_objects(
+        self, class_path: ReferencePath
+    ) -> dict[FName, DefaultObjectTemplate]:
+        """Prepare the types used by an effective default object tree."""
+        templates = self.collect_default_object_templates(class_path)
+        pending = list(templates.values())
+
+        while pending:
+            template = pending.pop()
+            self.build_class_defaults(template.class_path)
+            values = self._values_for(template.class_path)
+
+            for owner, declaration in template.layers:
+                if owner.get_outer() != class_path.get_outer():
+                    msg = (
+                        f"Inherited default objects from another package are not supported: {owner}"
+                    )
+                    raise NotImplementedError(msg)
+
+                for name, raw_value in declaration.properties.items():
+                    member = self.context.references.resolve_variable(
+                        template.class_path, name, self.context.parents
+                    )
+                    resolved = values.resolve_field_type(member.declaration, member.owner_class)
+                    self._prepare_field_type(member.declaration, resolved, raw_value)
+
+            pending.extend(template.children.values())
+
+        return templates
+
+    def collect_default_object_templates(
+        self, class_path: ReferencePath
+    ) -> dict[FName, DefaultObjectTemplate]:
+        """Collect inherited templates without modifying parsed declarations."""
+        result: dict[FName, DefaultObjectTemplate] = {}
+        hierarchy = list(
+            self.context.references.iter_class_hierarchy(class_path, self.context.parents)
+        )
+
+        for owner, declaration in reversed(hierarchy):
+            self._apply_default_object_declarations(owner, declaration.default_objects, result)
+
+        return result
+
+    def _apply_default_object_declarations(
+        self,
+        owner_class: ReferencePath,
+        declarations: list[DefaultObjectDeclaration],
+        templates: dict[FName, DefaultObjectTemplate],
+    ) -> None:
+        """Apply one declaration layer to its enclosing template collection."""
+        package_name = owner_class.get_outer().name
+        config = next(config for config in self.context.packages if config.name == package_name)
+        visible = collect_visible_packages(config, self.context.packages)
+        seen: set[FName] = set()
+
+        for declaration in declarations:
+            name = declaration.name
+
+            if name in seen:
+                msg = f"Duplicate default object {name} on {owner_class}"
+                raise CompilationError(msg, declaration.location)
+
+            seen.add(name)
+            template = templates.get(name)
+
+            if declaration.class_name is None:
+                if template is None:
+                    msg = (
+                        f"Default object {name} on {owner_class} has no Class "
+                        "and does not override an inherited template"
+                    )
+                    raise CompilationError(msg, declaration.location)
+            else:
+                class_path, class_declaration = self.context.references.resolve_class(
+                    declaration.class_name, config.name, visible
+                )
+
+                if class_declaration.is_abstract:
+                    msg = f"Default object {name} cannot construct abstract class {class_path}"
+                    raise CompilationError(msg, declaration.location)
+
+                if template is None:
+                    template = DefaultObjectTemplate(class_path)
+                    templates[name] = template
+                elif class_path != template.class_path:
+                    msg = (
+                        f"Changing the class of inherited default object {name} "
+                        f"from {template.class_path} to {class_path} is not implemented yet"
+                    )
+                    raise NotImplementedError(msg)
+
+            template.layers.append((owner_class, declaration))
+            self._apply_default_object_declarations(
+                owner_class, declaration.children, template.children
+            )

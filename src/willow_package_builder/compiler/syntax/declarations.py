@@ -138,6 +138,19 @@ class StructDeclaration:
 
 
 @dataclass
+class DefaultObjectDeclaration:
+    """A subobject declared inside defaultproperties."""
+
+    name: FName
+    class_name: ReferencePath | None
+
+    properties: dict[FName, object] = field(default_factory=dict)
+    children: list[DefaultObjectDeclaration] = field(default_factory=list)
+
+    location: SourceLocation | None = field(default=None, compare=False, repr=False, kw_only=True)
+
+
+@dataclass
 class ClassDeclaration:
     name: FName
     parent: ReferencePath | None
@@ -155,7 +168,13 @@ class ClassDeclaration:
 
     default_tokens: tuple[Token, ...] | None = None
     parsed_defaults: dict[FName, object] = field(default_factory=dict)
+    default_objects: list[DefaultObjectDeclaration] = field(default_factory=list)
     defaults: dict[FName, Value] = field(default_factory=dict)
 
     default_parse_error: str | None = None
     location: SourceLocation | None = field(default=None, compare=False, repr=False, kw_only=True)
+
+    @property
+    def is_abstract(self) -> bool:
+        """Whether this class is explicitly declared abstract."""
+        return any(modifier.name is ClassModifierName.ABSTRACT for modifier in self.modifiers)

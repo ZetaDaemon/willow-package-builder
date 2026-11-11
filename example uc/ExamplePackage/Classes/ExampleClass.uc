@@ -1,28 +1,11 @@
 class ExampleClass extends Object;
 
-struct immutable InnerData
-{
-    var int Count;
-    var float Scale;
-
-    structdefaultproperties
-    {
-        Scale=2.0
-    }
-};
-
-struct OuterData
-{
-    var InnerData Inner;
-
-    structdefaultproperties
-    {
-        Inner=(Count=5)
-    }
-};
-
-var OuterData Data;
+var instanced ExampleClass2 Obj;
 
 defaultproperties
 {
+    Begin Object Class=ExampleClass2 Name=MyObject
+        B=7
+    End Object
+    Obj=MyObject
 }

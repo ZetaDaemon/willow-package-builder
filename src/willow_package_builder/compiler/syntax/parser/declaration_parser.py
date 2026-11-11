@@ -652,12 +652,20 @@ class DeclarationParser(DeclarationSyntaxParser):
 
         try:
             parsed = parser.parse_defaults(skip_object_definitions=reference_only)
+
+            if isinstance(declaration, StructDeclaration) and parser.default_objects:
+                msg = "Object declarations inside struct defaults are not implemented"
+                raise NotImplementedError(msg)
         except CompilationError as error:
             if not reference_only:
                 raise
 
             declaration.parsed_defaults = {}
+            if isinstance(declaration, ClassDeclaration):
+                declaration.default_objects = []
             declaration.default_parse_error = str(error)
         else:
             declaration.parsed_defaults = parsed
+            if isinstance(declaration, ClassDeclaration):
+                declaration.default_objects = parser.default_objects
             declaration.default_parse_error = None

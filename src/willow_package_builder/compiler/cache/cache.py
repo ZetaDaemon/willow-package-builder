@@ -11,6 +11,7 @@ from willow_package_builder.compiler.syntax.declarations import (
     ClassDeclaration,
     ClassModifier,
     ConstantDeclaration,
+    DefaultObjectDeclaration,
     EnumDeclaration,
     FunctionCategory,
     FunctionDeclaration,
@@ -57,8 +58,8 @@ if TYPE_CHECKING:
     from willow_package_builder.package_config import PackageConfig
 
 
-CLASS_CACHE_SCHEMA_VERSION = 15
-DECLARATION_PARSER_VERSION = 13
+CLASS_CACHE_SCHEMA_VERSION = 16
+DECLARATION_PARSER_VERSION = 14
 
 
 @dataclass
@@ -111,6 +112,7 @@ CACHE_TYPES: dict[str, Callable[..., object]] = {
         ReferencePath,
         Keyword,
         Path,
+        DefaultObjectDeclaration,
     )
 }
 CACHE_TYPES["Path"] = lambda args: Path(args)  # noqa: PLW0108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]

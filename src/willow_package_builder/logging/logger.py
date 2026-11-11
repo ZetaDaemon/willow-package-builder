@@ -90,6 +90,7 @@ class Logger:
         except PackageBuilderError as error:
             self._log(f"{type(error).__name__}: {error}", sys.stderr, LogPrefix.ERROR)
             if self.debug:
+                self._log_to_file(traceback.format_exc(), LogPrefix.ERROR)
                 raise
             raise SystemExit(1) from None
         except Exception:

@@ -40,6 +40,8 @@ from willow_package_builder.upackage import (
 from .build_component import BuildComponent
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from willow_package_builder.builder.classes.struct_builder import StructBuilder
     from willow_package_builder.compiler.syntax.declarations import VariableDeclaration
 
@@ -55,6 +57,7 @@ class ValueBuilder(BuildComponent):
     reference_base: ReferencePath | None = field(default=None, kw_only=True)
     external_archetype: ReferencePath | None = field(default=None, kw_only=True)
     known_archetype_properties: frozenset[FName] = field(default_factory=frozenset)
+    reference_scope: Mapping[FName, ReferencePath] = field(default_factory=dict, kw_only=True)
 
     def _build_object_value(
         self, context: str, value: object, resolved_type: ResolvedType
@@ -73,6 +76,9 @@ class ValueBuilder(BuildComponent):
         else:
             msg = f"{context}: Expected an object reference or null, got {value!r}"
             raise ValueBuildError(msg)
+
+        if path.outer is None:
+            path = self.reference_scope.get(path.name, path)
 
         class_path = resolved_type.declaration_path
 

@@ -64,7 +64,7 @@ class ValueSerializer:
     context: BuildContext
 
     def object_class_path(self, target: UObject | ExternalReference) -> ReferencePath:
-        """Get the declared class of a registered object."""
+        """Get the qualified declared class of a registered object."""
         if isinstance(target, ExternalReference):
             return ReferencePath(target.class_package) + target.class_name
 
@@ -72,11 +72,12 @@ class ValueSerializer:
             return CORE_CLASS_PATH
 
         class_object = self.package.lookup_object_by_path(target.object_class)
+        path = class_object.reference()
 
         if isinstance(class_object, ExternalReference):
-            return class_object.reference()
+            return path
 
-        return class_object.reference()
+        return ReferencePath(self.package.name) + path
 
     def validate_object_reference(
         self, value: ObjectValue, target: UObject | ExternalReference, resolved_type: ResolvedType

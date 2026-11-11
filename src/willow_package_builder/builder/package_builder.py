@@ -123,12 +123,19 @@ class PackageBuilder:
         self.functions.build_class_functions()
 
     def build(self) -> Package:
-        """Build custom classes, then load references and construct objects."""
         info(f"Preparing package {self.config.name}")
-        self.prepare_class_defaults(self.context.loader.class_names(self.config.name))
+        class_names = tuple(self.context.loader.class_names(self.config.name))
+        self.prepare_class_defaults(class_names)
+
+        templates_by_class = {
+            class_path: self.defaults.prepare_default_objects(class_path)
+            for class_path in class_names
+        }
 
         info("Compiling classes")
         self.compile_classes()
+
+        self.object_builder.build_default_objects(templates_by_class)
 
         info("Reading objects")
         self.object_builder.read_objects()

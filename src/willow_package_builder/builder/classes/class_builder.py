@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from willow_package_builder.builder.build_component import BuildComponent
-from willow_package_builder.compiler.syntax.modifiers import ClassModifierName
+from willow_package_builder.compiler.syntax.modifiers import ClassModifierName, VariableModifier
 from willow_package_builder.logging import CompilationError, WarningCode, info, warn
 from willow_package_builder.payloads.class_payload import ClassFlags, StateFlags, UClassPayload
 from willow_package_builder.upackage import ObjectFlags, ReferencePath, UObject
@@ -92,6 +92,8 @@ class ClassBuilder(BuildComponent):
                 raise NotImplementedError(msg)
 
             flags = ClassFlags.COMPILED | ClassFlags.PARSED
+            if self.has_instanced_properties(class_path):
+                flags |= ClassFlags.HAS_INSTANCED_PROPS
 
             for modifier in exports.declaration.modifiers:
                 modifier_name = modifier.name
@@ -142,3 +144,16 @@ class ClassBuilder(BuildComponent):
                     exports.class_object, variable, class_path, payload.children
                 )
                 payload.children = obj.reference()
+
+    def has_instanced_properties(self, class_path: ReferencePath) -> bool:
+        """Check direct and inherited fields for instanced object references."""
+        for owner, declaration in self.context.references.iter_class_hierarchy(
+            class_path, self.context.parents
+        ):
+            for variable in declaration.variables:
+                if self.properties.type_has_instanced_objects(
+                    variable.type_ref, owner, variable.modifiers
+                ):
+                    return True
+
+        return False

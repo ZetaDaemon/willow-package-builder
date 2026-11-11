@@ -1,4 +1,11 @@
 # Chagelog
+## []
+### Fixes
+Fixed --debug not writing the stack trace to the log file.
+
+### Additions
+Added support for Begin Object in class default properties.
+
 ## [0.2]
 ### Additions
 Added the base setup for supporting class handlers.

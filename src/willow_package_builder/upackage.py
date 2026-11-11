@@ -262,7 +262,14 @@ class ReferencePath:
     def __repr__(self) -> str:
         return str(self)
 
-    def __add__(self, other: Name | FName) -> ReferencePath:
+    def __add__(self, other: Name | FName | ReferencePath) -> ReferencePath:
+        if isinstance(other, ReferencePath):
+            if self.is_none():
+                return ReferencePath(str(other))
+            if other.is_none():
+                return ReferencePath(str(self))
+            return ReferencePath(f"{self}.{other}")
+
         if self.is_none():
             return ReferencePath(other)
         return ReferencePath(other, self)

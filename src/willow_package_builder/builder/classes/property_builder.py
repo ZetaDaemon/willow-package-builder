@@ -48,11 +48,10 @@ VARIABLE_MODIFIER_FLAGS: dict[VariableModifier, PropertyFlags] = {
     VariableModifier.INTERP: PropertyFlags.INTERP | PropertyFlags.EDIT,
     VariableModifier.EDIT_INLINE: PropertyFlags.EDIT_INLINE,
     VariableModifier.EXPORT: PropertyFlags.EXPORT_OBJECT,
+    VariableModifier.INSTANCED: (PropertyFlags.EDIT_INLINE | PropertyFlags.EXPORT_OBJECT),
 }
 
-SUPPORTED_VARIABLE_MODIFIERS = frozenset(
-    {key for key in VARIABLE_MODIFIER_FLAGS if key != VariableModifier.EXPORT}
-)
+SUPPORTED_VARIABLE_MODIFIERS = frozenset(VARIABLE_MODIFIER_FLAGS)
 
 ARRAY_INNER_FLAGS = (
     PropertyFlags.EXPORT_OBJECT
@@ -67,34 +66,40 @@ class PropertyBuilder(BuildComponent):
     references: PackageReferences
 
     def struct_needs_ctor_link(self, struct_path: ReferencePath) -> bool:
-        owner_path, name = struct_path.split(require_outer=True)
+        """Check whether any inherited struct field requires construction."""
+        hierarchy = self.context.references.struct_hierarchy(
+            struct_path, self.context.parents, self.context.packages
+        )
 
-        member = self.context.references.resolve_struct(owner_path, name, self.context.parents)
+        for owner, declaration in hierarchy:
+            package_name = owner.get_outer().name
+            config = next(config for config in self.context.packages if config.name == package_name)
+            visible = collect_visible_packages(config, self.context.packages)
 
-        owner_package = member.owner_class.get_outer().name
-        config = next(config for config in self.context.packages if config.name == owner_package)
-        visible = collect_visible_packages(config, self.context.packages)
-
-        type_refs = [variable.type_ref for variable in member.declaration.variables]
-
-        if member.declaration.parent is not None:
-            type_refs.insert(0, TypeReference(member.declaration.parent))
-
-        for type_ref in type_refs:
-            resolved = self.context.references.resolve_type(
-                type_ref, member.owner_class, visible, self.context.parents
-            )
-
-            if resolved.category in (TypeCategory.STRING, TypeCategory.ARRAY):
-                return True
-
-            if resolved.category is TypeCategory.STRUCT:
-                if resolved.declaration_path is None:
-                    msg = "Resolved struct type has no declaration path"
-                    raise ValueError(msg)
-
-                if self.struct_needs_ctor_link(resolved.declaration_path):
+            for variable in declaration.variables:
+                if self.type_has_instanced_objects(variable.type_ref, owner, variable.modifiers):
                     return True
+
+                resolved = self.context.references.resolve_type(
+                    variable.type_ref, owner, visible, self.context.parents
+                )
+
+                match resolved.category:
+                    case TypeCategory.STRING | TypeCategory.ARRAY:
+                        return True
+
+                    case TypeCategory.STRUCT:
+                        path = resolved.declaration_path
+
+                        if path is None:
+                            msg = "Resolved struct has no declaration path"
+                            raise ValueError(msg)
+
+                        if self.struct_needs_ctor_link(path):
+                            return True
+
+                    case _:
+                        pass
 
         return False
 
@@ -319,3 +324,58 @@ class PropertyBuilder(BuildComponent):
             raise ValueError(msg)
 
         return self.references.enum_reference(resolved.declaration_path)
+
+    def type_has_instanced_objects(
+        self,
+        type_ref: TypeReference,
+        owner_class: ReferencePath,
+        modifiers: tuple[VariableModifier, ...] = (),
+        active_structs: frozenset[ReferencePath] = frozenset(),
+    ) -> bool:
+        """Check whether a property type contains instanced object references."""
+        modifiers = (*modifiers, *type_ref.modifiers)
+        package_name = owner_class.get_outer().name
+        config = next(config for config in self.context.packages if config.name == package_name)
+        visible = collect_visible_packages(config, self.context.packages)
+        resolved = self.context.references.resolve_type(
+            type_ref, owner_class, visible, self.context.parents
+        )
+
+        match resolved.category:
+            case TypeCategory.OBJECT:
+                return VariableModifier.INSTANCED in modifiers or (
+                    VariableModifier.EXPORT in modifiers
+                    and VariableModifier.EDIT_INLINE in modifiers
+                )
+
+            case TypeCategory.ARRAY:
+                return self.type_has_instanced_objects(
+                    type_ref.arguments[0], owner_class, modifiers, active_structs
+                )
+
+            case TypeCategory.STRUCT:
+                path = resolved.declaration_path
+
+                if path is None:
+                    msg = "Resolved struct has no declaration path"
+                    raise ValueError(msg)
+
+                if path in active_structs:
+                    return False
+
+                active_structs = active_structs | {path}
+                hierarchy = self.context.references.struct_hierarchy(
+                    path, self.context.parents, self.context.packages
+                )
+
+                for owner, declaration in hierarchy:
+                    for variable in declaration.variables:
+                        if self.type_has_instanced_objects(
+                            variable.type_ref, owner, variable.modifiers, active_structs
+                        ):
+                            return True
+
+                return False
+
+            case _:
+                return False

@@ -2,7 +2,8 @@ import string
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Self, cast
 
-from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
+from willow_package_builder.compiler.syntax.declarations import DefaultObjectDeclaration
+from willow_package_builder.compiler.syntax.keyword import KeywordEnum, ScriptKeywords
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
 from willow_package_builder.compiler.syntax.parser.token_parser import TokenParser
 from willow_package_builder.compiler.syntax.punctuation import Operator, Punctuation
@@ -30,8 +31,19 @@ class IndexedArrayDefaults:
     updates: list[tuple[int, object]] = field(default_factory=list)
 
 
+class DefaultObjectAttribute(KeywordEnum):
+    """Attributes accepted on a Begin Object declaration."""
+
+    CLASS = "class"
+    NAME = "name"
+
+
 class DefaultsParser(TokenParser):
     """Parse default property blocks into untyped Python data."""
+
+    def __init__(self, tokens: list[Token]) -> None:
+        super().__init__(tokens)
+        self.default_objects: list[DefaultObjectDeclaration] = []
 
     def _merge_value(self, previous: object, supplied: object) -> object:
         match previous, supplied:
@@ -165,20 +177,99 @@ class DefaultsParser(TokenParser):
                 msg = f"Expected a default value, got {token}"
                 raise CompilationError(msg, location)
 
+    def _parse_object_name(self) -> FName:
+        """Read an unqualified subobject name, allowing quoted spelling."""
+        token = self.peek()
+        location = SourceLocation(token.line, token.column)
+
+        match token.category:
+            case TokenCategory.IDENTIFIER:
+                name = self.advance().fname
+            case TokenCategory.STRING:
+                name = FName(self.parse_string_value())
+            case TokenCategory.NAME:
+                self.advance()
+                name = FName(str(token)[1:-1])
+            case _:
+                msg = f"Expected a default object name, got {token}"
+                raise CompilationError(msg, location)
+
+        text = str(name)
+
+        if not text.strip() or any(separator in text for separator in (".", ":", "/", "\\")):
+            msg = f"Default object name must be unqualified, got {text!r}"
+            raise CompilationError(msg, location)
+
+        return name
+
+    def parse_object_declaration(self) -> DefaultObjectDeclaration:
+        """Parse a new or inherited subobject and its nested declarations."""
+        opening = self.expect(ScriptKeywords.BEGIN)
+        self.expect(ScriptKeywords.OBJECT)
+        location = SourceLocation(opening.line, opening.column)
+        name: FName | None = None
+        class_name: ReferencePath | None = None
+
+        while True:
+            token = self.peek()
+
+            if token == DefaultObjectAttribute.CLASS:
+                if class_name is not None:
+                    msg = "Duplicate Class attribute in default object declaration"
+                    raise CompilationError(msg, SourceLocation(token.line, token.column))
+                self.advance()
+                self.expect(Operator.EQUAL)
+                class_name = self.parse_qualified_name()
+            elif token == DefaultObjectAttribute.NAME:
+                if name is not None:
+                    msg = "Duplicate Name attribute in default object declaration"
+                    raise CompilationError(msg, SourceLocation(token.line, token.column))
+                self.advance()
+                self.expect(Operator.EQUAL)
+                name = self._parse_object_name()
+            else:
+                break
+
+        if name is None:
+            msg = "Default object declaration requires Name"
+            raise CompilationError(msg, location)
+
+        declaration = DefaultObjectDeclaration(name, class_name, location=location)
+
+        while True:
+            token = self.peek()
+
+            if token.category is TokenCategory.EOF:
+                msg = f"Unterminated default object declaration for {name}"
+                raise CompilationError(msg, location)
+
+            if self.match(Punctuation.SEMICOLON):
+                continue
+
+            if token == ScriptKeywords.END and self.peek(1) == ScriptKeywords.OBJECT:
+                self.advance()
+                self.advance()
+                return declaration
+
+            if token == ScriptKeywords.BEGIN and self.peek(1) == ScriptKeywords.OBJECT:
+                declaration.children.append(self.parse_object_declaration())
+                continue
+
+            self._apply_operation(declaration.properties, self.parse_operation())
+
     def parse_defaults(self, *, skip_object_definitions: bool = False) -> dict[FName, object]:
+        """Parse property assignments and retain separately declared subobjects."""
         values: dict[FName, object] = {}
 
         while self.peek().category is not TokenCategory.EOF:
-            if self.peek() == ScriptKeywords.BEGIN and self.peek(1) == ScriptKeywords.OBJECT:
-                if not skip_object_definitions:
-                    token = self.peek()
-                    msg = (
-                        "Default object definitions are not implemented "
-                        f"at {token.line}:{token.column}"
-                    )
-                    raise NotImplementedError(msg)
+            if self.match(Punctuation.SEMICOLON):
+                continue
 
-                self.skip_object_definition()
+            if self.peek() == ScriptKeywords.BEGIN and self.peek(1) == ScriptKeywords.OBJECT:
+                if skip_object_definitions:
+                    self.skip_object_definition()
+                else:
+                    self.default_objects.append(self.parse_object_declaration())
                 continue
 
             self._apply_operation(values, self.parse_operation())

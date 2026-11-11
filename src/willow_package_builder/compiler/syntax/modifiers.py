@@ -103,6 +103,7 @@ class VariableModifier(KeywordEnum):
     EDIT_INLINE = "editinline"
     EXPORT = "export"
     NO_EXPORT = "noexport"
+    INSTANCED = "instanced"
     EDITOR_ONLY = "editoronly"
 
     # Networking

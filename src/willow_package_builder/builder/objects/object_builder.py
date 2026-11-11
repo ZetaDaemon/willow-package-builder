@@ -2,7 +2,7 @@ from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from willow_package_builder.builder.build_component import BuildComponent
 from willow_package_builder.compiler.semantics.types import TypeCategory
@@ -28,7 +28,13 @@ from willow_package_builder.properties.conversion import value_to_python
 from willow_package_builder.properties.merge import merge_values
 from willow_package_builder.properties.object_references import import_external_object
 from willow_package_builder.properties.reference_text import parse_reference_text
-from willow_package_builder.properties.values import ArrayValue, ObjectValue, Value
+from willow_package_builder.properties.values import (
+    ArrayValue,
+    DelegateValue,
+    ObjectValue,
+    StructValue,
+    Value,
+)
 from willow_package_builder.upackage import (
     CORE_PACKAGE_CLASS_PATH,
     DEFAULT_OBJECT_PREFIX,
@@ -41,10 +47,21 @@ from willow_package_builder.upackage import (
 )
 
 if TYPE_CHECKING:
+    from willow_package_builder.builder.classes.default_objects import DefaultObjectTemplate
     from willow_package_builder.builder.classes.struct_builder import StructBuilder
     from willow_package_builder.builder.references import PackageReferences
     from willow_package_builder.builder.value_builder import ValueBuilder
+    from willow_package_builder.compiler.syntax.declarations import (
+        TypeReference,
+        VariableDeclaration,
+    )
     from willow_package_builder.handlers.classes.class_handler import ClassHandler
+
+
+@dataclass
+class _InstancingState:
+    generated: dict[tuple[ReferencePath, ReferencePath], ObjectValue] = field(default_factory=dict)
+    owners: list[UObject] = field(default_factory=list)
 
 
 @dataclass
@@ -157,9 +174,16 @@ class ObjectBuilder(BuildComponent):
                         )
                         raise ObjectDefinitionError(msg)
 
-                    class_path, _ = self.context.references.resolve_class(
+                    class_path, class_declaration = self.context.references.resolve_class(
                         definition.class_name, self.config.name, visible
                     )
+
+                    if class_declaration.is_abstract:
+                        msg = (
+                            f"{definition.source}, document {definition.document}: "
+                            f"Cannot construct abstract class {class_path}"
+                        )
+                        raise ObjectDefinitionError(msg)
 
                     object_class = self.references.class_object_reference(class_path)
                     archetype = self.references.class_object_reference(
@@ -325,6 +349,7 @@ class ObjectBuilder(BuildComponent):
                     raise ObjectDefinitionError(msg) from error
 
                 completed.add(reference)
+                self.construct_instanced_properties(obj, definition.properties)
 
     def construct_object(
         self,
@@ -772,3 +797,505 @@ class ObjectBuilder(BuildComponent):
         payload.properties[name] = values.build_field_value(
             context, variable, value, resolved, existing
         )
+
+    @staticmethod
+    def properties_are_instanced(modifiers: tuple[VariableModifier, ...]) -> bool:
+        """Recognize the equivalent instanced property modifier forms."""
+        return VariableModifier.INSTANCED in modifiers or (
+            VariableModifier.EXPORT in modifiers and VariableModifier.EDIT_INLINE in modifiers
+        )
+
+    def _construct_instanced_reference(
+        self, obj: UObject, property_name: FName, value: ObjectValue, instancing: _InstancingState
+    ) -> ObjectValue | None:
+        """Construct or reuse a child from an available local template."""
+        candidates = [value.path]
+        parts = value.path.full_split()
+
+        if parts and parts[0] == self.package.name:
+            candidates.append(ReferencePath(".".join(str(part) for part in parts[1:])))
+
+        template = None
+
+        for path in candidates:
+            try:
+                template = self.package.lookup_object_by_path(path)
+            except KeyError:
+                continue
+            break
+
+        if template is None or isinstance(template, ExternalReference):
+            return None
+
+        template_path = template.reference()
+
+        destination = obj
+
+        for ancestor in reversed(instancing.owners):
+            if template_path == ancestor.archetype:
+                ancestor_payload = ancestor.payload
+                if not isinstance(ancestor_payload, ObjectInstancePayload):
+                    msg = f"Instancing owner has no instance payload: {ancestor.reference()}"
+                    raise TypeError(msg)
+                return ObjectValue(ancestor_payload.class_path, ancestor.reference())
+
+            if template.outer == ancestor.archetype:
+                destination = ancestor
+                break
+
+        outer = destination.reference()
+        key = (outer, template_path)
+
+        if key in instancing.generated:
+            return deepcopy(instancing.generated[key])
+
+        template_payload = template.payload
+
+        if not isinstance(template_payload, ObjectInstancePayload):
+            msg = f"Instanced template has no instance payload: {value.path}"
+            raise TypeError(msg)
+
+        if template_payload.handler is not None:
+            msg = (
+                f"Instancing objects with custom payload handlers "
+                f"is not implemented yet: {value.path}"
+            )
+            raise NotImplementedError(msg)
+
+        child_path = outer + template.name
+
+        try:
+            self.package.lookup_object_by_path(child_path)
+        except KeyError:
+            pass
+        else:
+            msg = (
+                f"{obj.reference()}: Cannot generate {child_path}; "
+                f"assign property {property_name} explicitly to use the existing child"
+            )
+            raise ObjectDefinitionError(msg)
+
+        flags = ObjectFlags.DEFAULT_EXPORT
+
+        if destination.flags & ObjectFlags.ARCHETYPE_OBJECT:
+            flags |= ObjectFlags.ARCHETYPE_OBJECT
+
+        child = self.construct_object(
+            template_payload.class_path,
+            template.object_class,
+            template.name,
+            outer,
+            flags,
+            template_path,
+        )
+        reference = ObjectValue(template_payload.class_path, child.reference())
+        instancing.generated[key] = reference
+        self.construct_instanced_properties(child, {}, instancing)
+        return deepcopy(reference)
+
+    def _construct_instanced_field_value(
+        self,
+        obj: UObject,
+        property_name: FName,
+        value: Value,
+        variable: VariableDeclaration,
+        owner_class: ReferencePath,
+        instancing: _InstancingState,
+        *,
+        supplied: bool = False,
+        raw_value: object = None,
+    ) -> Value | None:
+        """Instance references in a scalar or fixed-array field."""
+        overrides: dict[FName, object] | None = None
+
+        if supplied:
+            resolved = self.values.resolve_field_type(variable, owner_class)
+
+            if variable.array_dimension != 1 or resolved.category is not TypeCategory.STRUCT:
+                return None
+
+            if not isinstance(raw_value, dict):
+                msg = f"Expected struct overrides for {obj.reference()}.{property_name}"
+                raise TypeError(msg)
+
+            overrides = {}
+
+            for key, item in cast("dict[object, object]", raw_value).items():
+                if isinstance(key, FName):
+                    name = key
+                elif isinstance(key, str):
+                    name = FName(key)
+                else:
+                    msg = f"Expected a struct field name, got {key!r}"
+                    raise TypeError(msg)
+
+                overrides[name] = item
+
+        if variable.array_dimension == 1:
+            return self._construct_instanced_value(
+                obj,
+                property_name,
+                value,
+                variable.type_ref,
+                owner_class,
+                variable.modifiers,
+                instancing,
+                overrides,
+            )
+
+        if not isinstance(value, ArrayValue):
+            msg = f"Expected a fixed-array value for {obj.reference()}.{property_name}"
+            raise TypeError(msg)
+
+        elements: list[Value] = []
+        changed = False
+
+        for element in value.elements:
+            replacement = self._construct_instanced_value(
+                obj,
+                property_name,
+                element,
+                variable.type_ref,
+                owner_class,
+                variable.modifiers,
+                instancing,
+            )
+            if replacement is None:
+                elements.append(deepcopy(element))
+            else:
+                elements.append(replacement)
+                changed = True
+
+        return ArrayValue(elements) if changed else None
+
+    def _construct_instanced_value(
+        self,
+        obj: UObject,
+        property_name: FName,
+        value: Value,
+        type_ref: TypeReference,
+        owner_class: ReferencePath,
+        modifiers: tuple[VariableModifier, ...],
+        instancing: _InstancingState,
+        overrides: dict[FName, object] | None = None,
+    ) -> Value | None:
+        """Instance object references within a scalar or dynamic array value."""
+        modifiers = (*modifiers, *type_ref.modifiers)
+        package_name = owner_class.get_outer().name
+        config = next(config for config in self.context.packages if config.name == package_name)
+        visible = collect_visible_packages(config, self.context.packages)
+        resolved = self.context.references.resolve_type(
+            type_ref, owner_class, visible, self.context.parents
+        )
+
+        match resolved.category:
+            case TypeCategory.OBJECT:
+                if isinstance(value, ObjectValue) and self.properties_are_instanced(modifiers):
+                    return self._construct_instanced_reference(
+                        obj, property_name, value, instancing
+                    )
+
+            case TypeCategory.ARRAY:
+                if not isinstance(value, ArrayValue):
+                    msg = f"Expected an array value for {obj.reference()}.{property_name}"
+                    raise TypeError(msg)
+
+                if len(type_ref.arguments) != 1:
+                    msg = f"Array type requires one element type: {type_ref}"
+                    raise ValueError(msg)
+
+                elements: list[Value] = []
+                changed = False
+
+                for element in value.elements:
+                    replacement = self._construct_instanced_value(
+                        obj,
+                        property_name,
+                        element,
+                        type_ref.arguments[0],
+                        owner_class,
+                        modifiers,
+                        instancing,
+                    )
+                    if replacement is None:
+                        elements.append(deepcopy(element))
+                    else:
+                        elements.append(replacement)
+                        changed = True
+
+                if changed:
+                    return ArrayValue(elements)
+
+            case TypeCategory.STRUCT:
+                if not isinstance(value, StructValue):
+                    msg = f"Expected a struct value for {obj.reference()}.{property_name}"
+                    raise TypeError(msg)
+
+                path = resolved.declaration_path
+
+                if path is None:
+                    msg = "Resolved struct has no declaration path"
+                    raise ValueError(msg)
+
+                result = deepcopy(value)
+                changed = False
+
+                for name, field_value in value.values.items():
+                    member = self.context.references.resolve_struct_variable(
+                        path, name, self.context.parents, visible
+                    )
+                    replacement = self._construct_instanced_field_value(
+                        obj,
+                        property_name,
+                        field_value,
+                        member.declaration,
+                        member.owner_class,
+                        instancing,
+                        supplied=overrides is not None and name in overrides,
+                        raw_value=None if overrides is None else overrides.get(name),
+                    )
+
+                    if replacement is not None:
+                        result.values[name] = replacement
+                        changed = True
+
+                if changed:
+                    return result
+
+            case _:
+                pass
+
+        return None
+
+    def construct_instanced_properties(
+        self,
+        obj: UObject,
+        supplied_properties: dict[FName, object],
+        instancing: _InstancingState | None = None,
+    ) -> None:
+        """Instance omitted references, including fields of partial struct overrides."""
+        payload = obj.payload
+
+        if not isinstance(payload, ObjectInstancePayload):
+            msg = f"Object has no instance payload: {obj.reference()}"
+            raise TypeError(msg)
+
+        processed: set[FName] = set()
+
+        if instancing is None:
+            instancing = _InstancingState()
+
+        instancing.owners.append(obj)
+        try:
+            for owner, declaration in self.context.references.iter_class_hierarchy(
+                payload.class_path, self.context.parents
+            ):
+                for variable in declaration.variables:
+                    name = variable.name
+
+                    if name in processed:
+                        continue
+
+                    processed.add(name)
+
+                    # Handler-written properties without raw YAML stay untouched.
+                    if name in payload.properties and name not in supplied_properties:
+                        continue
+
+                    resolved = self.values.resolve_field_type(variable, owner)
+
+                    if resolved.category not in (
+                        TypeCategory.OBJECT,
+                        TypeCategory.ARRAY,
+                        TypeCategory.STRUCT,
+                    ):
+                        continue
+
+                    if name in payload.properties:
+                        value = payload.properties[name]
+                    else:
+                        value = self.archetype_property_value(obj, payload.class_path, name)
+
+                    replacement = self._construct_instanced_field_value(
+                        obj,
+                        name,
+                        value,
+                        variable,
+                        owner,
+                        instancing,
+                        supplied=name in supplied_properties,
+                        raw_value=supplied_properties.get(name),
+                    )
+
+                    if replacement is not None:
+                        payload.properties[name] = replacement
+        finally:
+            instancing.owners.pop()
+
+    def build_default_objects(
+        self, templates_by_class: dict[ReferencePath, dict[FName, DefaultObjectTemplate]]
+    ) -> None:
+        """Build effective template trees in base-to-derived class order."""
+        trees: dict[ReferencePath, dict[tuple[FName, ...], UObject]] = {}
+
+        for class_path, export in self.classes.items():
+            parent = self.context.parents[class_path]
+            inherited = {} if parent is None else trees.get(parent, {})
+            tree: dict[tuple[FName, ...], UObject] = {}
+            templates = templates_by_class[class_path]
+            self._reserve_default_object_tree(
+                templates, export.default_object.reference(), (), inherited, tree
+            )
+            trees[class_path] = tree
+
+            if not tree:
+                continue
+
+            remap: dict[ReferencePath, ReferencePath] = {}
+            ancestor = parent
+
+            while ancestor is not None:
+                for key, original in trees.get(ancestor, {}).items():
+                    source_path = original.reference()
+                    target_path = tree[key].reference()
+                    remap[source_path] = target_path
+                    remap[ReferencePath(self.package.name) + source_path] = target_path
+
+                ancestor = self.context.parents[ancestor]
+
+            scopes: dict[tuple[FName, ...], dict[FName, ReferencePath]] = {}
+
+            for key, obj in tree.items():
+                scopes.setdefault(key[:-1], {})[key[-1]] = obj.reference()
+
+            self._build_default_object_tree_properties(
+                class_path, templates, tree, inherited, scopes, remap
+            )
+
+            payload = export.default_object.payload
+            if not isinstance(payload, ObjectInstancePayload):
+                msg = f"CDO has an invalid payload: {class_path}"
+                raise TypeError(msg)
+
+            payload.properties = self._remap_default_properties(payload.properties, remap)
+
+    def _reserve_default_object_tree(
+        self,
+        templates: dict[FName, DefaultObjectTemplate],
+        outer: ReferencePath,
+        prefix: tuple[FName, ...],
+        inherited: dict[tuple[FName, ...], UObject],
+        tree: dict[tuple[FName, ...], UObject],
+    ) -> None:
+        """Reserve all exports before resolving references between them."""
+        for name, template in templates.items():
+            key = (*prefix, name)
+            original = inherited.get(key)
+            class_path = template.class_path
+            archetype = (
+                self.references.class_object_reference(class_path, default_object=True)
+                if original is None
+                else original.reference()
+            )
+            obj = self.construct_object(
+                class_path,
+                self.references.class_object_reference(class_path),
+                name,
+                outer,
+                ObjectFlags.DEFAULT_EXPORT | ObjectFlags.ARCHETYPE_OBJECT,
+                archetype,
+            )
+            tree[key] = obj
+            self._reserve_default_object_tree(
+                template.children, obj.reference(), key, inherited, tree
+            )
+
+    def _build_default_object_tree_properties(
+        self,
+        class_path: ReferencePath,
+        templates: dict[FName, DefaultObjectTemplate],
+        tree: dict[tuple[FName, ...], UObject],
+        inherited: dict[tuple[FName, ...], UObject],
+        scopes: dict[tuple[FName, ...], dict[FName, ReferencePath]],
+        remap: dict[ReferencePath, ReferencePath],
+    ) -> None:
+        for key, obj in tree.items():
+            template = templates[key[0]]
+            for name in key[1:]:
+                template = template.children[name]
+
+            payload = obj.payload
+            if not isinstance(payload, ObjectInstancePayload):
+                msg = f"Default object has an invalid payload: {obj.reference()}"
+                raise TypeError(msg)
+
+            original = inherited.get(key)
+            properties: dict[FName, Value] = {}
+
+            if original is not None:
+                original_payload = original.payload
+                if not isinstance(original_payload, ObjectInstancePayload):
+                    msg = f"Default object has an invalid payload: {original.reference()}"
+                    raise TypeError(msg)
+
+                properties = self._remap_default_properties(original_payload.properties, remap)
+
+            scope: dict[FName, ReferencePath] = {}
+            for depth in range(len(key) + 1):
+                scope.update(scopes.get(key[:depth], {}))
+
+            values = replace(
+                self.values,
+                implicit_fixed_index=True,
+                reference_base=obj.reference(),
+                reference_scope=scope,
+            )
+
+            for owner, declaration in template.layers:
+                if owner != class_path:
+                    continue
+
+                defaults = merge_values(self.class_default_values(template.class_path), properties)
+                try:
+                    overrides = values.build_class_values(
+                        f"Default object {obj.reference()}",
+                        template.class_path,
+                        declaration.properties,
+                        defaults,
+                    )
+                except ValueBuildError as error:
+                    msg = str(error)
+                    raise CompilationError(msg, declaration.location) from error
+
+                properties = merge_values(properties, overrides)
+
+            payload.properties = properties
+
+    def _remap_default_properties(
+        self, properties: dict[FName, Value], remap: dict[ReferencePath, ReferencePath]
+    ) -> dict[FName, Value]:
+        """Copy inherited values and redirect references to the derived CDO tree."""
+
+        def remap_value(value: Value) -> Value:
+            match value:
+                case ObjectValue():
+                    path = remap.get(value.path, value.path)
+                    reference = (
+                        None
+                        if value.reference is None
+                        else remap.get(value.reference, value.reference)
+                    )
+                    return replace(value, path=path, reference=reference)
+                case DelegateValue():
+                    return replace(value, target=remap.get(value.target, value.target))
+                case ArrayValue():
+                    return ArrayValue([remap_value(element) for element in value.elements])
+                case StructValue():
+                    return replace(
+                        value,
+                        values={name: remap_value(item) for name, item in value.values.items()},
+                    )
+                case _:
+                    return deepcopy(value)
+
+        return {name: remap_value(value) for name, value in properties.items()}
