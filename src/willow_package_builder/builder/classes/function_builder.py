@@ -103,8 +103,11 @@ class FunctionBuilder(BuildComponent):
             path = owner + function.name + parameter.name
 
             with declaration_context(path, parameter.location):
-                if parameter.array_dimension_name is not None or parameter.array_dimension != 1:
-                    msg = "Compiling fixed-array parameters is not implemented"
+                if (
+                    parameter.array_dimension != 1
+                    and ParameterModifier.OPTIONAL in parameter.modifiers
+                ):
+                    msg = "Optional fixed-array parameters are not implemented yet"
                     raise NotImplementedError(msg)
 
                 parameter_flags = PropertyFlags.PARAM
@@ -132,6 +135,7 @@ class FunctionBuilder(BuildComponent):
                         parameter.type_ref,
                         class_path,
                         parameter_flags,
+                        parameter.array_dimension,
                     )
                 )
 
@@ -211,6 +215,10 @@ class FunctionBuilder(BuildComponent):
             TypeCategory.FLOAT,
             TypeCategory.STRING,
             TypeCategory.OBJECT,
+            TypeCategory.CLASS,
+            TypeCategory.BYTE,
+            TypeCategory.NAME,
+            TypeCategory.ARRAY,
         ):
             msg = f"Function return type is not supported yet: {return_type!r}"
             raise NotImplementedError(msg)

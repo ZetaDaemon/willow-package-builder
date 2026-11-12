@@ -1,4 +1,3 @@
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -14,8 +13,7 @@ from willow_package_builder.compiler.syntax.declarations import (
     TypeReference,
     VariableDeclaration,
 )
-from willow_package_builder.compiler.syntax.keyword import Keyword
-from willow_package_builder.compiler.syntax.punctuation import Operator
+from willow_package_builder.compiler.syntax.lexer import TokenCategory
 from willow_package_builder.logging import (
     CompilationError,
     UnknownPropertyError,
@@ -33,7 +31,10 @@ from .intrinsics import INTRINSICS, PROPERTY_CLASS_PATHS, IntrinsicDefinition
 from .types import ResolvedType, TypeCategory
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterable, Iterator, Mapping
+
+    from willow_package_builder.compiler.syntax.keyword import Keyword
+    from willow_package_builder.compiler.syntax.punctuation import Operator
 
 DELEGATE_TYPE = ReferencePath("delegate")
 MAP_TYPE = ReferencePath("map")
@@ -762,6 +763,33 @@ class ReferenceDatabase:
 
         return candidates[0] if candidates else None
 
+    def find_array_dimension_constant(
+        self,
+        name: ReferencePath,
+        current_class: ReferencePath,
+        parents: Mapping[ReferencePath, ReferencePath | None],
+    ) -> int | None:
+        """Find an unqualified integer constant used as a fixed-array size."""
+        if name.outer is not None:
+            return None
+
+        for owner, declaration in self.iter_class_hierarchy(current_class, parents):
+            for constant in declaration.constants:
+                if constant.name != name.name:
+                    continue
+
+                tokens = constant.value_tokens
+                if len(tokens) != 1 or tokens[0].category is not TokenCategory.INTEGER:
+                    msg = (
+                        f"Array dimension constant {owner + constant.name} "
+                        "must be an integer literal"
+                    )
+                    raise CompilationError(msg)
+
+                return int(tokens[0])
+
+        return None
+
     def resolve_array_dimension(
         self,
         name: ReferencePath,
@@ -769,23 +797,24 @@ class ReferenceDatabase:
         visible_packages: set[FName],
         parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> int:
-        resolved = self.resolve_type(TypeReference(name), current_class, visible_packages, parents)
+        dimension = self.find_array_dimension_constant(name, current_class, parents)
 
-        if resolved.category is not TypeCategory.ENUM:
-            msg = f"Resolving non-enum array dimension {name!r} is not implemented"
-            raise NotImplementedError(msg)
+        if dimension is None:
+            resolved = self.resolve_type(
+                TypeReference(name), current_class, visible_packages, parents
+            )
 
-        if resolved.declaration_path is None:
-            msg = "Resolved array dimension enum has no declaration path"
-            raise ValueError(msg)
+            if resolved.category is not TypeCategory.ENUM:
+                msg = f"Array dimension {name!r} must name an integer constant or enum"
+                raise CompilationError(msg)
 
-        owner, enum_name = resolved.declaration_path.split()
-        if owner is None:
-            msg = f"Expected a fully qualified enum, got {resolved.declaration_path}."
-            raise ValueError(msg)
+            if resolved.declaration_path is None:
+                msg = "Resolved array dimension enum has no declaration path"
+                raise ValueError(msg)
 
-        member = self.resolve_enum(owner, enum_name, parents)
-        dimension = len(member.declaration.members)
+            owner, enum_name = resolved.declaration_path.split(require_outer=True)
+            member = self.resolve_enum(owner, enum_name, parents)
+            dimension = len(member.declaration.members)
 
         if not 1 < dimension <= MAX_FIXED_ARRAY_DIMENSION:
             msg = (

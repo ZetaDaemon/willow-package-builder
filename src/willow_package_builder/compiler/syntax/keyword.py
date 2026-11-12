@@ -61,3 +61,5 @@ class ScriptKeywords(KeywordEnum):
     END = "end"
     OBJECT = "object"
     DELEGATE = "delegate"
+    ARRAY_COUNT = "arraycount"
+    FOREACH = "foreach"

@@ -3,6 +3,7 @@ from dataclasses import KW_ONLY, dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from willow_package_builder.compiler.syntax.expressions import CallExpression
     from willow_package_builder.logging import SourceLocation
 
     from .declarations import VariableDeclaration
@@ -77,3 +78,9 @@ class ForStatement(Statement):
 class DoUntilStatement(Statement):
     statements: list[Statement]
     condition: Expression
+
+
+@dataclass
+class ForeachStatement(Statement):
+    iterator: CallExpression
+    statements: list[Statement]

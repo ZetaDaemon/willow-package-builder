@@ -308,6 +308,14 @@ class PropertyBuilder(BuildComponent):
         if name is None:
             return ReferencePath()
 
+        if (
+            self.context.references.find_array_dimension_constant(
+                name, class_path, self.context.parents
+            )
+            is not None
+        ):
+            return ReferencePath()
+
         resolved = self.context.references.resolve_type(
             TypeReference(name),
             class_path,

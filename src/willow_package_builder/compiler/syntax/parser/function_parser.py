@@ -2,14 +2,17 @@ from typing import TYPE_CHECKING, Self
 
 from willow_package_builder.compiler.syntax.declarations import OperatorCategory
 from willow_package_builder.compiler.syntax.expressions import (
+    ArrayCountExpression,
     BinaryExpression,
     BooleanExpression,
     CallExpression,
     Expression,
     FloatExpression,
     IdentifierExpression,
+    IndexExpression,
     IntegerExpression,
     MemberExpression,
+    NameExpression,
     SelfExpression,
     StringExpression,
     UnaryExpression,
@@ -25,6 +28,7 @@ from willow_package_builder.compiler.syntax.statements import (
     EmptyStatement,
     ExpressionStatement,
     ForStatement,
+    ForeachStatement,
     FunctionBody,
     IfStatement,
     ReturnStatement,
@@ -32,6 +36,7 @@ from willow_package_builder.compiler.syntax.statements import (
     WhileStatement,
 )
 from willow_package_builder.logging import CompilationError, SourceLocation
+from willow_package_builder.upackage import FName
 
 from .declaration_syntax_parser import DeclarationSyntaxParser
 
@@ -101,6 +106,12 @@ class FunctionParser(DeclarationSyntaxParser):
                     case ScriptKeywords.SELF:
                         return SelfExpression()
 
+                    case ScriptKeywords.ARRAY_COUNT:
+                        self.expect(Punctuation.LEFT_PAREN)
+                        array = self.parse_expression()
+                        self.expect(Punctuation.RIGHT_PAREN)
+                        return ArrayCountExpression(array)
+
                     case _:
                         return IdentifierExpression(token.fname)
 
@@ -120,6 +131,16 @@ class FunctionParser(DeclarationSyntaxParser):
                     raise NotImplementedError(msg)
 
                 return StringExpression(value)
+
+            case TokenCategory.NAME:
+                self.advance()
+                value = str(token)[1:-1]
+
+                if "\\" in value:
+                    msg = f"Name literal escapes are not implemented at {token.line}:{token.column}"
+                    raise NotImplementedError(msg)
+
+                return NameExpression(FName(value))
 
             case _:
                 pass
@@ -213,6 +234,16 @@ class FunctionParser(DeclarationSyntaxParser):
         statements = self.parse_statement_branch()
         return WhileStatement(condition, statements)
 
+    def parse_foreach_statement(self) -> ForeachStatement:
+        self.expect(ScriptKeywords.FOREACH)
+        iterator = self.parse_postfix_expression()
+
+        if not isinstance(iterator, CallExpression):
+            msg = "Expected an iterator call after foreach"
+            raise CompilationError(msg)
+
+        return ForeachStatement(iterator, self.parse_statement_branch())
+
     def _parse_statement(self) -> Statement:
         if self.match(Punctuation.SEMICOLON):
             return EmptyStatement()
@@ -249,6 +280,9 @@ class FunctionParser(DeclarationSyntaxParser):
 
             case ScriptKeywords.DO:
                 return self.parse_do_until_statement()
+
+            case ScriptKeywords.FOREACH:
+                return self.parse_foreach_statement()
 
             case _:
                 pass
@@ -355,6 +389,12 @@ class FunctionParser(DeclarationSyntaxParser):
             if self.peek() == Punctuation.LEFT_PAREN:
                 arguments = self.parse_call_arguments()
                 expression = CallExpression(expression, arguments)
+                continue
+
+            if self.match(Punctuation.LEFT_BRACKET):
+                index = self.parse_expression()
+                self.expect(Punctuation.RIGHT_BRACKET)
+                expression = IndexExpression(expression, index)
                 continue
 
             operator_name = self.peek().operator_name

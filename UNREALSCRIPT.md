@@ -65,18 +65,53 @@ private
 protected
 interp
 editinline
+export
+instanced
 ```
 
-Other recognized modifier names are not necessarily implemented by the property builder. In particular, `export` is not currently enabled for compiled variables.
+Other recognized modifier names are not necessarily implemented by the property builder.
 
-### Array limits
+### Arrays
 
-- Literal fixed-array dimensions and enum-based dimensions are implemented.
-- Named dimensions resolving to non-enum constants are not yet implemented.
-- Fixed-array parameters are not yet implemented.
-- Array indexing and dynamic-array operations inside function bodies are not yet implemented.
+Fixed array sizes can be integer literals, enums, or unqualified integer
+constants declared on the current class or an ancestor. `ArrayCount(Items)`
+returns the declared size of a fixed array as a compile-time constant.
 
-Declaring and initializing an array property is separate from manipulating it in compiled function bytecode.
+Indexed reads and writes support `int`, `byte`, `float`, `string`, `name`, enums,
+object references, class references, and structs in fixed and dynamic arrays.
+Dynamic arrays also support `bool` elements. Indices can be scalar integers, bytes,
+or enum values. An array sized by an enum also accepts bare members of that enum
+as indices.
+
+Supported dynamic-array operations:
+
+- Read or resize with `.Length`. Resizing uses plain assignment.
+- `Add(Count)` appends default-initialized elements. `AddItem(Value)` appends one
+  supplied element and returns its index.
+- `Insert(Index, Count)` and `Remove(Index, Count)` change a range of elements.
+- `InsertItem(Index, Value)` inserts one supplied element. `RemoveItem(Value)`
+  removes all matching elements.
+- `Find(Value)` returns the first matching index, or `-1`. The struct-array form,
+  `Find('FieldName', Value)`, requires a literal field name and a matching scalar
+  search value. Use the result of either form.
+- `Sort(Compare)` sorts in place and returns the first sorted element. The
+  comparator is a bare function name with two parameters of the element type and
+  an `int` result. Standalone calls can discard the result when the array's
+  property export is in the current package. Integer array sorting has been
+  verified in BL2.
+- `foreach Items(Item)` copies each element into a writable variable.
+  `foreach Items(Item, Index)` also writes the current index.
+
+Assignment between matching dynamic arrays copies the contents. Object
+references within the arrays still point to the same objects. Fixed and dynamic
+arrays can be passed by value or as `out` arguments. Fixed-array arguments must
+match the parameter's declared dimension. Functions can return dynamic arrays.
+
+Current limits include whole fixed-array assignment, optional fixed-array
+parameters, compound assignment or increment on `.Length`, passing `.Length`
+as an `out` argument, and array operations on receivers such as a function result.
+Delegate variables and qualified comparator expressions are unsupported for
+`Sort`.
 
 ### Other declaration limits
 
@@ -90,8 +125,8 @@ Declaring and initializing an array property is separate from manipulating it in
 | --- | --- |
 | Scripted `function` declarations with bodies | Implemented |
 | Functions returning no value | Implemented |
-| Return types `int`, `bool`, `float`, `string`, and object references | Implemented |
-| Other return types, including structs, arrays, names, enums, bytes, and class references | Not yet implemented |
+| Return types `int`, `byte`, `bool`, `float`, `string`, `name`, object references, class references, and dynamic arrays | Implemented |
+| Other return types, including structs and enums | Not yet implemented |
 | Local variables before executable statements | Implemented |
 | `static` and `protected` function modifiers | Implemented |
 | Other function modifiers | Not yet implemented for custom function declarations |
@@ -101,7 +136,7 @@ Declaring and initializing an array property is separate from manipulating it in
 | Calling existing native functions | Implemented within the supported argument/type handling |
 | Compiling native implementations | Outside compiler scope |
 
-Function-body variable reads currently support `int`, `bool`, `float`, `string`, and object references. Declaring another property type does not make it usable as a function expression yet.
+Function-body variable reads support scalar primitive values, enums, object and class references, dynamic arrays, and structs. Fixed arrays can be indexed or passed to matching fixed-array parameters.
 
 ### Parameters and calls
 
@@ -113,10 +148,11 @@ Implemented call handling includes:
 - `out` parameters, with writable argument validation.
 - `optional` parameters, omitted arguments, and explicit parameter defaults.
 - `const` parameters.
+- Fixed-array and dynamic-array parameters passed by value or as `out` arguments.
 
 Current limitations include:
 
-- Fixed-array parameters.
+- Optional fixed-array parameters.
 - Compiling parameter modifiers other than `out`, `const`, and `optional`.
 - Const-out argument handling.
 - Some optional-out combinations.
@@ -135,8 +171,11 @@ Implemented expression forms:
 - `self`.
 - Parenthesized expressions.
 - Object member access and object method calls.
+- Struct member access, including nested fields on variables and array elements.
+- Array indexing and `ArrayCount` for fixed arrays.
 - Native binary, prefix, and postfix operators, where the referenced overload and operand types are supported.
 - Native short-circuit operators using their declared skip behavior.
+- Name literals such as `'FieldName'`.
 
 Operator overloads and precedence come from the parsed reference declarations. An operator symbol's presence in the lexer does not guarantee that its source expression can be resolved and emitted.
 
@@ -145,8 +184,7 @@ Not yet implemented:
 - Calling scripted operator implementations.
 - Precedence that cannot be determined from the left operand type alone.
 - General casts and conversions.
-- Name literals, object/class literals, and `None` expressions inside function bodies.
-- Struct member expressions and array element expressions.
+- Object/class literals and `None` expressions inside function bodies.
 - Vector/rotator literals, conditional (`?:`) expressions, and object construction with `new`.
 - String escape decoding in function-body literals.
 
@@ -166,11 +204,12 @@ Implemented:
 - `do ... until`.
 - `break` and `continue` within loops.
 - Braced blocks and supported single-statement branches.
+- Dynamic-array `foreach`, including optional index output, `break`, `continue`, and early returns.
 
 Not yet implemented:
 
+- Native iterator calls.
 - `switch` / `case` / `default`.
-- `foreach` and iterator syntax.
 - Labels and `goto`.
 - State-control statements and state labels.
 - `assert` and other statement forms not listed above.
@@ -188,6 +227,12 @@ Implemented default handling includes:
 - Inherited defaults and partial struct overrides.
 - Annotated references such as `Object'Package.Parent:Child'`.
 - Dot/colon object path handling in the supported reference forms.
+- `Begin Object ... End Object` construction in compiled class defaults, including
+  nested blocks and references to sibling subobjects.
+- Same-package inheritance of default subobjects. A derived class can use
+  `Begin Object Name=ExistingName` to override fields on an inherited template.
+- Per-instance copies for instanced default subobjects in packaged objects.
+  An explicit YAML property override, including null, takes precedence.
 
 Limits:
 
@@ -199,6 +244,8 @@ Limits:
 - Binary struct serialization has layout restrictions, including inherited binary struct layouts and certain native/transient fields.
 
 Reference dumps can contain malformed or unavailable defaults. WPB has warning-based fixups for some reference-only cases. This does not make the same invalid input acceptable in a compiled custom class.
+
+Cross-package default-object inheritance and changing an inherited template’s class remain unsupported.
 
 ## Preprocessing
 

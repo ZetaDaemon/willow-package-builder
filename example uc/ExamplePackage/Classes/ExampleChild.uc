@@ -1,2 +1,0 @@
-class ExampleChild extends ExampleClass;
-

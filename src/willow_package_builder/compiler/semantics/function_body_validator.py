@@ -1,15 +1,21 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from willow_package_builder.compiler.semantics.expression_resolver import (
+    BUILTIN_CALL_SIGNATURES,
+    BuiltinMember,
+)
 from willow_package_builder.compiler.syntax.declarations import (
     ParameterDeclaration,
     VariableDeclaration,
 )
 from willow_package_builder.compiler.syntax.expressions import (
+    ArrayCountExpression,
     BinaryExpression,
     CallExpression,
     Expression,
     IdentifierExpression,
+    IndexExpression,
     MemberExpression,
     SelfExpression,
     UnaryExpression,
@@ -26,6 +32,7 @@ from willow_package_builder.compiler.syntax.statements import (
     DoUntilStatement,
     EmptyStatement,
     ExpressionStatement,
+    ForeachStatement,
     ForStatement,
     FunctionBody,
     IfStatement,
@@ -58,9 +65,17 @@ class FunctionBodyValidator:
 
             case MemberExpression():
                 self.validate_expression(expression)
+                if self.resolver.type_of(expression.object).category is TypeCategory.STRUCT:
+                    self.require_writable(expression.object)
+
                 member = self.resolver.resolve_member(expression)
                 declaration = member.declaration
                 owner = member.owner_class
+
+            case IndexExpression():
+                self.validate_expression(expression)
+                self.require_writable(expression.array)
+                return
 
             case _:
                 msg = "Assignment destination must be a writable variable"
@@ -144,14 +159,26 @@ class FunctionBodyValidator:
 
             case MemberExpression():
                 self.validate_expression(expression.object)
-                member = self.resolver.resolve_member(expression)
 
-                self.validate_variable_access(member.declaration, member.owner_class)
+                if (
+                    self.resolver.resolve_builtin_member(expression)
+                    is not BuiltinMember.ARRAY_LENGTH
+                ):
+                    member = self.resolver.resolve_member(expression)
+                    self.validate_variable_access(member.declaration, member.owner_class)
 
             case SelfExpression():
                 if FunctionModifier.STATIC in self.resolver.scope.function.modifiers:
                     msg = "Cannot use self in a static function"
                     raise CompilationError(msg)
+
+            case IndexExpression():
+                self.validate_expression(expression.array)
+                if self.resolver.resolve_enum_index(expression) is None:
+                    self.validate_expression(expression.index)
+
+            case ArrayCountExpression():
+                self.validate_expression(expression.array)
 
             case _:
                 pass
@@ -164,7 +191,15 @@ class FunctionBodyValidator:
                 return
 
             case AssignmentStatement():
-                self.require_writable(statement.target)
+                target = statement.target
+
+                if (
+                    isinstance(target, MemberExpression)
+                    and self.resolver.resolve_builtin_member(target) is BuiltinMember.ARRAY_LENGTH
+                ):
+                    self.require_writable(target.object)
+                else:
+                    self.require_writable(target)
 
                 target_type = self.validate_expression(statement.target)
                 value_type = self.validate_expression(statement.value)
@@ -249,6 +284,10 @@ class FunctionBodyValidator:
 
                 return
 
+            case ForeachStatement():
+                self.validate_foreach(statement, return_type)
+                return
+
             case DoUntilStatement():
                 for child in statement.statements:
                     self.validate_statement(child, return_type)
@@ -302,6 +341,14 @@ class FunctionBodyValidator:
                 operator = self.resolver.resolve_operator(expression)
 
             case CallExpression():
+                match self.resolver.resolve_builtin_call(expression):
+                    case ((BuiltinMember.ARRAY_FIND | BuiltinMember.ARRAY_FIND_STRUCT), _):
+                        msg = "Array Find result must be used"
+                        raise CompilationError(msg)
+
+                    case _:
+                        pass
+
                 return
 
             case _:
@@ -316,8 +363,49 @@ class FunctionBodyValidator:
             raise CompilationError(msg)
 
     def validate_call(self, expression: CallExpression) -> None:
+        builtin_call = self.resolver.resolve_builtin_call(expression)
+
+        if builtin_call is not None:
+            builtin, receiver = builtin_call
+            receiver_type = self.validate_expression(receiver)
+
+            signature = BUILTIN_CALL_SIGNATURES[builtin]
+
+            if signature.mutates_receiver:
+                self.require_writable(receiver)
+
+            arguments = self.resolver.require_builtin_arguments(
+                expression, len(signature.arguments)
+            )
+
+            if builtin is BuiltinMember.ARRAY_SORT:
+                self.resolver.resolve_array_sort_comparator(receiver_type, arguments[0])
+                return
+
+            if builtin is BuiltinMember.ARRAY_FIND_STRUCT:
+                field, _ = arguments
+                expected_types = (
+                    ResolvedType(TypeCategory.NAME),
+                    self.resolver.resolve_struct_find_field_type(receiver_type, field),
+                )
+            else:
+                expected_types = tuple(
+                    receiver_type.arguments[0] if category is None else ResolvedType(category)
+                    for category in signature.arguments
+                )
+
+            for argument, expected in zip(arguments, expected_types, strict=True):
+                actual = self.validate_expression(argument)
+
+                if actual != expected:
+                    msg = f"Array {builtin.name} expects {expected!r}, got {actual!r}"
+                    raise CompilationError(msg)
+
+            return
+
         member = self.resolver.resolve_call(expression)
         function = member.declaration
+
         scope = self.resolver.scope
         path = member.owner_class + function.name
 
@@ -372,6 +460,16 @@ class FunctionBodyValidator:
 
                 continue
             argument_type = self.validate_expression(argument)
+
+            dimension = self.resolver.array_dimension_of(argument)
+
+            if dimension != parameter.array_dimension:
+                msg = (
+                    f"Argument {parameter.name!r} of {path} requires array dimension "
+                    f"{parameter.array_dimension}, got {dimension}"
+                )
+                raise CompilationError(msg)
+
             parameter_type = self.resolver.resolve_declared_type(
                 parameter.type_ref, member.owner_class
             )
@@ -465,3 +563,38 @@ class FunctionBodyValidator:
             current = references.resolve_within_class(current, parents, packages)
 
         return references.is_subclass(current, owner, parents)
+
+    def validate_foreach(self, statement: ForeachStatement, return_type: ResolvedType) -> None:
+        iterator = statement.iterator
+        array = iterator.callee
+        array_type = self.validate_expression(array)
+
+        if (
+            array_type.category is not TypeCategory.ARRAY
+            or self.resolver.array_dimension_of(array) != 1
+        ):
+            msg = "foreach currently requires a dynamic array"
+            raise CompilationError(msg)
+
+        arguments = iterator.arguments
+        if not 1 <= len(arguments) <= 2 or arguments[0] is None:
+            msg = "Array foreach requires an item output and accepts an optional index output"
+            raise CompilationError(msg)
+
+        item = arguments[0]
+        index = arguments[1] if len(arguments) == 2 else None
+        outputs = [(item, array_type.arguments[0])]
+
+        if index is not None:
+            outputs.append((index, ResolvedType(TypeCategory.INT)))
+
+        for output, expected in outputs:
+            self.require_writable(output)
+            actual = self.validate_expression(output)
+
+            if actual != expected or self.resolver.array_dimension_of(output) != 1:
+                msg = f"Array foreach output must be a single value of type {expected!r}"
+                raise CompilationError(msg)
+
+        for child in statement.statements:
+            self.validate_statement(child, return_type)

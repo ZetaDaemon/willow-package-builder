@@ -158,6 +158,7 @@ class LoopBlock:
     continue_target: BytecodeLabel
     break_target: BytecodeLabel
     active: bool = True
+    iterator: bool = field(default=False, kw_only=True)
 
     _opcodes: Opcodes = field(default_factory=lambda: get_game().OPCODES, init=False, repr=False)
 
@@ -354,6 +355,37 @@ class Bytecode:
         self += self._opcodes.JUMP
         self += BytecodeJump(start)
         self += end
+
+    @contextmanager
+    def array_foreach(
+        self, array: Bytecode, item: Bytecode, index: Bytecode | None
+    ) -> Generator[LoopBlock]:
+        """Emit a dynamic array iterator and its loop exit."""
+        advance = BytecodeLabel()
+        cleanup = BytecodeLabel()
+        loop = LoopBlock(self, advance, cleanup, iterator=True)
+
+        self += self._opcodes.DYNAMIC_ARRAY_ITERATOR
+        self += array
+        self += item
+        self += bytes((int(index is not None),))
+
+        if index is None:
+            self += self._opcodes.EMPTY_PARAMETER_VALUE
+        else:
+            self += index
+
+        self += BytecodeJump(cleanup)
+
+        try:
+            yield loop
+        finally:
+            loop.active = False
+
+        self += advance
+        self += self._opcodes.ITERATOR_NEXT
+        self += cleanup
+        self += self._opcodes.ITERATOR_POP
 
     @contextmanager
     def for_statement(

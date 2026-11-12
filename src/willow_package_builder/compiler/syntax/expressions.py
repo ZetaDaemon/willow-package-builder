@@ -67,3 +67,19 @@ class MemberExpression(Expression):
 @dataclass
 class SelfExpression(Expression):
     pass
+
+
+@dataclass
+class IndexExpression(Expression):
+    array: Expression
+    index: Expression
+
+
+@dataclass
+class NameExpression(Expression):
+    value: FName
+
+
+@dataclass
+class ArrayCountExpression(Expression):
+    array: Expression

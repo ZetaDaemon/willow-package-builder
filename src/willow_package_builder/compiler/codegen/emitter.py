@@ -9,19 +9,26 @@ from willow_package_builder.bytecode import (
     BytecodeRelativeJump,
     LoopBlock,
 )
+from willow_package_builder.compiler.semantics.expression_resolver import (
+    BUILTIN_CALL_SIGNATURES,
+    BuiltinMember,
+)
 from willow_package_builder.compiler.semantics.function_body_validator import FunctionBodyValidator
 from willow_package_builder.compiler.semantics.scope import VariableCategory
 from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.declarations import VariableDeclaration
 from willow_package_builder.compiler.syntax.expressions import (
+    ArrayCountExpression,
     BinaryExpression,
     BooleanExpression,
     CallExpression,
     Expression,
     FloatExpression,
     IdentifierExpression,
+    IndexExpression,
     IntegerExpression,
     MemberExpression,
+    NameExpression,
     SelfExpression,
     StringExpression,
     UnaryExpression,
@@ -34,6 +41,7 @@ from willow_package_builder.compiler.syntax.statements import (
     DoUntilStatement,
     EmptyStatement,
     ExpressionStatement,
+    ForeachStatement,
     ForStatement,
     IfStatement,
     ReturnStatement,
@@ -42,13 +50,8 @@ from willow_package_builder.compiler.syntax.statements import (
 )
 from willow_package_builder.games import get_game
 from willow_package_builder.logging import CompilationError, declaration_context
-from willow_package_builder.upackage import (
-    CORE_STRING_PROPERTY_CLASS_PATH,
-    RETURN_VALUE_NAME,
-    FName,
-    ReferencePath,
-    UObject,
-)
+from willow_package_builder.payloads.property_payloads import UArrayPropertyPayload
+from willow_package_builder.upackage import RETURN_VALUE_NAME, FName, ReferencePath, UObject
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.classes.prepared_function import PreparedFunction
@@ -56,6 +59,8 @@ if TYPE_CHECKING:
     from willow_package_builder.opcode import Opcodes
 
     from .emission_context import EmissionContext
+
+BYTE_TO_INT_CAST = 0x3A
 
 
 @dataclass
@@ -67,32 +72,38 @@ class FunctionEmitter:
     _loops: list[LoopBlock] = field(default_factory=list, init=False, repr=False)
     _opcodes: Opcodes = field(default_factory=lambda: get_game().OPCODES, init=False, repr=False)
 
-    def _emit_identifier_expression(self, expression: IdentifierExpression) -> Bytecode:
+    def _emit_identifier_expression(
+        self, expression: IdentifierExpression, *, array_operand: bool = False
+    ) -> Bytecode:
         symbol = self.resolver.scope.resolve_variable(expression.name)
 
         resolved = self.resolver.resolve_declared_type(
             symbol.declaration.type_ref, symbol.owner_class
         )
-        if resolved.category not in (
+        if not array_operand and resolved.category not in (
             TypeCategory.INT,
             TypeCategory.BOOL,
             TypeCategory.FLOAT,
             TypeCategory.STRING,
             TypeCategory.OBJECT,
+            TypeCategory.CLASS,
+            TypeCategory.BYTE,
+            TypeCategory.ENUM,
+            TypeCategory.NAME,
+            TypeCategory.ARRAY,
+            TypeCategory.BYTE,
+            TypeCategory.STRUCT,
         ):
             msg = f"Variable bytecode for type {resolved!r} is not supported yet"
             raise NotImplementedError(msg)
 
-        if (
-            isinstance(symbol.declaration, VariableDeclaration)
-            and symbol.declaration.array_dimension != 1
-        ):
+        if not array_operand and symbol.declaration.array_dimension != 1:
             msg = f"Fixed array {expression.name!r} requires an element index"
             raise CompilationError(msg)
 
         script = Bytecode()
 
-        if resolved.category is TypeCategory.BOOL:
+        if not array_operand and resolved.category is TypeCategory.BOOL:
             script += self._opcodes.BOOL_VARIABLE
 
         reference = self.variable_reference(expression.name)
@@ -129,7 +140,9 @@ class FunctionEmitter:
         script = Bytecode()
 
         with script.native_function(operator.native_index):
-            script += self.emit_expression(expression.left)
+            script += self.emit_expression(
+                expression.left, modifying=ParameterModifier.OUT in operator.parameters[0].modifiers
+            )
 
             if skip_end is not None:
                 origin = BytecodeLabel()
@@ -138,7 +151,10 @@ class FunctionEmitter:
                 script += BytecodeRelativeJump(origin, skip_end)
                 script += origin
 
-            script += self.emit_expression(expression.right)
+            script += self.emit_expression(
+                expression.right,
+                modifying=ParameterModifier.OUT in operator.parameters[1].modifiers,
+            )
 
         # Must follow END_FUNCTION_PARAMS emitted by the context manager.
         if skip_end is not None:
@@ -159,7 +175,10 @@ class FunctionEmitter:
             raise NotImplementedError(msg)
 
         with script.native_function(operator.native_index):
-            script += self.emit_expression(expression.operand)
+            script += self.emit_expression(
+                expression.operand,
+                modifying=ParameterModifier.OUT in operator.parameters[0].modifiers,
+            )
 
         return script
 
@@ -171,11 +190,12 @@ class FunctionEmitter:
 
         if function.native_index is not None and function.native_index != 0:
             with script.native_function(function.native_index):
-                for argument in expression.arguments:
-                    if argument is None:
-                        script += self._opcodes.EMPTY_PARAMETER_VALUE
-                    else:
-                        script += self.emit_expression(argument)
+                for argument, parameter in zip(
+                    expression.arguments, function.parameters, strict=False
+                ):
+                    script += self._emit_call_argument(
+                        argument, modifying=ParameterModifier.OUT in parameter.modifiers
+                    )
 
             return script
 
@@ -192,11 +212,10 @@ class FunctionEmitter:
             script += self._opcodes.VIRTUAL_FUNCTION
             script += BytecodeName(function.name)
 
-        for argument in expression.arguments:
-            if argument is None:
-                script += self._opcodes.EMPTY_PARAMETER_VALUE
-            else:
-                script += self.emit_expression(argument)
+        for argument, parameter in zip(expression.arguments, function.parameters, strict=False):
+            script += self._emit_call_argument(
+                argument, modifying=ParameterModifier.OUT in parameter.modifiers
+            )
 
         for _ in function.parameters[len(expression.arguments) :]:
             script += self._opcodes.EMPTY_PARAMETER_VALUE
@@ -205,39 +224,18 @@ class FunctionEmitter:
         return script
 
     def _emit_call_expression(self, expression: CallExpression) -> Bytecode:
+        builtin_call = self.resolver.resolve_builtin_call(expression)
+
+        if builtin_call is not None:
+            builtin, receiver = builtin_call
+            return self._emit_builtin_call(expression, builtin, receiver)
+
         call = self._emit_call_body(expression)
 
         if not isinstance(expression.callee, MemberExpression):
             return call
 
-        member = self.resolver.resolve_call(expression)
-        function = member.declaration
-        result_type = self.resolver.resolve_declared_type(function.return_type, member.owner_class)
-
-        result_property = ReferencePath()
-
-        if result_type.category is not TypeCategory.VOID:
-            path = member.owner_class + function.name
-            function_reference = self.builder.function_reference(path)
-            if member.owner_class.outer is None:
-                msg = f"Expected fully qualified class, got {member.owner_class}"
-                raise ValueError(msg)
-            owner_package = member.owner_class.outer.name
-
-            if owner_package == self.builder.config.name:
-                reference = function_reference + RETURN_VALUE_NAME
-                result_property = self.builder.package.lookup_object_by_path(reference).reference()
-            else:
-                property_class = self.builder.context.references.property_class(result_type)
-                class_package, class_name = property_class.path.split()
-
-                if class_package is None:
-                    msg = f"Expected fully qualified class, got {property_class.path}"
-                    raise ValueError(msg)
-
-                result_property = self.builder.ensure_import(
-                    RETURN_VALUE_NAME, function_reference, class_package.name, class_name
-                )
+        result_property = self._call_return_property(expression)
 
         receiver = self.emit_expression(expression.callee.object)
         script = Bytecode()
@@ -247,38 +245,129 @@ class FunctionEmitter:
 
         return script
 
-    def _emit_member_expression(self, expression: MemberExpression) -> Bytecode:
+    def _emit_member_expression(
+        self, expression: MemberExpression, *, array_operand: bool = False, modifying: bool = False
+    ) -> Bytecode:
+        if self.resolver.resolve_builtin_member(expression) is BuiltinMember.ARRAY_LENGTH:
+            script = Bytecode()
+            script += self._opcodes.DYNAMIC_ARRAY_LENGTH
+            script += self._emit_array_operand(expression.object)
+            return script
+
         member = self.resolver.resolve_member(expression)
         declaration = member.declaration
         resolved = self.resolver.resolve_declared_type(declaration.type_ref, member.owner_class)
 
-        if declaration.array_dimension != 1:
+        if not array_operand and declaration.array_dimension != 1:
             msg = f"Fixed array {expression.name!r} requires an element index"
             raise CompilationError(msg)
 
-        if resolved.category not in (
+        if not array_operand and resolved.category not in (
             TypeCategory.INT,
             TypeCategory.BOOL,
             TypeCategory.FLOAT,
             TypeCategory.STRING,
             TypeCategory.OBJECT,
+            TypeCategory.BYTE,
+            TypeCategory.NAME,
+            TypeCategory.ARRAY,
+            TypeCategory.ENUM,
+            TypeCategory.STRUCT,
         ):
             msg = f"Member bytecode for type {resolved!r} is not implemented yet"
             raise NotImplementedError(msg)
+
+        receiver_type = self.resolver.type_of(expression.object)
+        if receiver_type.category is TypeCategory.STRUCT:
+            struct_path = receiver_type.declaration_path
+            if struct_path is None:
+                msg = "Struct type has no declaration path"
+                raise ValueError(msg)
+
+            context = self.builder.context
+            hierarchy = context.references.struct_hierarchy(
+                struct_path, context.parents, context.packages
+            )
+            declaring_struct = next(
+                owner + struct.name
+                for owner, struct in reversed(hierarchy)
+                if any(field is declaration for field in struct.variables)
+            )
+            reference = self.property_reference(
+                member.owner_class, declaration, declaring_struct=declaring_struct
+            )
+
+            script = Bytecode()
+            script += self._opcodes.STRUCT_MEMBER
+            script += BytecodeReference(reference)
+            script += BytecodeReference(self.builder.struct_reference(struct_path))
+            # Read directly from the struct's storage without marking it modified.
+            script += bytes((0, modifying))
+            script += self.emit_expression(expression.object, modifying=modifying)
+            return script
 
         reference = self.property_reference(member.owner_class, declaration)
         receiver = self.emit_expression(expression.object)
 
         script = Bytecode()
         with script.object_context(receiver, reference):
-            if resolved.category is TypeCategory.BOOL:
+            if not array_operand and resolved.category is TypeCategory.BOOL:
                 script += self._opcodes.BOOL_VARIABLE
 
             script.add_instance_variable(reference)
 
         return script
 
-    def emit_expression(self, expression: Expression) -> Bytecode:
+    def _emit_array_operand(self, expression: Expression) -> Bytecode:
+        match expression:
+            case IdentifierExpression():
+                return self._emit_identifier_expression(expression, array_operand=True)
+            case MemberExpression():
+                return self._emit_member_expression(expression, array_operand=True)
+            case _:
+                msg = "Array operations currently require an array variable or member"
+                raise NotImplementedError(msg)
+
+    def _emit_index_expression(self, expression: IndexExpression) -> Bytecode:
+        """Emit an indexed read from an array variable or member."""
+        element = self.resolver.type_of(expression)
+        if element.category not in (
+            TypeCategory.INT,
+            TypeCategory.FLOAT,
+            TypeCategory.STRING,
+            TypeCategory.OBJECT,
+            TypeCategory.CLASS,
+            TypeCategory.BYTE,
+            TypeCategory.NAME,
+            TypeCategory.STRUCT,
+            TypeCategory.ENUM,
+            TypeCategory.BOOL,
+        ):
+            msg = f"Indexed access to {element.category} arrays is not implemented yet"
+            raise NotImplementedError(msg)
+
+        array = self._emit_array_operand(expression.array)
+
+        script = Bytecode()
+        if self.resolver.array_dimension_of(expression.array) != 1:
+            script += self._opcodes.ARRAY_ELEMENT
+        else:
+            script += self._opcodes.DYNAMIC_ARRAY_ELEMENT
+
+        enum_index = self.resolver.resolve_enum_index(expression)
+        if enum_index is None:
+            index_type = self.resolver.type_of(expression.index)
+            if index_type.category in (TypeCategory.BYTE, TypeCategory.ENUM):
+                script += self._opcodes.PRIMITIVE_CAST
+                script += bytes((BYTE_TO_INT_CAST,))
+            script += self.emit_expression(expression.index)
+        else:
+            script.add_constant(enum_index)
+
+        script += array
+        return script
+
+    def emit_expression(self, expression: Expression, *, modifying: bool = False) -> Bytecode:
         """Convert an expression into bytecode."""
         match expression:
             case BooleanExpression() | IntegerExpression() | FloatExpression() | StringExpression():
@@ -299,11 +388,25 @@ class FunctionEmitter:
                 return self._emit_call_expression(expression)
 
             case MemberExpression():
-                return self._emit_member_expression(expression)
+                return self._emit_member_expression(expression, modifying=modifying)
 
             case SelfExpression():
                 script = Bytecode()
                 script += self._opcodes.SELF
+                return script
+
+            case IndexExpression():
+                return self._emit_index_expression(expression)
+
+            case NameExpression():
+                script = Bytecode()
+                script += self._opcodes.NAME_CONST
+                script += BytecodeName(expression.value)
+                return script
+
+            case ArrayCountExpression():
+                script = Bytecode()
+                script.add_constant(self.resolver.resolve_array_count(expression))
                 return script
 
             case _:
@@ -311,9 +414,17 @@ class FunctionEmitter:
                 raise NotImplementedError(msg)
 
     def property_reference(
-        self, owner_class: ReferencePath, declaration: VariableDeclaration
+        self,
+        owner_class: ReferencePath,
+        declaration: VariableDeclaration,
+        *,
+        declaring_struct: ReferencePath | None = None,
     ) -> ReferencePath:
-        outer = self.builder.class_object_reference(owner_class)
+        if declaring_struct is None:
+            outer = self.builder.class_object_reference(owner_class)
+        else:
+            outer = self.builder.struct_reference(declaring_struct)
+
         if owner_class.outer is None:
             msg = f"Expected fully qualified class, got {owner_class}"
             raise ValueError(msg)
@@ -346,21 +457,41 @@ class FunctionEmitter:
 
         return self.property_reference(symbol.owner_class, declaration)
 
-    def _emit_assignment_statement(self, statement: AssignmentStatement) -> Bytecode:
+    def _emit_assignment_statement(
+        self, statement: AssignmentStatement, *, modifying: bool = False
+    ) -> Bytecode:
         script = Bytecode()
         target_type = self.resolver.type_of(statement.target)
 
-        if target_type.category is TypeCategory.BOOL:
-            script += self._opcodes.LET_BOOL
-        else:
-            script += self._opcodes.LET
+        match target_type.category:
+            case TypeCategory.ARRAY:
+                if (
+                    self.resolver.array_dimension_of(statement.target) != 1
+                    or self.resolver.array_dimension_of(statement.value) != 1
+                ):
+                    msg = "Whole-array assignment currently requires dynamic arrays"
+                    raise NotImplementedError(msg)
 
-        script += self.emit_expression(statement.target)
+                script += self._opcodes.LET
+                script += self._emit_array_operand(statement.target)
+                script += self.emit_expression(statement.value)
+                return script
+
+            case TypeCategory.BOOL:
+                script += self._opcodes.LET_BOOL
+
+            case _:
+                script += self._opcodes.LET
+
+        script += self.emit_expression(statement.target, modifying=True)
         script += self.emit_expression(statement.value)
         return script
 
     def _emit_return_statement(self, statement: ReturnStatement) -> Bytecode:
         script = Bytecode()
+        for loop in reversed(self._loops):
+            if loop.iterator:
+                script += self._opcodes.ITERATOR_POP
         script += self._opcodes.RETURN
 
         if statement.value is None:
@@ -373,44 +504,35 @@ class FunctionEmitter:
     def _emit_expression_statement(self, statement: ExpressionStatement) -> Bytecode:
         script = Bytecode()
         expression = statement.expression
+
+        if isinstance(expression, CallExpression):
+            builtin_call = self.resolver.resolve_builtin_call(expression)
+            if builtin_call is not None:
+                builtin, receiver = builtin_call
+                if builtin is BuiltinMember.ARRAY_SORT:
+                    inner = self._sort_result_property(receiver)
+                    script += self._opcodes.EAT_RETURN_VALUE
+                    script += BytecodeReference(inner)
+                    script += self.emit_expression(expression)
+                    return script
+
         result_type = self.resolver.type_of(expression)
 
-        if result_type.category is TypeCategory.STRING:
+        if result_type.category in (TypeCategory.STRING, TypeCategory.ARRAY):
             match expression:
-                case BinaryExpression(left=IdentifierExpression() as target):
-                    target_type = self.resolver.type_of(target)
+                case CallExpression():
+                    property_reference = self._call_return_property(expression)
 
-                    if target_type.category is not TypeCategory.STRING:
-                        msg = "Discarding this string expression is not implemented yet"
-                        raise NotImplementedError(msg)
-
+                case BinaryExpression(left=IdentifierExpression() as target) if (
+                    result_type.category is TypeCategory.STRING
+                    and self.resolver.type_of(target).category is TypeCategory.STRING
+                ):
                     property_reference = self.variable_reference(target.name)
 
-                case CallExpression():
-                    member = self.resolver.resolve_call(expression)
-                    function = member.declaration
-                    path = member.owner_class + function.name
-                    function_reference = self.builder.function_reference(path)
-                    return_reference = function_reference + RETURN_VALUE_NAME
-
-                    if member.owner_class.outer is None:
-                        msg = f"Expected fully qualified class, got {member.owner_class}"
-                        raise ValueError(msg)
-                    owner_package = member.owner_class.outer.name
-
-                    if owner_package == self.builder.config.name:
-                        property_reference = self.builder.package.lookup_object_by_path(
-                            return_reference
-                        ).reference()
-                    else:
-                        property_reference = self.builder.ensure_import(
-                            RETURN_VALUE_NAME,
-                            function_reference,
-                            *CORE_STRING_PROPERTY_CLASS_PATH.full_split(),
-                        )
-
                 case _:
-                    msg = "Discarding this string expression is not implemented yet"
+                    msg = (
+                        f"Discarding this {result_type.category} expression is not implemented yet"
+                    )
                     raise NotImplementedError(msg)
 
             script += self._opcodes.EAT_RETURN_VALUE
@@ -431,6 +553,30 @@ class FunctionEmitter:
                 with branch.else_statement():
                     for child in statement.else_statements:
                         script += self.emit_statement(child)
+
+        return script
+
+    def _emit_foreach_statement(self, statement: ForeachStatement) -> Bytecode:
+        iterator = statement.iterator
+        array = self._emit_array_operand(iterator.callee)
+        item = iterator.arguments[0]
+        index = iterator.arguments[1] if len(iterator.arguments) == 2 else None
+
+        if item is None:
+            msg = "Array foreach requires an item output"
+            raise CompilationError(msg)
+
+        script = Bytecode()
+        item_code = self.emit_expression(item)
+        index_code = None if index is None else self.emit_expression(index)
+
+        with script.array_foreach(array, item_code, index_code) as loop:
+            self._loops.append(loop)
+            try:
+                for child in statement.statements:
+                    script += self.emit_statement(child)
+            finally:
+                self._loops.pop()
 
         return script
 
@@ -532,6 +678,9 @@ class FunctionEmitter:
             case DoUntilStatement():
                 return self._emit_do_until_statement(statement)
 
+            case ForeachStatement():
+                return self._emit_foreach_statement(statement)
+
             case _:
                 msg = f"Unsupported statement type: {type(statement).__name__}"
                 raise TypeError(msg)
@@ -600,3 +749,112 @@ class FunctionEmitter:
                     pass
 
         return False
+
+    def _emit_builtin_call(
+        self, expression: CallExpression, builtin: BuiltinMember, receiver: Expression
+    ) -> Bytecode:
+        opcodes = {
+            BuiltinMember.ARRAY_ADD: self._opcodes.DYNAMIC_ARRAY_ADD,
+            BuiltinMember.ARRAY_ADD_ITEM: self._opcodes.DYNAMIC_ARRAY_ADD_ITEM,
+            BuiltinMember.ARRAY_INSERT: self._opcodes.DYNAMIC_ARRAY_INSERT,
+            BuiltinMember.ARRAY_REMOVE: self._opcodes.DYNAMIC_ARRAY_REMOVE,
+            BuiltinMember.ARRAY_INSERT_ITEM: self._opcodes.DYNAMIC_ARRAY_INSERT_ITEM,
+            BuiltinMember.ARRAY_REMOVE_ITEM: self._opcodes.DYNAMIC_ARRAY_REMOVE_ITEM,
+            BuiltinMember.ARRAY_FIND: self._opcodes.DYNAMIC_ARRAY_FIND,
+            BuiltinMember.ARRAY_FIND_STRUCT: self._opcodes.DYNAMIC_ARRAY_FIND_STRUCT,
+            BuiltinMember.ARRAY_SORT: self._opcodes.DYNAMIC_ARRAY_SORT,
+        }
+        signature = BUILTIN_CALL_SIGNATURES[builtin]
+        arguments = self.resolver.require_builtin_arguments(expression, len(signature.arguments))
+
+        script = Bytecode()
+        script += opcodes[builtin]
+        script += self._emit_array_operand(receiver)
+        end: BytecodeLabel | None = None
+
+        if builtin in (
+            BuiltinMember.ARRAY_ADD_ITEM,
+            BuiltinMember.ARRAY_INSERT_ITEM,
+            BuiltinMember.ARRAY_REMOVE_ITEM,
+            BuiltinMember.ARRAY_FIND,
+            BuiltinMember.ARRAY_FIND_STRUCT,
+            BuiltinMember.ARRAY_SORT,
+        ):
+            origin = BytecodeLabel()
+            end = BytecodeLabel()
+            script += BytecodeRelativeJump(origin, end)
+            script += origin
+
+        if builtin is BuiltinMember.ARRAY_SORT:
+            comparator = self.resolver.resolve_array_sort_comparator(
+                self.resolver.type_of(receiver), arguments[0]
+            )
+            script += self._opcodes.INSTANCE_DELEGATE
+            script += BytecodeName(comparator.declaration.name)
+        else:
+            for argument in arguments:
+                script += self.emit_expression(argument)
+
+        script += self._opcodes.END_FUNCTION_PARAMS
+
+        if end is not None:
+            script += end
+
+        return script
+
+    def _sort_result_property(self, receiver: Expression) -> ReferencePath:
+        match receiver:
+            case IdentifierExpression():
+                reference = self.variable_reference(receiver.name)
+
+            case MemberExpression():
+                member = self.resolver.resolve_member(receiver)
+                reference = self.property_reference(member.owner_class, member.declaration)
+
+            case _:
+                msg = "Discarding Sort results requires an array variable or member"
+                raise NotImplementedError(msg)
+
+        obj = self.builder.package.lookup_object_by_path(reference)
+        if not isinstance(obj, UObject) or not isinstance(obj.payload, UArrayPropertyPayload):
+            msg = "Discarding Sort results requires an array property exported by this package"
+            raise NotImplementedError(msg)
+
+        return obj.payload.inner
+
+    def _call_return_property(self, expression: CallExpression) -> ReferencePath:
+        """Resolve the property used to store and clean up a call result."""
+        member = self.resolver.resolve_call(expression)
+        result_type = self.resolver.resolve_declared_type(
+            member.declaration.return_type, member.owner_class
+        )
+
+        if result_type.category is TypeCategory.VOID:
+            return ReferencePath()
+
+        path = member.owner_class + member.declaration.name
+        function_reference = self.builder.function_reference(path)
+        owner_package = member.owner_class.get_outer().name
+
+        if owner_package == self.builder.config.name:
+            reference = function_reference + RETURN_VALUE_NAME
+            return self.builder.package.lookup_object_by_path(reference).reference()
+
+        property_class = self.builder.context.references.property_class(result_type)
+        class_package, class_name = property_class.path.split(require_outer=True)
+        return self.builder.ensure_import(
+            RETURN_VALUE_NAME, function_reference, class_package.name, class_name
+        )
+
+    def _emit_call_argument(
+        self, argument: Expression | None, *, modifying: bool = False
+    ) -> Bytecode:
+        if argument is None:
+            script = Bytecode()
+            script += self._opcodes.EMPTY_PARAMETER_VALUE
+            return script
+
+        if self.resolver.array_dimension_of(argument) != 1:
+            return self._emit_array_operand(argument)
+
+        return self.emit_expression(argument, modifying=modifying)
