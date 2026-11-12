@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from willow_package_builder.upackage import Package
 
 from willow_package_builder.upackage import (
+    ATTRIBUTE_BASE_VALUE_SUFFIX,
     CORE_CLASS_PATH,
     CORE_PACKAGE_CLASS_PATH,
     NONE_NAME,
@@ -41,6 +42,12 @@ from willow_package_builder.upackage import (
     UObject,
     serialize_fstring,
 )
+
+ATTRIBUTE_PROPERTY_TAGS = {
+    TypeCategory.INT: PropertyTag.INT_ATTRIBUTE,
+    TypeCategory.FLOAT: PropertyTag.FLOAT_ATTRIBUTE,
+    TypeCategory.BYTE: PropertyTag.BYTE_ATTRIBUTE,
+}
 
 PROPERTY_TAG_NAMES: dict[TypeCategory, PropertyTag] = {
     TypeCategory.INT: PropertyTag.INT,
@@ -126,10 +133,15 @@ class ValueSerializer:
         )
 
     def serialize_property(
-        self, name: FName, value: Value, resolved_type: ResolvedType, array_index: int = 0
+        self,
+        name: FName,
+        value: Value,
+        resolved_type: ResolvedType,
+        array_index: int = 0,
+        property_tag: PropertyTag | None = None,
     ) -> bytes:
         """Serialize one property tag and its value."""
-        property_type = PROPERTY_TAG_NAMES[resolved_type.category]
+        property_type = property_tag or PROPERTY_TAG_NAMES[resolved_type.category]
         metadata = b""
 
         match property_type, value:
@@ -378,7 +390,13 @@ class ValueSerializer:
             )
             resolved = self.resolve_field_type(member.declaration, member.owner_class)
 
-            data.append(self.serialize_field(name, value, member.declaration, resolved))
+            if VariableModifier.ATTRIBUTE in member.declaration.modifiers:
+                tag = ATTRIBUTE_PROPERTY_TAGS[resolved.category]
+                base_name = FName(f"{member.declaration.name}{ATTRIBUTE_BASE_VALUE_SUFFIX}")
+                data.append(self.serialize_property(name, value, resolved, property_tag=tag))
+                data.append(self.serialize_property(base_name, value, resolved, property_tag=tag))
+            else:
+                data.append(self.serialize_field(name, value, member.declaration, resolved))
 
         return b"".join(data) + NONE_NAME.serialize(self.package)
 

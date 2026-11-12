@@ -151,15 +151,15 @@ class FunctionBuilder(BuildComponent):
         function_class = self.references.class_object_reference(CORE_FUNCTION_PATH)
         supported_modifiers = {FunctionModifier.STATIC, FunctionModifier.PROTECTED}
 
+        if FunctionModifier.NATIVE in function.modifiers:
+            msg = f"Cannot compile native function {function.name}"
+            raise CompilationError(msg)
+
         if function.func_category is not FunctionCategory.FUNCTION:
             msg = f"Function category {function.func_category} is not supported yet"
             raise NotImplementedError(msg)
 
         flags = FunctionFlags.DEFINED
-
-        if FunctionModifier.NATIVE in function.modifiers:
-            msg = f"Cannot compile native function {function.name}"
-            raise CompilationError(msg)
 
         for modifier in function.modifiers:
             if modifier not in supported_modifiers:

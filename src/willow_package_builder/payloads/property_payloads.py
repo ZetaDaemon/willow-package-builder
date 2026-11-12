@@ -13,25 +13,59 @@ class PropertyFlags(IntFlag):
     """PropertyFlags."""
 
     # fmt: off
-    NONE                = 0x0
+    NONE                 = 0x0
 
-    EDIT                = 0x1
-    CONST               = 0x2
-    EXPORT_OBJECT       = 0x8
-    OPTIONAL_PARAM      = 0x10
-    NET                 = 0x20
-    PARAM               = 0x80
-    OUT_PARAM           = 0x100
-    RETURN_PARAM        = 0x400
-    EDIT_CONST          = 0x20000
-    ALWAYS_INIT         = 0x100000
-    DUPLICATE_TRANSIENT = 0x200000
-    NEED_CTOR_LINK      = 0x400000
-    NO_EXPORT           = 0x800000
-    EDIT_INLINE         = 0x4000000
-    INTERP              = 0x200000000
-    PRIVATE_WRITE       = 0x4000000000
-    PROTECTED_WRITE     = 0x8000000000
+    EDIT                 = 0x1
+    CONST                = 0x2
+    INPUT                = 0x4
+    EXPORT_OBJECT        = 0x8
+    OPTIONAL_PARAM       = 0x10
+    NET                  = 0x20
+    EDIT_FIXED_SIZE      = 0x40
+    PARAM                = 0x80
+    OUT_PARAM            = 0x100
+    SKIP_PARAM           = 0x200
+    RETURN_PARAM         = 0x400
+    COERCE_PARAM         = 0x800
+    NATIVE               = 0x1000
+    TRANSIENT            = 0x2000
+    CONFIG               = 0x4000
+    LOCALIZED            = 0x8000
+    EDIT_CONST           = 0x20000
+    GLOBAL_CONFIG        = 0x40000
+    COMPONENT            = 0x80000
+    ALWAYS_INIT          = 0x100000
+    DUPLICATE_TRANSIENT  = 0x200000
+    NEED_CTOR_LINK       = 0x400000
+    NO_EXPORT            = 0x800000
+    NO_IMPORT            = 0x1000000
+    NO_CLEAR             = 0x2000000
+    EDIT_INLINE          = 0x4000000
+    ED_FINDABLE          = 0x8000000
+    EDIT_INLINE_USE      = 0x10000000
+    DEPRECATED           = 0x20000000
+    DATA_BINDING         = 0x40000000
+    SERIALIZE_TEXT       = 0x80000000
+    REP_NOTIFY           = 0x100000000
+    INTERP               = 0x200000000
+    NON_TRANSACTIONAL    = 0x400000000
+    EDITOR_ONLY          = 0x800000000
+    NOT_FOR_CONSOLE      = 0x1000000000
+    REP_RETRY            = 0x2000000000
+    PRIVATE_WRITE        = 0x4000000000
+    PROTECTED_WRITE      = 0x8000000000
+    ARCHETYPE_PROPERTY   = 0x10000000000
+    EDIT_HIDE            = 0x20000000000
+    EDIT_TEXT_BOX        = 0x40000000000
+    CROSS_LEVEL_PASSIVE  = 0x100000000000
+    CROSS_LEVEL_ACTIVE   = 0x200000000000
+
+    # Gearbox attribute properties.
+    ATTRIBUTE_BASE_VALUE = 0x4000000000000000
+    ATTRIBUTE_VALUE      = 0x8000000000000000
+
+    CROSS_LEVEL          = CROSS_LEVEL_PASSIVE | CROSS_LEVEL_ACTIVE
+    DEVELOPMENT_ASSETS   = EDITOR_ONLY | NOT_FOR_CONSOLE
 
 
 # fmt: on
@@ -82,6 +116,17 @@ class UIntPropertyPayload(UPropertyPayload):
 
 
 @dataclass
+class UBytePropertyPayload(UPropertyPayload):
+    """Byte or enum property."""
+
+    enum: ReferencePath = field(default_factory=ReferencePath)
+
+    @override
+    def serialize_body(self, package: Package) -> bytes:
+        return super().serialize_body(package) + self.enum.serialize(package)
+
+
+@dataclass
 class UFloatPropertyPayload(UPropertyPayload):
     """UnrealScript float."""
 
@@ -92,6 +137,29 @@ class UBoolPropertyPayload(UPropertyPayload):
 
 
 @dataclass
+class UNumericAttributePropertyPayload(UPropertyPayload):
+    """Serialized property definition shared by float and int attributes."""
+
+    modifier_stack: ReferencePath = field(default_factory=ReferencePath)
+    related_property: ReferencePath = field(default_factory=ReferencePath)
+
+    required_fields: ClassVar[tuple[str, ...]] = ("related_property",)
+
+    @override
+    def serialize_body(self, package: Package) -> bytes:
+        return (
+            super().serialize_body(package)
+            + self.modifier_stack.serialize(package)
+            + self.related_property.serialize(package)
+        )
+
+
+@dataclass
+class UByteAttributePropertyPayload(UNumericAttributePropertyPayload, UBytePropertyPayload):
+    """Byte property followed by its attribute links."""
+
+
+@dataclass
 class UNamePropertyPayload(UPropertyPayload):
     """UnrealScript name."""
 
@@ -99,17 +167,6 @@ class UNamePropertyPayload(UPropertyPayload):
 @dataclass
 class UStrPropertyPayload(UPropertyPayload):
     """UnrealScript string."""
-
-
-@dataclass
-class UBytePropertyPayload(UPropertyPayload):
-    """Byte or enum property."""
-
-    enum: ReferencePath = field(default_factory=ReferencePath)
-
-    @override
-    def serialize_body(self, package: Package) -> bytes:
-        return super().serialize_body(package) + self.enum.serialize(package)
 
 
 @dataclass

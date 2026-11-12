@@ -53,6 +53,7 @@ class ClassModifierName(KeywordEnum):
     # Persistence and configuration
     TRANSIENT = "transient"
     NO_TRANSIENT = "notransient"
+    NON_TRANSIENT = "nontransient"
     CONFIG = "config"
     PER_OBJECT_CONFIG = "perobjectconfig"
     PER_OBJECT_LOCALIZED = "perobjectlocalized"
@@ -81,6 +82,7 @@ class VariableModifier(KeywordEnum):
 
     # Implementation
     NATIVE = "native"
+    ATTRIBUTE = "attribute"
     CONST = "const"
     INIT = "init"
 

@@ -33,7 +33,11 @@ from willow_package_builder.compiler.syntax.expressions import (
     StringExpression,
     UnaryExpression,
 )
-from willow_package_builder.compiler.syntax.modifiers import FunctionModifier, ParameterModifier
+from willow_package_builder.compiler.syntax.modifiers import (
+    FunctionModifier,
+    ParameterModifier,
+    VariableModifier,
+)
 from willow_package_builder.compiler.syntax.statements import (
     AssignmentStatement,
     BreakStatement,
@@ -108,7 +112,10 @@ class FunctionEmitter:
 
         reference = self.variable_reference(expression.name)
 
-        if symbol.category is VariableCategory.INSTANCE:
+        if VariableModifier.ATTRIBUTE in symbol.declaration.modifiers:
+            script += self._opcodes.ATTRIBUTE_VARIABLE
+            script += BytecodeReference(reference)
+        elif symbol.category is VariableCategory.INSTANCE:
             script.add_instance_variable(reference)
         elif ParameterModifier.OUT in symbol.declaration.modifiers:
             script += self._opcodes.OUT_VARIABLE
@@ -314,7 +321,11 @@ class FunctionEmitter:
             if not array_operand and resolved.category is TypeCategory.BOOL:
                 script += self._opcodes.BOOL_VARIABLE
 
-            script.add_instance_variable(reference)
+            if VariableModifier.ATTRIBUTE in declaration.modifiers:
+                script += self._opcodes.ATTRIBUTE_VARIABLE
+                script += BytecodeReference(reference)
+            else:
+                script.add_instance_variable(reference)
 
         return script
 
@@ -435,7 +446,9 @@ class FunctionEmitter:
             return self.builder.package.lookup_object_by_path(reference).reference()
 
         resolved = self.resolver.resolve_declared_type(declaration.type_ref, owner_class)
-        property_class = self.builder.context.references.property_class(resolved)
+        property_class = self.builder.context.references.property_class(
+            resolved, attribute=VariableModifier.ATTRIBUTE in declaration.modifiers
+        )
         class_package, class_name = property_class.path.split()
         if class_package is None:
             msg = f"Expected fully qualified class, got {property_class.path}"
@@ -457,10 +470,31 @@ class FunctionEmitter:
 
         return self.property_reference(symbol.owner_class, declaration)
 
-    def _emit_assignment_statement(
-        self, statement: AssignmentStatement, *, modifying: bool = False
-    ) -> Bytecode:
+    def _is_attribute_target(self, expression: Expression) -> bool:
+        match expression:
+            case IdentifierExpression():
+                declaration = self.resolver.scope.resolve_variable(expression.name).declaration
+
+            case MemberExpression():
+                if self.resolver.resolve_builtin_member(expression) is not None:
+                    return False
+
+                declaration = self.resolver.resolve_member(expression).declaration
+
+            case _:
+                return False
+
+        return VariableModifier.ATTRIBUTE in declaration.modifiers
+
+    def _emit_assignment_statement(self, statement: AssignmentStatement) -> Bytecode:
         script = Bytecode()
+
+        if self._is_attribute_target(statement.target):
+            script += self._opcodes.LET_ATTRIBUTE
+            script += self.emit_expression(statement.target, modifying=True)
+            script += self.emit_expression(statement.value)
+            return script
+
         target_type = self.resolver.type_of(statement.target)
 
         match target_type.category:

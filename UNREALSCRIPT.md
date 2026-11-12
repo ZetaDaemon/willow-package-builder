@@ -25,8 +25,8 @@ The availability of a bytecode opcode or payload class also does not imply that 
 | Qualified class names and inherited member lookup | Implemented |
 | `within` class constraints | Implemented |
 | Class default objects | Implemented |
-| `abstract`, `editinlinenew`, `perobjectlocalized` class modifiers | Implemented |
-| Other class modifiers, including configuration-related modifiers | Not yet implemented for compiled classes |
+| Class modifiers | See below |
+| `implements(...)` for existing interfaces | Implemented with method signature checks |
 | New root classes without a superclass | Not yet implemented |
 | Compiling interfaces | Not yet implemented; declaration is retained for reference and export is omitted with a warning |
 | Native class implementation | Not compiled; native declarations belong in reference packages |
@@ -34,6 +34,26 @@ The availability of a bytecode opcode or payload class also does not imply that 
 | Replication blocks | Not yet implemented |
 
 An abstract class may be emitted, but bodyless scripted functions are not yet implemented. Marking a class abstract does not bypass that limitation.
+
+### Class modifiers
+
+- Construction and placement include `abstract`, `editinlinenew`,
+  `noteditinlinenew`, `placeable`, and `notplaceable`.
+- Persistence and configuration include `transient`, `nontransient`
+  (`notransient` is also accepted), `config(Name)`, `config(inherit)`,
+  `perobjectconfig`, and `perobjectlocalized`. A child without an explicit
+  config name inherits its parent's name.
+- Editor metadata includes `classgroup`, `hidecategories`, `showcategories`,
+  `collapsecategories`, `dontcollapsecategories`, `autoexpandcategories`,
+  `autocollapsecategories`, `dontautocollapsecategories`, `dontsortcategories`,
+  and `forcescriptorder(true|false)`.
+- `noexport` emits the C++ header export flag. The class still has a UPK export.
+
+`implements(...)` supports imported interfaces. The compiler checks the
+required methods and rejects redeclaring an interface already listed by a
+superclass. Local interface exports and calls through interface-typed
+expressions remain unsupported. `nativereplication` and `defaulttoinstanced`
+are also unsupported.
 
 ## Properties, enums, and structs
 
@@ -50,26 +70,39 @@ Native structs can be described by reference declarations and used by value cons
 
 ### Variable modifiers
 
-Currently implemented for compiled fields:
+WPB accepts these modifiers on compiled fields:
 
-```text
-const
-editconst
-init
-noexport
-duplicatetransient
-privatewrite
-protectedwrite
-public
-private
-protected
-interp
-editinline
-export
-instanced
-```
+- Access and initialization include `const`, `init`, `public`, `private`,
+  `protected`, `privatewrite`, and `protectedwrite`.
+- Persistence and configuration include `transient`, `duplicatetransient`,
+  `config`, `globalconfig`, and `localized`. Classes with config fields need
+  an explicit or inherited config name.
+- Editor and export flags include `editconst`, `editinline`, `export`, `noexport`,
+  `instanced`, `editoronly`, `noclear`, `noimport`, `serializetext`,
+  `databinding`, `editfixedsize`, `edithide`, `edittextbox`, `nontransactional`,
+  `interp`, `input`, and `deprecated`.
 
-Other recognized modifier names are not necessarily implemented by the property builder.
+These flags are emitted as metadata. Editor behavior and config or localization
+file loading have not been verified in game. `editoronly` emits the flag and
+does not perform a separate stripping pass. `repnotify`, `repretry`,
+`crosslevelactive`, and `crosslevelpassive` are unsupported. Compiling a
+`native` field raises an error.
+
+#### Gearbox attributes
+
+Use `var attribute float Value;` for a scalar class field. `byte` and `int`
+are also supported. WPB generates the effective field, a linked
+`ValueBaseValue`, and a `ValueModifierStack`. Reference packages must provide
+the `Core.AttributeModifier` declaration.
+
+Plain assignment updates the base value and recalculates the effective value
+with the active modifiers. In BL2, native `+=` left the base unchanged.
+`defaultproperties` initializes both the base and effective values. A YAML
+instance override sets the base value. In BL2, the effective field retained
+the class default until an attribute operation triggered recalculation.
+
+In BL2, a packaged `AttributeDefinition` using an
+`ObjectPropertyAttributeValueResolver` can target the custom field.
 
 ### Arrays
 

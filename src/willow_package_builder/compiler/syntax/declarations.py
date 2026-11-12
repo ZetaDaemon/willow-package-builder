@@ -2,11 +2,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from willow_package_builder.compiler.syntax.keyword import Keyword, KeywordEnum
+from willow_package_builder.compiler.syntax.modifiers import ClassModifierName
 from willow_package_builder.upackage import FName, ReferencePath
 
 if TYPE_CHECKING:
     from willow_package_builder.compiler.syntax.modifiers import (
-        ClassModifierName,
         ParameterModifier,
         StructModifier,
         VariableModifier,

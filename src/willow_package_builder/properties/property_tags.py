@@ -12,3 +12,6 @@ class PropertyTag(StrEnum):
     ARRAY = "ArrayProperty"
     STRUCT = "StructProperty"
     DELEGATE = "DelegateProperty"
+    INT_ATTRIBUTE = "IntAttributeProperty"
+    FLOAT_ATTRIBUTE = "FloatAttributeProperty"
+    BYTE_ATTRIBUTE = "ByteAttributeProperty"

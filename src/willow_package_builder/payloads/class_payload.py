@@ -5,7 +5,6 @@ from enum import IntFlag
 from typing import ClassVar, override
 
 from willow_package_builder.bytecode import Bytecode
-from willow_package_builder.games import get_game
 from willow_package_builder.upackage import (
     NONE_NAME,
     FName,
@@ -27,22 +26,40 @@ class StateFlags(IntFlag):
 class ClassFlags(IntFlag):
     """ClassFlags."""
 
-    NONE                 = 0x0
+    NONE                  = 0x0
 
-    ABSTRACT             = 0x1
-    COMPILED             = 0x2
-    CONFIG               = 0x4
-    TRANSIENT            = 0x8
-    PARSED               = 0x10
-    NATIVE               = 0x80
-    NO_EXPORT            = 0x100
-    PLACEABLE            = 0x200
-    PER_OBJECT_CONFIG    = 0x400
-    NATIVE_REPLICATION   = 0x800
-    EDIT_INLINE_NEW      = 0x1000
-    COLLAPSE_CATEGORIES  = 0x2000
-    HAS_INSTANCED_PROPS  = 0x200000
-    PER_OBJECT_LOCALIZED = 0x40000000
+    ABSTRACT              = 0x1
+    COMPILED              = 0x2
+    CONFIG                = 0x4
+    TRANSIENT             = 0x8
+    PARSED                = 0x10
+    LOCALIZED             = 0x20
+    SAFE_REPLACE          = 0x40
+    NATIVE                = 0x80
+    NO_EXPORT             = 0x100
+    PLACEABLE             = 0x200
+    PER_OBJECT_CONFIG     = 0x400
+    NATIVE_REPLICATION    = 0x800
+    EDIT_INLINE_NEW       = 0x1000
+    COLLAPSE_CATEGORIES   = 0x2000
+    INTERFACE             = 0x4000
+    IS_U_PROPERTY         = 0x8000
+    IS_U_OBJECT_PROPERTY  = 0x10000
+    IS_U_BOOL_PROPERTY    = 0x20000
+    IS_U_STATE            = 0x40000
+    IS_U_FUNCTION         = 0x80000
+    IS_U_STRUCT_PROPERTY  = 0x100000
+    HAS_INSTANCED_PROPS   = 0x200000
+    NEEDS_DEF_PROPS       = 0x400000
+    HAS_COMPONENTS        = 0x800000
+    HIDDEN                = 0x1000000
+    DEPRECATED            = 0x2000000
+    HIDE_DROP_DOWN        = 0x4000000
+    EXPORTED              = 0x8000000
+    INTRINSIC             = 0x10000000
+    NATIVE_ONLY           = 0x20000000
+    PER_OBJECT_LOCALIZED  = 0x40000000
+    HAS_CROSS_LEVEL_REFS  = 0x80000000
 
 
 
@@ -50,25 +67,36 @@ class ClassFlags(IntFlag):
 class FunctionFlags(IntFlag):
     """FunctionFlags."""
 
-    NONE = 0x0
+    NONE                = 0x0
 
-    FINAL = 0x1
-    DEFINED = 0x2
-    ITERATOR = 0x4
-    LATENT = 0x8
-    SINGULAR = 0x20
-    NET = 0x40
-    NET_RELIABLE = 0x80
-    SIMULATED = 0x100
-    EXEC = 0x200
-    NATIVE = 0x400
-    STATIC = 0x2000
-    PUBLIC = 0x20000
-    PRIVATE = 0x40000
-    PROTECTED = 0x80000
-    NET_SERVER = 0x200000
-    HAS_OUT_PARAMS = 0x400000
-    NET_CLIENT = 0x1000000
+    FINAL               = 0x1
+    DEFINED             = 0x2
+    ITERATOR            = 0x4
+    LATENT              = 0x8
+    PRE_OPERATOR        = 0x10
+    SINGULAR            = 0x20
+    NET                 = 0x40
+    NET_RELIABLE        = 0x80
+    SIMULATED           = 0x100
+    EXEC                = 0x200
+    NATIVE              = 0x400
+    EVENT               = 0x800
+    OPERATOR            = 0x1000
+    STATIC              = 0x2000
+    HAS_OPTIONAL_PARAMS = 0x4000
+    CONST               = 0x8000
+    PUBLIC              = 0x20000
+    PRIVATE             = 0x40000
+    PROTECTED           = 0x80000
+    DELEGATE            = 0x100000
+    NET_SERVER          = 0x200000
+    HAS_OUT_PARAMS      = 0x400000
+    HAS_DEFAULTS        = 0x800000
+    NET_CLIENT          = 0x1000000
+    DLL_IMPORT          = 0x2000000
+    K2_CALL             = 0x4000000
+    K2_OVERRIDE         = 0x8000000
+    K2_PURE             = 0x10000000
 
 
 # fmt: on
@@ -196,6 +224,7 @@ class UClassPayload(UStatePayload):
     default_object: ReferencePath = field(default_factory=ReferencePath)
 
     component_defaults: dict[FName, ReferencePath] = field(default_factory=dict, init=False)
+    interfaces: dict[ReferencePath, ReferencePath] = field(default_factory=dict, init=False)
     dont_sort_categories: list[FName] = field(default_factory=list, init=False)
     hide_categories: list[FName] = field(default_factory=list, init=False)
     auto_expand_categories: list[FName] = field(default_factory=list, init=False)
@@ -222,13 +251,18 @@ class UClassPayload(UStatePayload):
             for name, obj in self.component_defaults.items()
         )
 
+        interfaces = struct.pack("<i", len(self.interfaces)) + b"".join(
+            interface.serialize(package) + pointer_property.serialize(package)
+            for interface, pointer_property in self.interfaces.items()
+        )
+
         return (
             super().serialize_body(package)
             + struct.pack("<I", int(self.class_flags))
             + self.within.serialize(package)
             + self.config_name.serialize(package)
             + component_defaults
-            + struct.pack("<i", 0)  # No implemented interfaces.
+            + interfaces
             + serialize_names(self.dont_sort_categories)
             + serialize_names(self.hide_categories)
             + serialize_names(self.auto_expand_categories)

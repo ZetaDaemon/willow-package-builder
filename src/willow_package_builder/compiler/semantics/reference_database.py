@@ -27,7 +27,12 @@ from willow_package_builder.upackage import (
     ReferencePath,
 )
 
-from .intrinsics import INTRINSICS, PROPERTY_CLASS_PATHS, IntrinsicDefinition
+from .intrinsics import (
+    ATTRIBUTE_PROPERTY_CLASS_PATHS,
+    INTRINSICS,
+    PROPERTY_CLASS_PATHS,
+    IntrinsicDefinition,
+)
 from .types import ResolvedType, TypeCategory
 
 if TYPE_CHECKING:
@@ -519,11 +524,15 @@ class ReferenceDatabase:
         msg = f"Unknown class: {path}"
         raise CompilationError(msg)
 
-    def property_class(self, resolved: ResolvedType) -> IntrinsicDefinition:
-        path = PROPERTY_CLASS_PATHS.get(resolved.category)
+    def property_class(
+        self, resolved: ResolvedType, *, attribute: bool = False
+    ) -> IntrinsicDefinition:
+        paths = ATTRIBUTE_PROPERTY_CLASS_PATHS if attribute else PROPERTY_CLASS_PATHS
+        path = paths.get(resolved.category)
 
         if path is None:
-            msg = f"Type {resolved} cannot be represented as a property"
+            kind = "attribute property" if attribute else "property"
+            msg = f"Type {resolved} cannot be represented as a {kind}"
             raise CompilationError(msg)
 
         return self.intrinsics[path]

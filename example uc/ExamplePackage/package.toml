@@ -1,2 +1,2 @@
 name = "ExamplePackage"
-references = ["../Engine"]
+references = ["../Core"]

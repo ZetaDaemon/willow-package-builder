@@ -2,6 +2,9 @@ from dataclasses import dataclass, field
 
 from willow_package_builder.upackage import (
     CLASS_CLASS_NAME,
+    CORE_BYTE_ATTRIBUTE_PROPERTY_CLASS_PATH,
+    CORE_FLOAT_ATTRIBUTE_PROPERTY_CLASS_PATH,
+    CORE_INT_ATTRIBUTE_PROPERTY_CLASS_PATH,
     CORE_PACKAGE_NAME,
     FName,
     ReferencePath,
@@ -45,6 +48,9 @@ _INTRINSIC_PARENTS: dict[ReferencePath, ReferencePath] = {
         "Core.StructProperty": "Core.Property",
         "Core.DelegateProperty": "Core.Property",
         "Engine.StaticMesh": "Core.Object",
+        "Core.IntAttributeProperty": "Core.IntProperty",
+        "Core.FloatAttributeProperty": "Core.FloatProperty",
+        "Core.ByteAttributeProperty": "Core.ByteProperty",
     }.items()
 }
 
@@ -68,4 +74,11 @@ PROPERTY_CLASS_PATHS: dict[TypeCategory, ReferencePath] = {
 
 INTRINSICS: dict[ReferencePath, IntrinsicDefinition] = {
     path: IntrinsicDefinition(path, parent) for path, parent in _INTRINSIC_PARENTS.items()
+}
+
+
+ATTRIBUTE_PROPERTY_CLASS_PATHS = {
+    TypeCategory.INT: CORE_INT_ATTRIBUTE_PROPERTY_CLASS_PATH,
+    TypeCategory.FLOAT: CORE_FLOAT_ATTRIBUTE_PROPERTY_CLASS_PATH,
+    TypeCategory.BYTE: CORE_BYTE_ATTRIBUTE_PROPERTY_CLASS_PATH,
 }

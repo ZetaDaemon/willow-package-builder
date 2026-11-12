@@ -2,27 +2,35 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from willow_package_builder.builder.build_component import BuildComponent
+from willow_package_builder.compiler.semantics.intrinsics import ATTRIBUTE_PROPERTY_CLASS_PATHS
+from willow_package_builder.compiler.semantics.reference_database import ARRAY_TYPE
 from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.declarations import TypeReference, VariableDeclaration
 from willow_package_builder.compiler.syntax.lexer import TokenCategory
 from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.package_config import collect_visible_packages
+from willow_package_builder.payloads.class_payload import UClassPayload
 from willow_package_builder.payloads.property_payloads import (
     PropertyFlags,
     UArrayPropertyPayload,
     UBoolPropertyPayload,
+    UByteAttributePropertyPayload,
     UBytePropertyPayload,
     UClassPropertyPayload,
     UFloatPropertyPayload,
     UIntPropertyPayload,
     UNamePropertyPayload,
+    UNumericAttributePropertyPayload,
     UObjectPropertyPayload,
     UPropertyPayload,
     UStrPropertyPayload,
     UStructPropertyPayload,
 )
 from willow_package_builder.upackage import (
+    ATTRIBUTE_BASE_VALUE_SUFFIX,
+    ATTRIBUTE_MODIFIER_STACK_SUFFIX,
+    CORE_ATTRIBUTE_MODIFIER_CLASS_PATH,
     CORE_CLASS_PATH,
     NONE_NAME,
     FName,
@@ -34,12 +42,18 @@ from willow_package_builder.upackage import (
 if TYPE_CHECKING:
     from willow_package_builder.builder.references import PackageReferences
 
+
+ATTRIBUTE_MODIFIER_STACK_TYPE = TypeReference(
+    ARRAY_TYPE, (TypeReference(CORE_ATTRIBUTE_MODIFIER_CLASS_PATH),)
+)
+
 VARIABLE_MODIFIER_FLAGS: dict[VariableModifier, PropertyFlags] = {
     VariableModifier.CONST: PropertyFlags.CONST,
     VariableModifier.EDIT_CONST: PropertyFlags.EDIT_CONST,
     VariableModifier.INIT: PropertyFlags.ALWAYS_INIT,
     VariableModifier.NO_EXPORT: PropertyFlags.NO_EXPORT,
     VariableModifier.DUPLICATE_TRANSIENT: PropertyFlags.DUPLICATE_TRANSIENT,
+    VariableModifier.TRANSIENT: PropertyFlags.TRANSIENT,
     VariableModifier.PRIVATE_WRITE: PropertyFlags.PRIVATE_WRITE,
     VariableModifier.PROTECTED_WRITE: PropertyFlags.PROTECTED_WRITE,
     VariableModifier.PUBLIC: PropertyFlags.NONE,
@@ -47,8 +61,23 @@ VARIABLE_MODIFIER_FLAGS: dict[VariableModifier, PropertyFlags] = {
     VariableModifier.PROTECTED: PropertyFlags.NONE,
     VariableModifier.INTERP: PropertyFlags.INTERP | PropertyFlags.EDIT,
     VariableModifier.EDIT_INLINE: PropertyFlags.EDIT_INLINE,
+    VariableModifier.SERIALIZE_TEXT: PropertyFlags.SERIALIZE_TEXT,
+    VariableModifier.NO_CLEAR: PropertyFlags.NO_CLEAR,
     VariableModifier.EXPORT: PropertyFlags.EXPORT_OBJECT,
     VariableModifier.INSTANCED: (PropertyFlags.EDIT_INLINE | PropertyFlags.EXPORT_OBJECT),
+    VariableModifier.INPUT: PropertyFlags.INPUT,
+    VariableModifier.EDIT_FIXED_SIZE: PropertyFlags.EDIT_FIXED_SIZE,
+    VariableModifier.NO_IMPORT: PropertyFlags.NO_IMPORT,
+    VariableModifier.DATA_BINDING: PropertyFlags.DATA_BINDING,
+    VariableModifier.NON_TRANSACTIONAL: PropertyFlags.NON_TRANSACTIONAL,
+    VariableModifier.EDIT_HIDE: PropertyFlags.EDIT_HIDE,
+    VariableModifier.EDIT_TEXT_BOX: PropertyFlags.EDIT_TEXT_BOX,
+    VariableModifier.CONFIG: PropertyFlags.CONFIG,
+    VariableModifier.GLOBAL_CONFIG: PropertyFlags.CONFIG | PropertyFlags.GLOBAL_CONFIG,
+    VariableModifier.LOCALIZED: PropertyFlags.LOCALIZED,
+    VariableModifier.ATTRIBUTE: PropertyFlags.ATTRIBUTE_VALUE | PropertyFlags.TRANSIENT,
+    VariableModifier.DEPRECATED: PropertyFlags.DEPRECATED,
+    VariableModifier.EDITOR_ONLY: PropertyFlags.EDITOR_ONLY,
 }
 
 SUPPORTED_VARIABLE_MODIFIERS = frozenset(VARIABLE_MODIFIER_FLAGS)
@@ -58,6 +87,8 @@ ARRAY_INNER_FLAGS = (
     | PropertyFlags.ALWAYS_INIT
     | PropertyFlags.EDIT_CONST
     | PropertyFlags.EDIT_INLINE
+    | PropertyFlags.EDITOR_ONLY
+    | PropertyFlags.CROSS_LEVEL
 )
 
 
@@ -113,6 +144,11 @@ class PropertyBuilder(BuildComponent):
         array_dimension: int = 1,
     ) -> UObject:
         path = owner.reference() + name
+
+        if VariableModifier.ATTRIBUTE in type_ref.modifiers:
+            msg = f"Attribute modifier must be on a class field: {path}"
+            raise CompilationError(msg)
+
         flags |= self.variable_modifier_flags(type_ref.modifiers, path)
         resolved = self.context.references.resolve_type(
             type_ref,
@@ -201,11 +237,23 @@ class PropertyBuilder(BuildComponent):
         ):
             flags |= PropertyFlags.NEED_CTOR_LINK
 
+        if flags & (PropertyFlags.ATTRIBUTE_VALUE | PropertyFlags.ATTRIBUTE_BASE_VALUE):
+            property_class_path = ATTRIBUTE_PROPERTY_CLASS_PATHS.get(resolved.category)
+            if property_class_path is None or array_dimension != 1:
+                msg = f"Attribute property {path} currently requires a scalar byte, int, or float"
+                raise NotImplementedError(msg)
+
+            payload = (
+                UByteAttributePropertyPayload()
+                if resolved.category is TypeCategory.BYTE
+                else UNumericAttributePropertyPayload()
+            )
+        else:
+            property_class_path = self.context.references.property_class(resolved).path
+
         payload.array_dimension = array_dimension
         payload.property_flags = flags
-
-        definition = self.context.references.property_class(resolved)
-        property_class = self.references.class_object_reference(definition.path)
+        property_class = self.references.class_object_reference(property_class_path)
 
         obj = UObject(
             name, ObjectFlags.PUBLIC_EXPORT, owner.reference(), property_class, payload=payload
@@ -228,6 +276,12 @@ class PropertyBuilder(BuildComponent):
     ) -> UObject:
         path = owner.reference() + declaration.name
         flags = self.variable_modifier_flags(declaration.modifiers, path)
+
+        if VariableModifier.ATTRIBUTE in declaration.modifiers and not isinstance(
+            owner.payload, UClassPayload
+        ):
+            msg = f"Attribute modifier must be on a class field: {path}"
+            raise CompilationError(msg)
 
         category = NONE_NAME
         tokens = declaration.category_tokens
@@ -263,7 +317,54 @@ class PropertyBuilder(BuildComponent):
         obj.payload.category = category
         obj.payload.next_field = next_field
         obj.payload.array_enum = self.array_enum_reference(declaration, class_path)
+
+        if isinstance(obj.payload, UNumericAttributePropertyPayload):
+            self._link_attribute_fields(owner, declaration, class_path, obj, obj.payload)
+
         return obj
+
+    def _link_attribute_fields(
+        self,
+        owner: UObject,
+        declaration: VariableDeclaration,
+        class_path: ReferencePath,
+        effective: UObject,
+        payload: UNumericAttributePropertyPayload,
+    ) -> None:
+        """Create the base value and modifier stack and link all three fields."""
+        base = self.create_property(
+            owner,
+            FName(f"{declaration.name}{ATTRIBUTE_BASE_VALUE_SUFFIX}"),
+            declaration.type_ref,
+            class_path,
+            PropertyFlags.CONST | PropertyFlags.ATTRIBUTE_BASE_VALUE,
+        )
+        stack = self.create_property(
+            owner,
+            FName(f"{declaration.name}{ATTRIBUTE_MODIFIER_STACK_SUFFIX}"),
+            ATTRIBUTE_MODIFIER_STACK_TYPE,
+            class_path,
+            PropertyFlags.CONST | PropertyFlags.TRANSIENT,
+        )
+        base_payload = base.payload
+        stack_payload = stack.payload
+
+        if not isinstance(base_payload, UNumericAttributePropertyPayload) or not isinstance(
+            stack_payload, UArrayPropertyPayload
+        ):
+            msg = f"Invalid attribute companion payloads for {effective.reference()}"
+            raise TypeError(msg)
+
+        base.flags &= ~ObjectFlags.PUBLIC
+        stack.flags &= ~ObjectFlags.PUBLIC
+
+        stack_payload.next_field = payload.next_field
+        base_payload.next_field = stack.reference()
+        payload.next_field = base.reference()
+
+        payload.modifier_stack = stack.reference()
+        payload.related_property = base.reference()
+        base_payload.related_property = effective.reference()
 
     def variable_modifier_flags(
         self, modifiers: tuple[VariableModifier, ...], path: ReferencePath
@@ -288,13 +389,13 @@ class PropertyBuilder(BuildComponent):
                 raise CompilationError(msg)
 
         for modifier in modifiers:
-            if modifier not in SUPPORTED_VARIABLE_MODIFIERS:
-                msg = f"Variable modifier {modifier.value!r} is not implemented"
-                raise NotImplementedError(msg)
-
             if modifier is VariableModifier.NATIVE:
                 msg = f"Cannot compile native property {path}"
                 raise CompilationError(msg)
+
+            if modifier not in SUPPORTED_VARIABLE_MODIFIERS:
+                msg = f"Variable modifier {modifier.value!r} is not implemented"
+                raise NotImplementedError(msg)
 
             flags |= VARIABLE_MODIFIER_FLAGS[modifier]
 
