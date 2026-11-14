@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from time import perf_counter
 from typing import TYPE_CHECKING, cast
 
 from willow_package_builder.builder.build_component import BuildComponent
@@ -13,7 +14,7 @@ from willow_package_builder.compiler.syntax.declarations import (
 )
 from willow_package_builder.compiler.syntax.modifiers import FunctionModifier, ParameterModifier
 from willow_package_builder.compiler.syntax.parser import FunctionParser
-from willow_package_builder.logging import CompilationError, declaration_context
+from willow_package_builder.logging import CompilationError, declaration_context, info
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import (
     FunctionFlags,
@@ -464,7 +465,13 @@ class FunctionBuilder(BuildComponent):
         return prepared
 
     def build_class_functions(self) -> None:
+        info("Preparing function bodies")
+        start = perf_counter()
         prepared = self._prepare_all_functions()
+        info(f"Prepared {len(prepared)} functions in {perf_counter() - start:.3f}s")
+
+        info(f"Validating and emitting bytecode for {len(prepared)} functions")
+        start = perf_counter()
 
         for function in prepared:
             scope = function.resolver.scope
@@ -476,3 +483,5 @@ class FunctionBuilder(BuildComponent):
                     function.resolver, self.references, function.function_object
                 )
                 payload.script = emitter.emit_body(function)
+
+        info(f"Validated and emitted bytecode in {perf_counter() - start:.3f}s")

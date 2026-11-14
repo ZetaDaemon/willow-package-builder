@@ -295,6 +295,7 @@ class DefaultsBuilder(BuildComponent):
         is_struct: bool,
     ) -> dict[FName, Value]:
         result: dict[FName, Value] = {}
+        existing = existing.copy()
         visible = collect_visible_packages(values.config, self.context.packages)
         reference_only = values.config.directory not in self.context.build_packages
 
@@ -332,7 +333,8 @@ class DefaultsBuilder(BuildComponent):
                 continue
 
             result.update(built)
-            existing = merge_values(existing, built)
+            previous = {name: existing[name] for name in built if name in existing}
+            existing.update(merge_values(previous, built))
 
         return result
 

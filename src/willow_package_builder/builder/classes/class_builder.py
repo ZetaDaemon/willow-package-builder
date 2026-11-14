@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from time import perf_counter
 from typing import TYPE_CHECKING
 
 from willow_package_builder.builder.build_component import BuildComponent
@@ -104,8 +105,17 @@ class ClassBuilder(BuildComponent):
 
     def reserve_classes(self) -> None:
         package_name = self.config.name
+        class_order = self.context.class_order
 
-        for class_path in self.context.class_order:
+        info(f"Selecting classes for {package_name} from {len(class_order)} declarations")
+        start = perf_counter()
+        package_classes = [path for path in class_order if path.get_outer().name == package_name]
+        info(
+            f"Selected {len(package_classes)} classes for {package_name} "
+            f"in {perf_counter() - start:.3f}s"
+        )
+
+        for class_path in package_classes:
             if class_path.get_outer().name != package_name:
                 continue
 

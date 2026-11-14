@@ -1,4 +1,14 @@
 # Chagelog
+## [0.5.1]
+### Performance
+- Index structs and enums by name to speed up type resolution during builds.
+- Reduce copying when applying property defaults. Together, these changes
+  reduced class-default preparation for VersionZeta from 18.402s to 2.289s.
+
+### Build output
+- Report elapsed time for class defaults, default subobjects, class export
+  preparation, function preparation, and bytecode emission.
+
 ## [0.5]
 ### Additions
 - Compile scripted events, inherited function overrides, and states with

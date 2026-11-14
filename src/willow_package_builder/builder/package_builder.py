@@ -1,13 +1,15 @@
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import TYPE_CHECKING
 
+from willow_package_builder.builder.classes.default_objects import DefaultObjectTemplate
 from willow_package_builder.builder.defaults_builder import DefaultsBuilder
 from willow_package_builder.builder.value_builder import ValueBuilder
 from willow_package_builder.games import get_game
 from willow_package_builder.logging import info
 from willow_package_builder.objects.definitions import ObjectDefinition, ObjectDefinitionFlag
 from willow_package_builder.package_config import collect_visible_packages
-from willow_package_builder.upackage import Package, ReferencePath
+from willow_package_builder.upackage import FName, Package, ReferencePath
 
 from .build_state import PackageBuildState
 from .classes.class_builder import ClassBuilder
@@ -112,8 +114,14 @@ class PackageBuilder:
 
     def compile_classes(self) -> None:
         """Create class definitions, CDOs, fields, and function bytecode exports."""
-        info("Compiling function bodies")
+        info("Preparing class exports")
+        start = perf_counter()
+
+        reservation_start = perf_counter()
         self.class_builder.reserve_classes()
+        info(f"Reserved class exports in {perf_counter() - reservation_start:.3f}s")
+
+        info("Linking class exports")
         self.class_builder.link_classes()
         self.struct_builder.reserve_structs()
         self.struct_builder.link_structs()
@@ -122,17 +130,26 @@ class PackageBuilder:
         self.struct_builder.build_struct_fields()
         self.class_builder.build_class_fields()
         self.class_builder.build_class_states()
+
+        info(f"Prepared class exports in {perf_counter() - start:.3f}s")
         self.functions.build_class_functions()
 
     def build(self) -> Package:
         info(f"Preparing package {self.config.name}")
         class_names = tuple(self.context.loader.class_names(self.config.name))
-        self.prepare_class_defaults(class_names)
 
+        info("Building class defaults")
+        start = perf_counter()
+        self.prepare_class_defaults(class_names)
+        info(f"Built class defaults in {perf_counter() - start:.3f}s")
+
+        info("Preparing default subobjects")
+        start = perf_counter()
         templates_by_class = {
             class_path: self.defaults.prepare_default_objects(class_path)
             for class_path in class_names
         }
+        info(f"Prepared default subobjects in {perf_counter() - start:.3f}s")
 
         info("Compiling classes")
         self.compile_classes()

@@ -81,6 +81,9 @@ class ReferenceDatabase:
     _parent_cache_packages: tuple[PackageConfig, ...] | None = field(
         default=None, init=False, repr=False
     )
+    _member_types_by_name: dict[FName, list[ResolvedType]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def add_class(self, package_name: FName, declaration: ClassDeclaration) -> None:
         path = ReferencePath(declaration.name, ReferencePath(package_name))
@@ -97,6 +100,16 @@ class ReferenceDatabase:
         self.classes[path] = declaration
         self._parent_cache = None
         self._parent_cache_packages = None
+
+        for struct in declaration.structs:
+            self._member_types_by_name.setdefault(struct.name, []).append(
+                ResolvedType(TypeCategory.STRUCT, path + struct.name)
+            )
+
+        for enum in declaration.enums:
+            self._member_types_by_name.setdefault(enum.name, []).append(
+                ResolvedType(TypeCategory.ENUM, path + enum.name)
+            )
 
         for operator in declaration.operators:
             operator_key = operator.name
@@ -797,37 +810,21 @@ class ReferenceDatabase:
     def find_visible_member_type(
         self, name: FName, current_package: FName, visible_packages: set[FName]
     ) -> ResolvedType | None:
-        allowed = {current_package, *visible_packages}
-        candidates: list[ResolvedType] = []
+        local: list[ResolvedType] = []
+        visible: list[ResolvedType] = []
 
-        for owner, declaration in self.classes.items():
-            if owner.base not in allowed:
+        for candidate in self._member_types_by_name.get(name, ()):
+            path = candidate.declaration_path
+            if path is None:
                 continue
 
-            candidates.extend(
-                [
-                    ResolvedType(TypeCategory.STRUCT, owner + struct.name)
-                    for struct in declaration.structs
-                    if struct.name == name
-                ]
-            )
+            package = path.base
+            if package == current_package:
+                local.append(candidate)
+            elif package in visible_packages:
+                visible.append(candidate)
 
-            candidates.extend(
-                [
-                    ResolvedType(TypeCategory.ENUM, owner + enum.name)
-                    for enum in declaration.enums
-                    if enum.name == name
-                ]
-            )
-
-        local = [
-            candidate
-            for candidate in candidates
-            if candidate.declaration_path is not None
-            and candidate.declaration_path.base == current_package
-        ]
-        candidates = local or candidates
-
+        candidates = local or visible
         if len(candidates) > 1:
             paths = ", ".join(str(candidate.declaration_path) for candidate in candidates)
             msg = f"Ambiguous struct or enum {name!r}: {paths}"
