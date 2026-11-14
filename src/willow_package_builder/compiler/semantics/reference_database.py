@@ -14,6 +14,8 @@ from willow_package_builder.compiler.syntax.declarations import (
     VariableDeclaration,
 )
 from willow_package_builder.compiler.syntax.lexer import TokenCategory
+from willow_package_builder.compiler.syntax.modifiers import ParameterModifier
+from willow_package_builder.compiler.syntax.punctuation import Operator
 from willow_package_builder.logging import (
     CompilationError,
     UnknownPropertyError,
@@ -39,7 +41,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
 
     from willow_package_builder.compiler.syntax.keyword import Keyword
-    from willow_package_builder.compiler.syntax.punctuation import Operator
 
 DELEGATE_TYPE = ReferencePath("delegate")
 MAP_TYPE = ReferencePath("map")
@@ -63,6 +64,7 @@ PRIMITIVE_TYPES = {
 class ResolvedMember[T]:
     owner_class: ReferencePath
     declaration: T
+    state_name: FName | None = None
 
 
 @dataclass
@@ -470,6 +472,49 @@ class ReferenceDatabase:
 
         return None
 
+    @staticmethod
+    def binary_operand_cost(
+        name: Operator | Keyword, actual: ResolvedType, expected: ResolvedType, *, out: bool = False
+    ) -> int | None:
+        if actual == expected:
+            return 0
+
+        if out:
+            return None
+
+        match actual.category, expected.category:
+            case TypeCategory.BYTE, TypeCategory.INT:
+                return 1
+            case TypeCategory.BYTE | TypeCategory.INT, TypeCategory.FLOAT:
+                return 2
+            case (TypeCategory.FLOAT, TypeCategory.INT | TypeCategory.BYTE) | (
+                TypeCategory.INT,
+                TypeCategory.BYTE,
+            ):
+                return 3
+
+            case _:
+                pass
+
+        if name in (
+            Operator.EQUAL_EQUAL,
+            Operator.NOT_EQUAL,
+            Operator.LESS,
+            Operator.LESS_EQUAL,
+            Operator.GREATER,
+            Operator.GREATER_EQUAL,
+        ) and (actual.category, expected.category) == (TypeCategory.ENUM, TypeCategory.INT):
+            return 1
+
+        if (
+            name in (Operator.EQUAL_EQUAL, Operator.NOT_EQUAL)
+            and actual.category is TypeCategory.OBJECT
+            and expected == ResolvedType(TypeCategory.OBJECT, CORE_OBJECT_PATH)
+        ):
+            return 1
+
+        return None
+
     def resolve_binary_operator(
         self,
         name: Operator | Keyword,
@@ -481,7 +526,7 @@ class ReferenceDatabase:
     ) -> ResolvedMember[OperatorDeclaration]:
 
         for owner, declaration in self.iter_class_hierarchy(current_class, parents):
-            matches: list[OperatorDeclaration] = []
+            matches: list[tuple[int, OperatorDeclaration]] = []
 
             for operator in declaration.operators:
                 if operator.op_category is not OperatorCategory.BINARY or operator.name != name:
@@ -491,22 +536,36 @@ class ReferenceDatabase:
                     operator.parameters[0].type_ref, owner, visible_packages, parents
                 )
 
-                if left_type != left:
+                left_cost = self.binary_operand_cost(
+                    name,
+                    left,
+                    left_type,
+                    out=ParameterModifier.OUT in operator.parameters[0].modifiers,
+                )
+                if left_cost is None:
                     continue
 
                 right_type = self.resolve_type(
                     operator.parameters[1].type_ref, owner, visible_packages, parents
                 )
-
-                if right_type == right:
-                    matches.append(operator)
-
-            if len(matches) > 1:
-                msg = f"Multiple exact overloads of {name!r} on {owner} for {left!r} and {right!r}"
-                raise CompilationError(msg)
+                right_cost = self.binary_operand_cost(
+                    name,
+                    right,
+                    right_type,
+                    out=ParameterModifier.OUT in operator.parameters[1].modifiers,
+                )
+                if right_cost is not None:
+                    matches.append((max(left_cost, right_cost), operator))
 
             if matches:
-                return ResolvedMember(owner, matches[0])
+                fewest_conversions = min(cost for cost, _ in matches)
+                best = [operator for cost, operator in matches if cost == fewest_conversions]
+
+                if len(best) > 1:
+                    msg = f"Ambiguous overload of {name!r} on {owner} for {left!r} and {right!r}"
+                    raise CompilationError(msg)
+
+                return ResolvedMember(owner, best[0])
 
         msg = f"No exact overload of {name!r} for {left!r} and {right!r}"
         raise CompilationError(msg)
@@ -546,32 +605,36 @@ class ReferenceDatabase:
         visible_packages: set[FName],
         parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedMember[OperatorDeclaration]:
-
         for owner, declaration in self.iter_class_hierarchy(current_class, parents):
-            matches: list[OperatorDeclaration] = []
+            matches: list[tuple[int, OperatorDeclaration]] = []
 
             for operator in declaration.operators:
                 if operator.op_category is not category or operator.name != name:
                     continue
 
+                parameter = operator.parameters[0]
                 parameter_type = self.resolve_type(
-                    operator.parameters[0].type_ref, owner, visible_packages, parents
+                    parameter.type_ref, owner, visible_packages, parents
                 )
-
-                if parameter_type == operand:
-                    matches.append(operator)
-
-            if len(matches) > 1:
-                msg = (
-                    f"Multiple exact {category.value} overloads "
-                    f"of {name!r} on {owner} for {operand!r}"
+                cost = self.binary_operand_cost(
+                    name, operand, parameter_type, out=ParameterModifier.OUT in parameter.modifiers
                 )
-                raise CompilationError(msg)
+                if cost is not None:
+                    matches.append((cost, operator))
 
             if matches:
-                return ResolvedMember(owner, matches[0])
+                best_cost = min(cost for cost, _ in matches)
+                best = [operator for cost, operator in matches if cost == best_cost]
+                if len(best) > 1:
+                    msg = (
+                        f"Ambiguous {category.value} overload of {name!r} "
+                        f"on {owner} for {operand!r}"
+                    )
+                    raise CompilationError(msg)
 
-        msg = f"No exact {category.value} overload of {name!r} for {operand!r}"
+                return ResolvedMember(owner, best[0])
+
+        msg = f"No matching {category.value} overload of {name!r} for {operand!r}"
         raise CompilationError(msg)
 
     def resolve_struct_variable(

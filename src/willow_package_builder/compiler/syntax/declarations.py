@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from willow_package_builder.compiler.syntax.keyword import Keyword, KeywordEnum
-from willow_package_builder.compiler.syntax.modifiers import ClassModifierName
+from willow_package_builder.compiler.syntax.modifiers import ClassModifierName, StateModifier
 from willow_package_builder.upackage import FName, ReferencePath
 
 if TYPE_CHECKING:
@@ -151,6 +151,19 @@ class DefaultObjectDeclaration:
 
 
 @dataclass
+class StateDeclaration:
+    name: FName
+    parent: FName | None
+    modifiers: tuple[StateModifier, ...]
+    editable: bool
+    functions: list[FunctionDeclaration] = field(default_factory=list)
+    ignores: list[FName] = field(default_factory=list)
+    code_tokens: tuple[Token, ...] = ()
+
+    location: SourceLocation | None = field(default=None, compare=False, repr=False, kw_only=True)
+
+
+@dataclass
 class ClassDeclaration:
     name: FName
     parent: ReferencePath | None
@@ -165,10 +178,12 @@ class ClassDeclaration:
     variables: list[VariableDeclaration] = field(default_factory=list)
     functions: list[FunctionDeclaration] = field(default_factory=list)
     operators: list[OperatorDeclaration] = field(default_factory=list)
+    states: list[StateDeclaration] = field(default_factory=list)
 
     default_tokens: tuple[Token, ...] | None = None
     parsed_defaults: dict[FName, object] = field(default_factory=dict)
     default_objects: list[DefaultObjectDeclaration] = field(default_factory=list)
+    reference_default_objects: list[DefaultObjectDeclaration] = field(default_factory=list)
     defaults: dict[FName, Value] = field(default_factory=dict)
 
     default_parse_error: str | None = None

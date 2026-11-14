@@ -1,9 +1,12 @@
-from typing import final
+from typing import TYPE_CHECKING, ClassVar, final
 
 from willow_package_builder.opcode import Opcode
-from willow_package_builder.upackage import PackageFlags
+from willow_package_builder.upackage import FName, PackageFlags
 
-from .game import Game, TargetGame
+from .game import WILLOW_PROBE_BITS, Game, TargetGame
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 @final
@@ -135,6 +138,50 @@ class Bl2Opcode:
 
 
 @final
+class Bl2PrimitiveCastSelectors:
+    """BL2 primitive cast selectors."""
+
+    INTERFACE_TO_OBJECT = Opcode(0x36)
+    INTERFACE_TO_STRING = Opcode(0x37)
+    INTERFACE_TO_BOOL = Opcode(0x38)
+    ROTATOR_TO_VECTOR = Opcode(0x39)
+    BYTE_TO_INT = Opcode(0x3A)
+    BYTE_TO_BOOL = Opcode(0x3B)
+    BYTE_TO_FLOAT = Opcode(0x3C)
+    INT_TO_BYTE = Opcode(0x3D)
+    INT_TO_BOOL = Opcode(0x3E)
+    INT_TO_FLOAT = Opcode(0x3F)
+    BOOL_TO_BYTE = Opcode(0x40)
+    BOOL_TO_INT = Opcode(0x41)
+    BOOL_TO_FLOAT = Opcode(0x42)
+    FLOAT_TO_BYTE = Opcode(0x43)
+    FLOAT_TO_INT = Opcode(0x44)
+    FLOAT_TO_BOOL = Opcode(0x45)
+    OBJECT_TO_INTERFACE = Opcode(0x46)
+    OBJECT_TO_BOOL = Opcode(0x47)
+    NAME_TO_BOOL = Opcode(0x48)
+    STRING_TO_BYTE = Opcode(0x49)
+    STRING_TO_INT = Opcode(0x4A)
+    STRING_TO_BOOL = Opcode(0x4B)
+    STRING_TO_FLOAT = Opcode(0x4C)
+    STRING_TO_VECTOR = Opcode(0x4D)
+    STRING_TO_ROTATOR = Opcode(0x4E)
+    VECTOR_TO_BOOL = Opcode(0x4F)
+    VECTOR_TO_ROTATOR = Opcode(0x50)
+    ROTATOR_TO_BOOL = Opcode(0x51)
+    BYTE_TO_STRING = Opcode(0x52)
+    INT_TO_STRING = Opcode(0x53)
+    BOOL_TO_STRING = Opcode(0x54)
+    FLOAT_TO_STRING = Opcode(0x55)
+    OBJECT_TO_STRING = Opcode(0x56)
+    NAME_TO_STRING = Opcode(0x57)
+    VECTOR_TO_STRING = Opcode(0x58)
+    ROTATOR_TO_STRING = Opcode(0x59)
+    DELEGATE_TO_STRING = Opcode(0x5A)
+    STRING_TO_NAME = Opcode(0x60)
+
+
+@final
 class Bl2(Game):
     TARGET = TargetGame.BL2
 
@@ -144,6 +191,8 @@ class Bl2(Game):
     COOKER_VERSION = 134
 
     OPCODES = Bl2Opcode()
+    PRIMITIVE_CAST_SELECTORS = Bl2PrimitiveCastSelectors()
+    PROBE_BITS: ClassVar[Mapping[FName, int]] = WILLOW_PROBE_BITS
 
     PACKAGE_FLAGS = (
         PackageFlags.ALLOW_DOWNLOAD

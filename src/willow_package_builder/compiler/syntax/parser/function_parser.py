@@ -1,21 +1,31 @@
 from typing import TYPE_CHECKING, Self
 
-from willow_package_builder.compiler.syntax.declarations import OperatorCategory
+from willow_package_builder.compiler.semantics.reference_database import PRIMITIVE_TYPES
+from willow_package_builder.compiler.semantics.types import TypeCategory
+from willow_package_builder.compiler.syntax.declarations import OperatorCategory, TypeReference
 from willow_package_builder.compiler.syntax.expressions import (
     ArrayCountExpression,
     BinaryExpression,
     BooleanExpression,
     CallExpression,
+    CastExpression,
+    ClassLiteralExpression,
+    ConditionalExpression,
     Expression,
     FloatExpression,
+    GlobalExpression,
     IdentifierExpression,
     IndexExpression,
     IntegerExpression,
     MemberExpression,
     NameExpression,
+    NewExpression,
+    NoneExpression,
     SelfExpression,
     StringExpression,
+    SuperExpression,
     UnaryExpression,
+    VectorExpression,
 )
 from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
@@ -27,8 +37,8 @@ from willow_package_builder.compiler.syntax.statements import (
     DoUntilStatement,
     EmptyStatement,
     ExpressionStatement,
-    ForStatement,
     ForeachStatement,
+    ForStatement,
     FunctionBody,
     IfStatement,
     ReturnStatement,
@@ -36,7 +46,7 @@ from willow_package_builder.compiler.syntax.statements import (
     WhileStatement,
 )
 from willow_package_builder.logging import CompilationError, SourceLocation
-from willow_package_builder.upackage import FName
+from willow_package_builder.upackage import FName, ReferencePath
 
 from .declaration_syntax_parser import DeclarationSyntaxParser
 
@@ -85,6 +95,22 @@ class FunctionParser(DeclarationSyntaxParser):
 
         return cls.from_tokens(function.body_tokens, expression_resolver)
 
+    def _parse_vector_component(self) -> float:
+        negative = self.match(Operator.SUBTRACT)
+        token = self.peek()
+
+        match token.category:
+            case TokenCategory.INTEGER:
+                value = float(int(token))
+            case TokenCategory.FLOAT:
+                value = float(token)
+            case _:
+                msg = f"Expected a numeric vector component at {token.line}:{token.column}"
+                raise CompilationError(msg)
+
+        self.advance()
+        return -value if negative else value
+
     def parse_primary_expression(self) -> Expression:
         token = self.peek()
 
@@ -97,6 +123,38 @@ class FunctionParser(DeclarationSyntaxParser):
                 self.advance()
 
                 match token:
+                    case ScriptKeywords.VECT if self.match(Punctuation.LEFT_PAREN):
+                        x = self._parse_vector_component()
+                        self.expect(Punctuation.COMMA)
+                        y = self._parse_vector_component()
+                        self.expect(Punctuation.COMMA)
+                        z = self._parse_vector_component()
+                        self.expect(Punctuation.RIGHT_PAREN)
+                        return VectorExpression(x, y, z)
+
+                    case ScriptKeywords.GLOBAL:
+                        self.expect(Punctuation.DOT)
+                        return GlobalExpression(self.expect_identifier().fname)
+
+                    case ScriptKeywords.SUPER:
+                        ancestor = None
+                        if self.match(Punctuation.LEFT_PAREN):
+                            ancestor = self.expect_identifier().fname
+                            self.expect(Punctuation.RIGHT_PAREN)
+
+                        self.expect(Punctuation.DOT)
+                        name = self.expect_identifier().fname
+                        return SuperExpression(ancestor, name)
+
+                    case ScriptKeywords.CLASS if self.peek().category is TokenCategory.NAME:
+                        literal = self.advance()
+                        path = str(literal)[1:-1]
+                        if not path or "\\" in path or any(not part for part in path.split(".")):
+                            msg = f"Invalid class literal at {literal.line}:{literal.column}"
+                            raise CompilationError(msg)
+
+                        return ClassLiteralExpression(ReferencePath(path))
+
                     case ScriptKeywords.TRUE:
                         return BooleanExpression(True)  # noqa: FBT003
 
@@ -106,13 +164,48 @@ class FunctionParser(DeclarationSyntaxParser):
                     case ScriptKeywords.SELF:
                         return SelfExpression()
 
+                    case ScriptKeywords.NONE:
+                        return NoneExpression()
+
                     case ScriptKeywords.ARRAY_COUNT:
                         self.expect(Punctuation.LEFT_PAREN)
                         array = self.parse_expression()
                         self.expect(Punctuation.RIGHT_PAREN)
                         return ArrayCountExpression(array)
 
+                    case ScriptKeywords.NEW:
+                        self.expect(Punctuation.LEFT_PAREN)
+                        outer = self.parse_expression()
+                        self.expect(Punctuation.RIGHT_PAREN)
+
+                        if (
+                            self.peek() != ScriptKeywords.CLASS
+                            or self.peek(1).category is not TokenCategory.NAME
+                        ):
+                            msg = "Expected a class literal after new(Outer)"
+                            raise CompilationError(msg)
+
+                        object_class = self.parse_primary_expression()
+                        if not isinstance(object_class, ClassLiteralExpression):
+                            msg = "Expected a class literal after new(Outer)"
+                            raise CompilationError(msg)
+
+                        return NewExpression(outer, object_class)
+
                     case _:
+                        resolver = self.expression_resolver
+                        if resolver is not None and self.peek() not in (
+                            Punctuation.LEFT_PAREN,
+                            Punctuation.DOT,
+                        ):
+                            constant = resolver.resolve_integer_constant(token.fname)
+                            if constant is not None:
+                                return constant
+
+                            member = resolver.resolve_bare_enum_member(token.fname)
+                            if member is not None:
+                                return member
+
                         return IdentifierExpression(token.fname)
 
             case TokenCategory.FLOAT:
@@ -153,14 +246,29 @@ class FunctionParser(DeclarationSyntaxParser):
         msg = f"Expected expression, got {token} at {token.line}:{token.column}"
         raise CompilationError(msg)
 
-    def parse_expression(self, maximum_precedence: int | None = None) -> Expression:
+    def parse_expression(
+        self, maximum_precedence: int | None = None, *, enum_hint: ReferencePath | None = None
+    ) -> Expression:
         resolver = self.expression_resolver
 
         if resolver is None:
             msg = "Expression parsing requires an expression resolver"
             raise ValueError(msg)
 
-        left = self.parse_unary_expression()
+        member = None
+        if (
+            enum_hint is not None
+            and self.peek().category is TokenCategory.IDENTIFIER
+            and self.peek(1)
+            not in (Punctuation.DOT, Punctuation.LEFT_PAREN, Punctuation.LEFT_BRACKET)
+        ):
+            member = resolver.resolve_enum_member_hint(self.peek().fname, enum_hint)
+
+        if member is None:
+            left = self.parse_unary_expression()
+        else:
+            self.advance()
+            left = member
 
         while True:
             token = self.peek()
@@ -169,7 +277,8 @@ class FunctionParser(DeclarationSyntaxParser):
             if operator is None:
                 break
 
-            precedence = resolver.binary_precedence(operator, resolver.type_of(left))
+            left_type = resolver.type_of(left)
+            precedence = resolver.binary_precedence(operator, left_type)
 
             if precedence is None:
                 break
@@ -178,11 +287,22 @@ class FunctionParser(DeclarationSyntaxParser):
                 break
 
             self.advance()
-            right = self.parse_expression(precedence - 1)
+            right = self.parse_expression(
+                precedence - 1,
+                enum_hint=(
+                    left_type.declaration_path if left_type.category is TypeCategory.ENUM else None
+                ),
+            )
 
             expression = BinaryExpression(left, operator, right)
             resolver.resolve_operator(expression)
             left = expression
+
+        if maximum_precedence is None and self.match(Operator.QUESTION):
+            when_true = self.parse_expression()
+            self.expect(Punctuation.COLON)
+            when_false = self.parse_expression()
+            return ConditionalExpression(left, when_true, when_false)
 
         return left
 
@@ -383,12 +503,31 @@ class FunctionParser(DeclarationSyntaxParser):
         while True:
             if self.match(Punctuation.DOT):
                 name = self.expect_identifier().fname
+
+                if isinstance(expression, IdentifierExpression):
+                    member = resolver.resolve_qualified_enum_member(expression.name, name)
+                    if member is not None:
+                        expression = member
+                        continue
+
                 expression = MemberExpression(expression, name)
                 continue
 
             if self.peek() == Punctuation.LEFT_PAREN:
                 arguments = self.parse_call_arguments()
-                expression = CallExpression(expression, arguments)
+
+                if isinstance(expression, IdentifierExpression) and (
+                    (target := ReferencePath(expression.name)) in PRIMITIVE_TYPES
+                    or resolver.is_object_cast_target(expression.name)
+                ):
+                    if len(arguments) != 1 or (operand := arguments[0]) is None:
+                        msg = f"{target}(...) requires exactly one argument"
+                        raise CompilationError(msg)
+
+                    expression = CastExpression(TypeReference(target), operand)
+
+                else:
+                    expression = CallExpression(expression, arguments)
                 continue
 
             if self.match(Punctuation.LEFT_BRACKET):

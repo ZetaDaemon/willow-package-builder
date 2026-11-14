@@ -450,11 +450,13 @@ class Bytecode:
         self += end
 
     @contextmanager
-    def object_context(self, receiver: Bytecode, result_property: ReferencePath) -> Generator[None]:
+    def object_context(
+        self, receiver: Bytecode, result_property: ReferencePath, *, class_context: bool = False
+    ) -> Generator[None]:
         origin = BytecodeLabel()
         end = BytecodeLabel()
 
-        self += self._opcodes.CONTEXT
+        self += self._opcodes.CLASS_CONTEXT if class_context else self._opcodes.CONTEXT
         self += receiver
         self += BytecodeRelativeJump(origin, end)
         self += BytecodeReference(result_property)

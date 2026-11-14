@@ -18,6 +18,7 @@ from willow_package_builder.compiler.syntax.declarations import (
     OperatorCategory,
     OperatorDeclaration,
     ParameterDeclaration,
+    StateDeclaration,
     StructDeclaration,
     TypeReference,
     VariableDeclaration,
@@ -28,11 +29,16 @@ from willow_package_builder.compiler.syntax.modifiers import (
     ClassModifierName,
     FunctionModifier,
     ParameterModifier,
+    StateModifier,
     StructModifier,
     VariableModifier,
 )
 from willow_package_builder.compiler.syntax.parser import DeclarationParser
-from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
+from willow_package_builder.compiler.syntax.parser.defaults_parser import (
+    ArrayDefaultOperation,
+    ArrayDefaultOperationCategory,
+    ArrayDefaults,
+)
 from willow_package_builder.compiler.syntax.punctuation import Operator
 from willow_package_builder.logging import CompilationError, SourceLocation, info
 from willow_package_builder.properties.values import (
@@ -58,8 +64,8 @@ if TYPE_CHECKING:
     from willow_package_builder.package_config import PackageConfig
 
 
-CLASS_CACHE_SCHEMA_VERSION = 16
-DECLARATION_PARSER_VERSION = 14
+CLASS_CACHE_SCHEMA_VERSION = 19
+DECLARATION_PARSER_VERSION = 18
 
 
 @dataclass
@@ -107,12 +113,14 @@ CACHE_TYPES: dict[str, Callable[..., object]] = {
         SourceLocation,
         FName,
         Name,
-        IndexedArrayDefaults,
+        ArrayDefaults,
         DelegateValue,
         ReferencePath,
         Keyword,
         Path,
         DefaultObjectDeclaration,
+        StateDeclaration,
+        ArrayDefaultOperation,
     )
 }
 CACHE_TYPES["Path"] = lambda args: Path(args)  # noqa: PLW0108  # pyright: ignore[reportUnknownArgumentType, reportUnknownLambdaType]
@@ -129,6 +137,8 @@ CACHE_ENUMS: dict[str, type[Enum]] = {
         VariableModifier,
         StructModifier,
         Operator,
+        StateModifier,
+        ArrayDefaultOperationCategory,
     )
 }
 

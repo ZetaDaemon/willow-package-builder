@@ -1,6 +1,7 @@
 import string
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Self, cast
+from enum import Enum, auto
+from typing import Self, cast
 
 from willow_package_builder.compiler.syntax.declarations import DefaultObjectDeclaration
 from willow_package_builder.compiler.syntax.keyword import KeywordEnum, ScriptKeywords
@@ -8,27 +9,39 @@ from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
 from willow_package_builder.compiler.syntax.parser.token_parser import TokenParser
 from willow_package_builder.compiler.syntax.punctuation import Operator, Punctuation
 from willow_package_builder.logging import CompilationError, SourceLocation
-from willow_package_builder.upackage import ReferencePath
-
-if TYPE_CHECKING:
-    from willow_package_builder.upackage import FName
+from willow_package_builder.upackage import FName, ReferencePath
 
 BYTE_LENGTH = 2
+
+
+class ArrayDefaultOperationCategory(Enum):
+    SET_INDEX = auto()
+    ADD = auto()
+    REMOVE = auto()
+    REMOVE_INDEX = auto()
+    REPLACE = auto()
+    EMPTY = auto()
 
 
 @dataclass
 class DefaultOperation:
     name: FName
     value: object
-    array_index: int | None = None
+
+
+@dataclass
+class ArrayDefaultOperation:
+    category: ArrayDefaultOperationCategory
+    values: tuple[object, ...] = ()
+    index: int | None = None
     location: SourceLocation | None = None
 
 
 @dataclass
-class IndexedArrayDefaults:
+class ArrayDefaults:
     initial: object = None
     has_initial: bool = field(default=False, kw_only=True)
-    updates: list[tuple[int, object]] = field(default_factory=list)
+    updates: list[ArrayDefaultOperation] = field(default_factory=list)
 
 
 class DefaultObjectAttribute(KeywordEnum):
@@ -36,6 +49,14 @@ class DefaultObjectAttribute(KeywordEnum):
 
     CLASS = "class"
     NAME = "name"
+
+
+class DefaultArrayMethod(KeywordEnum):
+    ADD = "add"
+    REMOVE = "remove"
+    REMOVE_INDEX = "removeindex"
+    REPLACE = "replace"
+    EMPTY = "empty"
 
 
 class DefaultsParser(TokenParser):
@@ -64,36 +85,80 @@ class DefaultsParser(TokenParser):
 
     def _apply_operation(self, values: dict[FName, object], operation: DefaultOperation) -> None:
         key = next((name for name in values if name == operation.name), operation.name)
+        previous = values.get(key)
+        update = operation.value
 
-        if operation.array_index is None:
-            values[key] = self._merge_value(values.get(key), operation.value)
+        if not isinstance(update, ArrayDefaultOperation):
+            values[key] = self._merge_value(previous, update)
             return
 
-        previous = values.get(key)
-
-        if isinstance(previous, IndexedArrayDefaults):
-            indexed = previous
+        if isinstance(previous, ArrayDefaults):
+            array = previous
         else:
-            indexed = IndexedArrayDefaults(initial=previous, has_initial=key in values)
+            array = ArrayDefaults(initial=previous, has_initial=key in values)
+            values[key] = array
 
-        indexed.updates.append((operation.array_index, operation.value))
-        values[key] = indexed
+        array.updates.append(update)
 
     def parse_operation(self) -> DefaultOperation:
         token = self.expect_identifier()
         location = SourceLocation(token.line, token.column)
-        array_index = None
 
+        if self.match(Punctuation.DOT):
+            return DefaultOperation(token.fname, self._parse_array_method(location))
+
+        index = None
         if self.match(Punctuation.LEFT_PAREN):
-            array_index = self.parse_integer()
+            index = self.parse_integer()
             self.expect(Punctuation.RIGHT_PAREN)
         elif self.match(Punctuation.LEFT_BRACKET):
-            array_index = self.parse_integer()
+            index = self.parse_integer()
             self.expect(Punctuation.RIGHT_BRACKET)
 
         self.expect(Operator.EQUAL)
+        value = self.parse_value()
 
-        return DefaultOperation(token.fname, self.parse_value(), array_index, location)
+        if index is not None:
+            value = ArrayDefaultOperation(
+                ArrayDefaultOperationCategory.SET_INDEX,
+                values=(value,),
+                index=index,
+                location=location,
+            )
+
+        return DefaultOperation(token.fname, value)
+
+    def _parse_array_method(self, location: SourceLocation) -> ArrayDefaultOperation:
+        token = self.expect_identifier()
+        if token not in DefaultArrayMethod:
+            msg = f"Unknown default array method {token}"
+            raise CompilationError(msg, location)
+
+        method = DefaultArrayMethod(token)
+        category = ArrayDefaultOperationCategory[method.name]
+
+        if method is DefaultArrayMethod.EMPTY:
+            if self.match(Punctuation.LEFT_PAREN):
+                self.expect(Punctuation.RIGHT_PAREN)
+
+            return ArrayDefaultOperation(category, location=location)
+
+        self.expect(Punctuation.LEFT_PAREN)
+
+        if method is DefaultArrayMethod.REMOVE_INDEX:
+            index = self.parse_integer()
+            self.expect(Punctuation.RIGHT_PAREN)
+            return ArrayDefaultOperation(category, index=index, location=location)
+
+        first = self.parse_value()
+        values = (first,)
+
+        if method is DefaultArrayMethod.REPLACE:
+            self.expect(Punctuation.COMMA)
+            values = (first, self.parse_value())
+
+        self.expect(Punctuation.RIGHT_PAREN)
+        return ArrayDefaultOperation(category, values=values, location=location)
 
     def _parse_struct_value(self) -> dict[FName, object]:
         self.expect(Punctuation.LEFT_PAREN)
@@ -202,7 +267,9 @@ class DefaultsParser(TokenParser):
 
         return name
 
-    def parse_object_declaration(self) -> DefaultObjectDeclaration:
+    def parse_object_declaration(
+        self, *, include_properties: bool = True
+    ) -> DefaultObjectDeclaration:
         """Parse a new or inherited subobject and its nested declarations."""
         opening = self.expect(ScriptKeywords.BEGIN)
         self.expect(ScriptKeywords.OBJECT)
@@ -252,12 +319,17 @@ class DefaultsParser(TokenParser):
                 return declaration
 
             if token == ScriptKeywords.BEGIN and self.peek(1) == ScriptKeywords.OBJECT:
-                declaration.children.append(self.parse_object_declaration())
+                declaration.children.append(
+                    self.parse_object_declaration(include_properties=include_properties)
+                )
                 continue
 
-            self._apply_operation(declaration.properties, self.parse_operation())
+            if include_properties:
+                self._apply_operation(declaration.properties, self.parse_operation())
+            else:
+                self.advance()
 
-    def parse_defaults(self, *, skip_object_definitions: bool = False) -> dict[FName, object]:
+    def parse_defaults(self, *, include_object_properties: bool = False) -> dict[FName, object]:
         """Parse property assignments and retain separately declared subobjects."""
         values: dict[FName, object] = {}
 
@@ -266,10 +338,21 @@ class DefaultsParser(TokenParser):
                 continue
 
             if self.peek() == ScriptKeywords.BEGIN and self.peek(1) == ScriptKeywords.OBJECT:
-                if skip_object_definitions:
-                    self.skip_object_definition()
-                else:
-                    self.default_objects.append(self.parse_object_declaration())
+                self.default_objects.append(
+                    self.parse_object_declaration(include_properties=include_object_properties)
+                )
+                continue
+
+            if (
+                not include_object_properties
+                and self.peek().category is TokenCategory.IDENTIFIER
+                and self.peek(1) == Operator.EQUAL
+                and self.peek(2).line > self.peek(1).line
+                and self.peek(2).category is TokenCategory.IDENTIFIER
+                and self.peek(3) == Operator.EQUAL
+            ):
+                self.advance()  # Property name.
+                self.advance()  # Equals sign.
                 continue
 
             self._apply_operation(values, self.parse_operation())
@@ -319,31 +402,6 @@ class DefaultsParser(TokenParser):
             if self.match(Punctuation.RIGHT_PAREN):
                 return elements
             self.expect(Punctuation.COMMA)
-
-    def skip_object_definition(self) -> None:
-        opening = self.peek()
-        self.expect(ScriptKeywords.BEGIN)
-        self.expect(ScriptKeywords.OBJECT)
-        depth = 1
-
-        while depth:
-            token = self.peek()
-
-            if token.category is TokenCategory.EOF:
-                msg = "Unterminated default object definition"
-                raise CompilationError(msg, SourceLocation(opening.line, opening.column))
-
-            if (
-                token.category is TokenCategory.IDENTIFIER
-                and self.peek(1) == ScriptKeywords.OBJECT
-                and token in (ScriptKeywords.BEGIN, ScriptKeywords.END)
-            ):
-                self.advance()
-                self.advance()
-                depth += 1 if token == ScriptKeywords.BEGIN else -1
-                continue
-
-            self.advance()
 
     def parse_string_value(self) -> str:
         token = self.advance()

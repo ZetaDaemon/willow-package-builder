@@ -4,7 +4,11 @@ from typing import TYPE_CHECKING, cast
 
 from willow_package_builder.builder.struct_layout import requires_binary_struct
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
-from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
+from willow_package_builder.compiler.syntax.parser.defaults_parser import (
+    ArrayDefaultOperation,
+    ArrayDefaultOperationCategory,
+    ArrayDefaults,
+)
 from willow_package_builder.logging import (
     CompilationError,
     ValueBuildError,
@@ -294,7 +298,7 @@ class ValueBuilder(BuildComponent):
         resolved_type: ResolvedType,
         existing: Value | None = None,
     ) -> Value:
-        if isinstance(value, IndexedArrayDefaults):
+        if isinstance(value, ArrayDefaults):
             return self._build_indexed_array_value(
                 context, definition, value, resolved_type, existing
             )
@@ -303,7 +307,13 @@ class ValueBuilder(BuildComponent):
             return self.build_value(context, value, resolved_type, existing)
 
         if self.implicit_fixed_index and not isinstance(value, list):
-            indexed = IndexedArrayDefaults(updates=[(0, value)])
+            indexed = ArrayDefaults(
+                updates=[
+                    ArrayDefaultOperation(
+                        ArrayDefaultOperationCategory.SET_INDEX, values=(value,), index=0
+                    )
+                ]
+            )
             return self._build_indexed_array_value(
                 context, definition, indexed, resolved_type, existing
             )
@@ -465,11 +475,84 @@ class ValueBuilder(BuildComponent):
 
         return path
 
+    def _apply_array_default_operation(
+        self,
+        context: str,
+        array: ArrayValue,
+        update: ArrayDefaultOperation,
+        element_type: ResolvedType,
+        *,
+        fixed: bool,
+    ) -> None:
+        category = update.category
+        elements = array.elements
+
+        if update.location is not None:
+            context = f"{context} at {update.location}"
+
+        if fixed and category is not ArrayDefaultOperationCategory.SET_INDEX:
+            msg = f"{context}: {category.name} requires a dynamic array"
+            raise ValueBuildError(msg)
+
+        match category:
+            case ArrayDefaultOperationCategory.SET_INDEX:
+                index = update.index
+                if index is None or index < 0 or (fixed and index >= len(elements)):
+                    msg = f"{context}: Array index {index} out of bounds"
+                    raise ValueBuildError(msg)
+
+                (raw_value,) = update.values
+                while len(elements) <= index:
+                    elements.append(self.struct_builder.initial_value(element_type))
+
+                elements[index] = self.build_value(
+                    f"{context}, element {index}", raw_value, element_type, elements[index]
+                )
+
+            case ArrayDefaultOperationCategory.ADD:
+                (raw_value,) = update.values
+                elements.append(self.build_value(context, raw_value, element_type))
+
+            case ArrayDefaultOperationCategory.REMOVE_INDEX:
+                index = update.index
+                if index is None or not 0 <= index < len(elements):
+                    msg = f"{context}: Array index {index} out of bounds"
+                    raise ValueBuildError(msg)
+
+                del elements[index]
+
+            case ArrayDefaultOperationCategory.REMOVE:
+                (raw_value,) = update.values
+                search = self.build_value(context, raw_value, element_type)
+                elements[:] = [
+                    element
+                    for element in elements
+                    if not self._array_default_values_match(element, search)
+                ]
+
+            case ArrayDefaultOperationCategory.REPLACE:
+                raw_search, raw_replacement = update.values
+                search = self.build_value(context, raw_search, element_type)
+                replacement = self.build_value(context, raw_replacement, element_type)
+                for index, element in enumerate(elements):
+                    if self._array_default_values_match(element, search):
+                        elements[index] = deepcopy(replacement)
+
+            case ArrayDefaultOperationCategory.EMPTY:
+                elements.clear()
+
+    @staticmethod
+    def _array_default_values_match(left: Value, right: Value) -> bool:
+        if isinstance(left, ObjectValue) and isinstance(right, ObjectValue):
+            return left.path == right.path
+
+        return left == right
+
     def _build_indexed_array_value(
         self,
         context: str,
         definition: VariableDeclaration,
-        value: IndexedArrayDefaults,
+        value: ArrayDefaults,
         resolved_type: ResolvedType,
         existing: Value | None,
     ) -> ArrayValue:
@@ -508,18 +591,8 @@ class ValueBuilder(BuildComponent):
             msg = f"{context}: Existing fixed-array length does not match its declaration"
             raise ValueError(msg)
 
-        for index, raw_value in value.updates:
-            element_context = f"{context}, element {index}"
-            if index < 0 or (fixed and index >= definition.array_dimension):
-                msg = f"{element_context}: Array index out of bounds"
-                raise ValueBuildError(msg)
-
-            while len(result.elements) <= index:
-                result.elements.append(self.struct_builder.initial_value(element_type))
-
-            result.elements[index] = self.build_value(
-                element_context, raw_value, element_type, result.elements[index]
-            )
+        for update in value.updates:
+            self._apply_array_default_operation(context, result, update, element_type, fixed=fixed)
 
         return result
 

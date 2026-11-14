@@ -30,7 +30,7 @@ The availability of a bytecode opcode or payload class also does not imply that 
 | New root classes without a superclass | Not yet implemented |
 | Compiling interfaces | Not yet implemented; declaration is retained for reference and export is omitted with a warning |
 | Native class implementation | Not compiled; native declarations belong in reference packages |
-| States and state-specific functions | Not yet implemented |
+| States and state-specific functions | See [States](#states) |
 | Replication blocks | Not yet implemented |
 
 An abstract class may be emitted, but bodyless scripted functions are not yet implemented. Marking a class abstract does not bypass that limitation.
@@ -54,6 +54,22 @@ required methods and rejects redeclaring an interface already listed by a
 superclass. Local interface exports and calls through interface-typed
 expressions remain unsupported. `nativereplication` and `defaulttoinstanced`
 are also unsupported.
+
+## States
+
+Classes can declare `state` and `simulated state` blocks containing scripted
+functions and events. A state with the same name as an ancestor state inherits
+from it automatically. WPB links inherited state-function overrides and emits
+probe masks using the target game's probe table.
+
+An unqualified call in a state function can resolve to a state function.
+`super.Function()` can reach an inherited state implementation.
+`global.Function()` selects the class implementation, and
+`super(ClassName).Function()` selects a class implementation through the
+named ancestor.
+
+Explicit state inheritance (`state A extends B`), `auto` and editable
+states, `ignores`, executable state code, and state labels remain unsupported.
 
 ## Properties, enums, and structs
 
@@ -150,7 +166,7 @@ Delegate variables and qualified comparator expressions are unsupported for
 
 - Delegate signatures may be parsed from reference declarations, but delegate property construction and delegate invocation/assignment are not yet implemented by the custom class compiler.
 - Native `map` type resolution is not yet implemented.
-- Parsing a `const` declaration does not imply general constant-expression evaluation or use of named constants in function expressions.
+- Function expressions can use unqualified class constants initialized with integer literals, including inherited constants. General constant-expression evaluation remains unsupported.
 
 ## Functions
 
@@ -158,13 +174,15 @@ Delegate variables and qualified comparator expressions are unsupported for
 | --- | --- |
 | Scripted `function` declarations with bodies | Implemented |
 | Functions returning no value | Implemented |
-| Return types `int`, `byte`, `bool`, `float`, `string`, `name`, object references, class references, and dynamic arrays | Implemented |
-| Other return types, including structs and enums | Not yet implemented |
+| Return types `int`, `byte`, `bool`, `float`, `string`, `name`, object references, class references, dynamic arrays, and structs | Implemented |
+| Enum returns and other return types | Not yet implemented |
 | Local variables before executable statements | Implemented |
-| `static` and `protected` function modifiers | Implemented |
+| `static`, `protected`, and `simulated` function modifiers | Implemented |
+| `reliable server` | Supported for class-level overrides of existing RPCs. Multiplayer behavior remains untested |
 | Other function modifiers | Not yet implemented for custom function declarations |
-| `event` and `delegate` function declarations | Not yet implemented for compilation |
-| Overriding inherited functions | Not yet implemented |
+| Scripted `event` declarations | Implemented |
+| Compiling `delegate` declarations | Not yet implemented |
+| Overriding inherited functions | Supported for compatible signatures, including scripted overrides of eligible native parent functions |
 | Bodyless scripted functions | Not yet implemented |
 | Calling existing native functions | Implemented within the supported argument/type handling |
 | Compiling native implementations | Outside compiler scope |
@@ -177,7 +195,8 @@ Implemented call handling includes:
 
 - Calls to scripted functions and existing native functions.
 - Direct calls by name and calls through object expressions.
-- Static functions invoked through the supported direct-call path.
+- Static calls through the supported direct-call path and through `class'SomeClass'.static.Function()`.
+- Inherited and class-scoped calls using `super.Function()`, `super(ClassName).Function()`, or `global.Function()`.
 - `out` parameters, with writable argument validation.
 - `optional` parameters, omitted arguments, and explicit parameter defaults.
 - `const` parameters.
@@ -189,10 +208,14 @@ Current limitations include:
 - Compiling parameter modifiers other than `out`, `const`, and `optional`.
 - Const-out argument handling.
 - Some optional-out combinations.
-- Default argument expressions requiring a conversion to another type.
-- Delegate calls, `super`/`global` call syntax, class-literal static-call syntax, and other special call forms.
+- Delegate calls.
+- New RPC declarations and replication blocks.
 
-Calls remain subject to the validator's type compatibility and visibility rules. WPB does not provide the full engine compiler's implicit conversion system.
+Calls remain subject to type compatibility and visibility rules. Ordinary
+by-value parameters accept supported numeric conversions and compatible object
+and bounded class references. A `coerce` parameter on an existing declaration
+can also use the supported primitive conversions involving `bool`. `out`
+parameters require writable arguments of the matching type.
 
 ## Function expressions
 
@@ -209,16 +232,28 @@ Implemented expression forms:
 - Native binary, prefix, and postfix operators, where the referenced overload and operand types are supported.
 - Native short-circuit operators using their declared skip behavior.
 - Name literals such as `'FieldName'`.
+- Bare and enum-qualified enum members and supported enum comparisons.
+- Class literals, such as `class'SomeClass'`, and `None` in supported
+  object-reference expressions.
+- Conditional expressions (`Condition ? WhenTrue : WhenFalse`).
+- Explicit casts among `byte`, `int`, `float`, and `bool`, and object
+  casts such as `SomeClass(Expression)`.
+- Vector literals with numeric components, such as `vect(0, 0, 1)`.
+- Object construction with `new(Outer) class'SomeClass'`.
 
 Operator overloads and precedence come from the parsed reference declarations. An operator symbol's presence in the lexer does not guarantee that its source expression can be resolved and emitted.
+
+Implicit conversions among `byte`, `int`, and `float` apply to supported
+assignments, returns, by-value call arguments, parameter defaults, and native
+operator overloads. Compatible object references can be upcast without an
+explicit cast.
 
 Not yet implemented:
 
 - Calling scripted operator implementations.
 - Precedence that cannot be determined from the left operand type alone.
-- General casts and conversions.
-- Object/class literals and `None` expressions inside function bodies.
-- Vector/rotator literals, conditional (`?:`) expressions, and object construction with `new`.
+- Casts outside the supported primitive and object conversions.
+- Rotator literals and other forms of `new`.
 - String escape decoding in function-body literals.
 
 Some discarded string expressions also have emission restrictions. Returning a string or assigning a supported string expression is separate from evaluating and discarding an arbitrary string result.
@@ -257,7 +292,9 @@ Implemented default handling includes:
 - Scalar values, enum identifiers, names, object/class reference strings, and null references.
 - Arrays and nested struct mappings.
 - Indexed default assignments such as `Values(2)=10` or `Values[2]=10`.
-- Inherited defaults and partial struct overrides.
+- Inherited defaults and partial struct overrides, with unset struct fields
+  initialized from the struct defaults.
+- Ordered dynamic-array updates in defaults blocks. See the table below.
 - Annotated references such as `Object'Package.Parent:Child'`.
 - Dot/colon object path handling in the supported reference forms.
 - `Begin Object ... End Object` construction in compiled class defaults, including
@@ -267,9 +304,32 @@ Implemented default handling includes:
 - Per-instance copies for instanced default subobjects in packaged objects.
   An explicit YAML property override, including null, takes precedence.
 
+| Dynamic-array default operation | Effect |
+| --- | --- |
+| `Items.Add(Value)` | Append one value |
+| `Items.Remove(Value)` | Remove all matching values |
+| `Items.RemoveIndex(Index)` | Remove one element at a zero-based index |
+| `Items.Replace(Old, New)` | Replace all matching values |
+| `Items.Empty` or `Items.Empty()` | Clear the array |
+
+Array updates start from the inherited value unless the block assigns a
+replacement array. Indexed assignments and method updates run in source
+order. Fixed-size arrays support indexed assignments. These default
+operations have their own syntax and semantics. For example,
+`Items.Add(2)` in defaults appends the value `2`, while the function-body
+method grows the array by two elements.
+
+For compiled subclasses of reference classes, WPB can export inherited stock
+component templates discovered from the reference defaults. Supported
+component fields and arrays are remapped to the generated CDO's templates.
+This requires reference declarations that identify the original templates
+and their references.
+
 Limits:
 
-- Reference-only object-definition blocks are skipped rather than constructed.
+- Reference-only object definitions supply metadata for inherited component
+  templates. WPB does not compile reference packages or recreate arbitrary
+  reference-only default subobjects from their bodies.
 - Defaults are parsed as literal/reference data, not arbitrary executable expressions.
 - General escape decoding for quoted name/reference literals is not yet implemented.
 - Default strings support the parser's implemented escapes, rather than every possible UnrealScript escape sequence.
@@ -278,7 +338,7 @@ Limits:
 
 Reference dumps can contain malformed or unavailable defaults. WPB has warning-based fixups for some reference-only cases. This does not make the same invalid input acceptable in a compiled custom class.
 
-Cross-package default-object inheritance and changing an inherited template’s class remain unsupported.
+General cross-package default-subobject inheritance and changing an inherited template’s class remain unsupported.
 
 ## Preprocessing
 

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import struct
 from typing import TYPE_CHECKING
 
 from willow_package_builder.bytecode import (
@@ -14,24 +15,37 @@ from willow_package_builder.compiler.semantics.expression_resolver import (
     BuiltinMember,
 )
 from willow_package_builder.compiler.semantics.function_body_validator import FunctionBodyValidator
+from willow_package_builder.compiler.semantics.reference_database import PRIMITIVE_TYPES
 from willow_package_builder.compiler.semantics.scope import VariableCategory
 from willow_package_builder.compiler.semantics.types import TypeCategory
-from willow_package_builder.compiler.syntax.declarations import VariableDeclaration
+from willow_package_builder.compiler.syntax.declarations import (
+    ParameterDeclaration,
+    VariableDeclaration,
+)
 from willow_package_builder.compiler.syntax.expressions import (
     ArrayCountExpression,
     BinaryExpression,
     BooleanExpression,
     CallExpression,
+    CastExpression,
+    ClassLiteralExpression,
+    ConditionalExpression,
+    EnumMemberExpression,
     Expression,
     FloatExpression,
+    GlobalExpression,
     IdentifierExpression,
     IndexExpression,
     IntegerExpression,
     MemberExpression,
     NameExpression,
+    NewExpression,
+    NoneExpression,
     SelfExpression,
     StringExpression,
+    SuperExpression,
     UnaryExpression,
+    VectorExpression,
 )
 from willow_package_builder.compiler.syntax.modifiers import (
     FunctionModifier,
@@ -63,8 +77,6 @@ if TYPE_CHECKING:
     from willow_package_builder.opcode import Opcodes
 
     from .emission_context import EmissionContext
-
-BYTE_TO_INT_CAST = 0x3A
 
 
 @dataclass
@@ -125,6 +137,26 @@ class FunctionEmitter:
 
         return script
 
+    def _emit_operator_operand(
+        self, expression: Expression, parameter: ParameterDeclaration, owner: ReferencePath
+    ) -> Bytecode:
+        actual = self.resolver.type_of(expression)
+        expected = self.resolver.resolve_declared_type(parameter.type_ref, owner)
+        script = Bytecode()
+
+        if actual.category is TypeCategory.ENUM and expected.category is TypeCategory.INT:
+            selector = get_game().PRIMITIVE_CAST_SELECTORS.BYTE_TO_INT
+        else:
+            selector = self.resolver.primitive_cast_selector(actual, expected)
+        if selector is not None:
+            script += self._opcodes.PRIMITIVE_CAST
+            script += selector
+
+        script += self.emit_expression(
+            expression, modifying=ParameterModifier.OUT in parameter.modifiers
+        )
+        return script
+
     def _emit_binary_expression(self, expression: BinaryExpression) -> Bytecode:
         member = self.resolver.resolve_operator(expression)
         operator = member.declaration
@@ -147,8 +179,8 @@ class FunctionEmitter:
         script = Bytecode()
 
         with script.native_function(operator.native_index):
-            script += self.emit_expression(
-                expression.left, modifying=ParameterModifier.OUT in operator.parameters[0].modifiers
+            script += self._emit_operator_operand(
+                expression.left, operator.parameters[0], member.owner_class
             )
 
             if skip_end is not None:
@@ -158,9 +190,8 @@ class FunctionEmitter:
                 script += BytecodeRelativeJump(origin, skip_end)
                 script += origin
 
-            script += self.emit_expression(
-                expression.right,
-                modifying=ParameterModifier.OUT in operator.parameters[1].modifiers,
+            script += self._emit_operator_operand(
+                expression.right, operator.parameters[1], member.owner_class
             )
 
         # Must follow END_FUNCTION_PARAMS emitted by the context manager.
@@ -182,9 +213,8 @@ class FunctionEmitter:
             raise NotImplementedError(msg)
 
         with script.native_function(operator.native_index):
-            script += self.emit_expression(
-                expression.operand,
-                modifying=ParameterModifier.OUT in operator.parameters[0].modifiers,
+            script += self._emit_operator_operand(
+                expression.operand, operator.parameters[0], member.owner_class
             )
 
         return script
@@ -200,29 +230,35 @@ class FunctionEmitter:
                 for argument, parameter in zip(
                     expression.arguments, function.parameters, strict=False
                 ):
-                    script += self._emit_call_argument(
-                        argument, modifying=ParameterModifier.OUT in parameter.modifiers
-                    )
+                    script += self._emit_call_argument(argument, parameter, member.owner_class)
 
             return script
 
         if (
-            FunctionModifier.FINAL in function.modifiers
+            isinstance(expression.callee, SuperExpression)
+            or FunctionModifier.FINAL in function.modifiers
             or FunctionModifier.STATIC in function.modifiers
         ):
-            path = member.owner_class + function.name
+            owner = member.owner_class
+            if member.state_name is not None:
+                owner += member.state_name
+
+            path = owner + function.name
             reference = self.builder.function_reference(path)
 
             script += self._opcodes.FINAL_FUNCTION
             script += BytecodeReference(reference)
+
+        elif isinstance(expression.callee, GlobalExpression):
+            script += self._opcodes.GLOBAL_FUNCTION
+            script += BytecodeName(function.name)
+
         else:
             script += self._opcodes.VIRTUAL_FUNCTION
             script += BytecodeName(function.name)
 
         for argument, parameter in zip(expression.arguments, function.parameters, strict=False):
-            script += self._emit_call_argument(
-                argument, modifying=ParameterModifier.OUT in parameter.modifiers
-            )
+            script += self._emit_call_argument(argument, parameter, member.owner_class)
 
         for _ in function.parameters[len(expression.arguments) :]:
             script += self._opcodes.EMPTY_PARAMETER_VALUE
@@ -244,10 +280,18 @@ class FunctionEmitter:
 
         result_property = self._call_return_property(expression)
 
-        receiver = self.emit_expression(expression.callee.object)
-        script = Bytecode()
+        static_class = self.resolver.resolve_static_call_class(expression)
+        if static_class is None:
+            receiver = self.emit_expression(expression.callee.object)
+        else:
+            receiver = Bytecode()
+            receiver += self._opcodes.OBJECT_CONST
+            receiver += BytecodeReference(self.builder.class_object_reference(static_class))
 
-        with script.object_context(receiver, result_property):
+        script = Bytecode()
+        with script.object_context(
+            receiver, result_property, class_context=static_class is not None
+        ):
             script += call
 
         return script
@@ -370,7 +414,7 @@ class FunctionEmitter:
             index_type = self.resolver.type_of(expression.index)
             if index_type.category in (TypeCategory.BYTE, TypeCategory.ENUM):
                 script += self._opcodes.PRIMITIVE_CAST
-                script += bytes((BYTE_TO_INT_CAST,))
+                script += get_game().PRIMITIVE_CAST_SELECTORS.BYTE_TO_INT
             script += self.emit_expression(expression.index)
         else:
             script.add_constant(enum_index)
@@ -395,6 +439,26 @@ class FunctionEmitter:
             case UnaryExpression():
                 return self._emit_unary_expression(expression)
 
+            case CastExpression():
+                if expression.target.name not in PRIMITIVE_TYPES:
+                    target = self.resolver.resolve_object_cast(expression)
+                    script = Bytecode()
+                    script += self._opcodes.DYNAMIC_CAST
+                    script += BytecodeReference(self.builder.class_object_reference(target))
+                    script += self.emit_expression(expression.operand)
+                    return script
+
+                _, selector = self.resolver.resolve_primitive_cast(expression)
+                operand = self.emit_expression(expression.operand)
+                if selector is None:
+                    return operand
+
+                script = Bytecode()
+                script += self._opcodes.PRIMITIVE_CAST
+                script += selector
+                script += operand
+                return script
+
             case CallExpression():
                 return self._emit_call_expression(expression)
 
@@ -404,6 +468,28 @@ class FunctionEmitter:
             case SelfExpression():
                 script = Bytecode()
                 script += self._opcodes.SELF
+                return script
+
+            case NoneExpression():
+                script = Bytecode()
+                script += self._opcodes.NO_OBJECT
+                return script
+
+            case ClassLiteralExpression(path=path):
+                target = self.resolver.resolve_class_literal(path)
+                script = Bytecode()
+                script += self._opcodes.OBJECT_CONST
+                script += BytecodeReference(self.builder.class_object_reference(target))
+                return script
+
+            case NewExpression():
+                script = Bytecode()
+                script += self._opcodes.NEW
+                script += self.emit_expression(expression.outer)
+                script += self._opcodes.NOTHING  # Name.
+                script += self._opcodes.NOTHING  # Flags.
+                script += self.emit_expression(expression.object_class)
+                script += self._opcodes.NOTHING  # Template.
                 return script
 
             case IndexExpression():
@@ -418,6 +504,37 @@ class FunctionEmitter:
             case ArrayCountExpression():
                 script = Bytecode()
                 script.add_constant(self.resolver.resolve_array_count(expression))
+                return script
+
+            case EnumMemberExpression(ordinal=ordinal):
+                script = Bytecode()
+                script += self._opcodes.BYTE_CONST
+                script += bytes((ordinal,))
+                return script
+
+            case ConditionalExpression():
+                true_start = BytecodeLabel()
+                true_end = BytecodeLabel()
+                false_start = BytecodeLabel()
+                false_end = BytecodeLabel()
+
+                script = Bytecode()
+                script += self._opcodes.CONDITIONAL
+                script += self.emit_expression(expression.condition)
+                script += BytecodeRelativeJump(true_start, true_end)
+                script += true_start
+                script += self.emit_expression(expression.when_true)
+                script += true_end
+                script += BytecodeRelativeJump(false_start, false_end)
+                script += false_start
+                script += self.emit_expression(expression.when_false)
+                script += false_end
+                return script
+
+            case VectorExpression(x=x, y=y, z=z):
+                script = Bytecode()
+                script += self._opcodes.VECTOR_CONST
+                script += struct.pack("<fff", x, y, z)
                 return script
 
             case _:
@@ -489,10 +606,18 @@ class FunctionEmitter:
     def _emit_assignment_statement(self, statement: AssignmentStatement) -> Bytecode:
         script = Bytecode()
 
+        value = Bytecode()
+        selector = self.resolver.assignment_cast_selector(statement)
+        if selector is not None:
+            value += self._opcodes.PRIMITIVE_CAST
+            value += selector
+
+        value += self.emit_expression(statement.value)
+
         if self._is_attribute_target(statement.target):
             script += self._opcodes.LET_ATTRIBUTE
             script += self.emit_expression(statement.target, modifying=True)
-            script += self.emit_expression(statement.value)
+            script += value
             return script
 
         target_type = self.resolver.type_of(statement.target)
@@ -508,7 +633,7 @@ class FunctionEmitter:
 
                 script += self._opcodes.LET
                 script += self._emit_array_operand(statement.target)
-                script += self.emit_expression(statement.value)
+                script += value
                 return script
 
             case TypeCategory.BOOL:
@@ -518,7 +643,7 @@ class FunctionEmitter:
                 script += self._opcodes.LET
 
         script += self.emit_expression(statement.target, modifying=True)
-        script += self.emit_expression(statement.value)
+        script += value
         return script
 
     def _emit_return_statement(self, statement: ReturnStatement) -> Bytecode:
@@ -531,6 +656,16 @@ class FunctionEmitter:
         if statement.value is None:
             script += self._opcodes.NOTHING
         else:
+            scope = self.resolver.scope
+            return_type = self.resolver.resolve_declared_type(
+                scope.function.return_type, scope.class_path
+            )
+            value_type = self.resolver.type_of(statement.value)
+            selector = self.resolver.resolve_return_cast(statement.value, value_type, return_type)
+            if selector is not None:
+                script += self._opcodes.PRIMITIVE_CAST
+                script += selector
+
             script += self.emit_expression(statement.value)
 
         return script
@@ -753,7 +888,9 @@ class FunctionEmitter:
                 script += self._opcodes.NOTHING
             else:
                 with script.default_parameter():
-                    script += self.emit_expression(default)
+                    script += self._emit_call_argument(
+                        default, parameter, self.resolver.scope.class_path
+                    )
 
         for statement in body.statements:
             script += self.emit_statement(statement)
@@ -881,14 +1018,23 @@ class FunctionEmitter:
         )
 
     def _emit_call_argument(
-        self, argument: Expression | None, *, modifying: bool = False
+        self, argument: Expression | None, parameter: ParameterDeclaration, owner: ReferencePath
     ) -> Bytecode:
+        script = Bytecode()
+
         if argument is None:
-            script = Bytecode()
             script += self._opcodes.EMPTY_PARAMETER_VALUE
             return script
 
         if self.resolver.array_dimension_of(argument) != 1:
             return self._emit_array_operand(argument)
 
-        return self.emit_expression(argument, modifying=modifying)
+        selector = self.resolver.parameter_cast_selector(argument, parameter, owner)
+        if selector is not None:
+            script += self._opcodes.PRIMITIVE_CAST
+            script += selector
+
+        script += self.emit_expression(
+            argument, modifying=ParameterModifier.OUT in parameter.modifiers
+        )
+        return script

@@ -19,10 +19,13 @@ from willow_package_builder.payloads.class_payload import (
     FunctionFlags,
     UClassPayload,
     UFunctionPayload,
+    UScriptStatePayload,
+    UStatePayload,
 )
 from willow_package_builder.payloads.property_payloads import PropertyFlags, UPropertyPayload
 from willow_package_builder.upackage import (
     CORE_FUNCTION_PATH,
+    CORE_STATE_PATH,
     RETURN_VALUE_NAME,
     ObjectFlags,
     ReferencePath,
@@ -124,6 +127,9 @@ class FunctionBuilder(BuildComponent):
                         case ParameterModifier.OPTIONAL:
                             parameter_flags |= PropertyFlags.OPTIONAL_PARAM
 
+                        case ParameterModifier.COERCE:
+                            parameter_flags |= PropertyFlags.COERCE_PARAM
+
                         case _:
                             msg = f"Unsupported parameter modifier {modifier.value!r}"
                             raise NotImplementedError(msg)
@@ -141,25 +147,122 @@ class FunctionBuilder(BuildComponent):
 
         return properties
 
+    @staticmethod
+    def _validate_override(
+        function: FunctionDeclaration,
+        inherited: FunctionDeclaration,
+        path: ReferencePath,
+        base_path: ReferencePath,
+    ) -> None:
+        if FunctionModifier.FINAL in inherited.modifiers:
+            msg = f"{path} cannot override final function {base_path}"
+            raise CompilationError(msg)
+
+        if (
+            inherited.func_category != function.func_category
+            or (set(inherited.modifiers) - {FunctionModifier.NATIVE}) != set(function.modifiers)
+            or inherited.return_type != function.return_type
+            or len(inherited.parameters) != len(function.parameters)
+            or any(
+                base.type_ref != derived.type_ref
+                or base.array_dimension != derived.array_dimension
+                or set(base.modifiers) != set(derived.modifiers)
+                for base, derived in zip(inherited.parameters, function.parameters, strict=True)
+            )
+        ):
+            msg = f"Override {path} must match the declaration of {base_path}"
+            raise CompilationError(msg)
+
+    def _resolve_super_function(
+        self, class_path: ReferencePath, function: FunctionDeclaration
+    ) -> ReferencePath:
+        parent = self.context.parents[class_path]
+        if parent is None:
+            return ReferencePath()
+
+        references = self.context.references
+        for owner, declaration in references.iter_class_hierarchy(parent, self.context.parents):
+            for inherited in declaration.functions:
+                if inherited.name != function.name:
+                    continue
+
+                path = class_path + function.name
+                base_path = owner + inherited.name
+
+                self._validate_override(function, inherited, path, base_path)
+
+                return self.references.function_reference(base_path)
+        return ReferencePath()
+
+    def _resolve_super_state_function(
+        self, class_path: ReferencePath, state_path: ReferencePath, function: FunctionDeclaration
+    ) -> ReferencePath:
+        state_name = state_path.name
+        parent = self.context.parents[class_path]
+        if parent is None:
+            return ReferencePath()
+
+        for owner, declaration in self.context.references.iter_class_hierarchy(
+            parent, self.context.parents
+        ):
+            for state in declaration.states:
+                if state.name != state_name:
+                    continue
+
+                for inherited in state.functions:
+                    if inherited.name != function.name:
+                        continue
+
+                    base_path = owner + state.name + inherited.name
+                    self._validate_override(
+                        function, inherited, state_path + function.name, base_path
+                    )
+
+                    class_outer = self.references.class_object_reference(owner)
+
+                    if owner.get_outer().name == self.config.name:
+                        reference = class_outer + state.name + inherited.name
+                        return self.package.lookup_object_by_path(reference).reference()
+
+                    state_outer = self.references.ensure_import(
+                        state.name, class_outer, *CORE_STATE_PATH.full_split()
+                    )
+                    return self.references.ensure_import(
+                        inherited.name, state_outer, *CORE_FUNCTION_PATH.full_split()
+                    )
+
+        return ReferencePath()
+
     def _prepare_function(
         self,
         function: FunctionDeclaration,
         class_path: ReferencePath,
-        class_payload: UClassPayload,
-        class_object_reference: ReferencePath,
+        owner_payload: UClassPayload | UStatePayload,
+        owner_reference: ReferencePath,
     ) -> PreparedFunction:
         function_class = self.references.class_object_reference(CORE_FUNCTION_PATH)
-        supported_modifiers = {FunctionModifier.STATIC, FunctionModifier.PROTECTED}
+        supported_modifiers = {
+            FunctionModifier.STATIC,
+            FunctionModifier.PROTECTED,
+            FunctionModifier.SIMULATED,
+            FunctionModifier.RELIABLE,
+            FunctionModifier.SERVER,
+        }
 
         if FunctionModifier.NATIVE in function.modifiers:
             msg = f"Cannot compile native function {function.name}"
             raise CompilationError(msg)
 
-        if function.func_category is not FunctionCategory.FUNCTION:
-            msg = f"Function category {function.func_category} is not supported yet"
-            raise NotImplementedError(msg)
+        match function.func_category:
+            case FunctionCategory.FUNCTION:
+                flags = FunctionFlags.DEFINED
 
-        flags = FunctionFlags.DEFINED
+            case FunctionCategory.EVENT:
+                flags = FunctionFlags.DEFINED | FunctionFlags.EVENT
+
+            case _:
+                msg = f"Function category {function.func_category} is not supported yet"
+                raise NotImplementedError(msg)
 
         for modifier in function.modifiers:
             if modifier not in supported_modifiers:
@@ -170,21 +273,27 @@ class FunctionBuilder(BuildComponent):
 
             flags |= flag
 
-        # Don't silently emit an override without linking its base function.
-        parent = self.context.parents[class_path]
+        super_function = (
+            self._resolve_super_function(class_path, function)
+            if isinstance(owner_payload, UClassPayload)
+            else self._resolve_super_state_function(class_path, owner_reference, function)
+        )
 
-        if parent is not None:
-            for owner, ancestor in self.context.references.iter_class_hierarchy(
-                parent, self.context.parents
-            ):
-                if any(candidate.name == function.name for candidate in ancestor.functions):
-                    msg = (
-                        f"Override {class_path}.{function.name} of {owner} "
-                        "is not supported by the function builder yet"
-                    )
-                    raise NotImplementedError(msg)
+        if flags & FunctionFlags.NET and (
+            not isinstance(owner_payload, UClassPayload) or super_function.is_none()
+        ):
+            msg = "Only class-level overrides of existing networked functions are supported"
+            raise NotImplementedError(msg)
 
-        scope = FunctionScope(class_path, function, self.context.references, self.context.parents)
+        scope = FunctionScope(
+            class_path,
+            function,
+            self.context.references,
+            self.context.parents,
+            state_name=(
+                owner_reference.name if isinstance(owner_payload, UScriptStatePayload) else None
+            ),
+        )
 
         resolver = ExpressionResolver(self.context, scope)
 
@@ -219,23 +328,39 @@ class FunctionBuilder(BuildComponent):
             TypeCategory.BYTE,
             TypeCategory.NAME,
             TypeCategory.ARRAY,
+            TypeCategory.STRUCT,
         ):
-            msg = f"Function return type is not supported yet: {return_type!r}"
+            msg = f"Function return type is not supported yet: {return_type}"
             raise NotImplementedError(msg)
 
         function_payload = UFunctionPayload(
-            friendly_name=function.name, function_flags=flags, next_field=class_payload.children
+            next_field=owner_payload.children,
+            super_struct=super_function,
+            function_flags=flags,
+            friendly_name=function.name,
         )
 
         function_object = UObject(
             function.name,
             ObjectFlags.PUBLIC_EXPORT,
-            class_object_reference,
+            owner_reference,
             function_class,
             payload=function_payload,
         )
 
-        function_reference = self.package.add_export(function_object)
+        function_reference = function_object.reference()
+        try:
+            self.package.lookup_object_by_path(function_reference)
+        except KeyError:
+            pass
+        else:
+            msg = (
+                f"Function {function.name} conflicts with an existing"
+                f" declaration in {owner_reference}"
+            )
+            raise CompilationError(msg)
+
+        self.package.add_export(function_object)
 
         properties: list[UObject] = self._process_function_parameters(
             function, function_payload, function_object, class_path
@@ -252,7 +377,7 @@ class FunctionBuilder(BuildComponent):
                 )
             )
 
-        owner = class_path
+        owner = owner_reference
 
         for local in locals_:
             path = owner + function.name + local.name
@@ -283,8 +408,8 @@ class FunctionBuilder(BuildComponent):
 
         prepared_function = PreparedFunction(resolver, body, function_object, parameter_defaults)
 
-        class_payload.children = function_reference
-        class_payload.function_map[function.name] = function_reference
+        owner_payload.children = function_reference
+        owner_payload.function_map[function.name] = function_reference
 
         return prepared_function
 
@@ -310,6 +435,24 @@ class FunctionBuilder(BuildComponent):
                     )
                 )
 
+        for state in exports.declaration.states:
+            state_path = exports.class_object.reference() + state.name
+            state_object = self.package.lookup_object_by_path(state_path)
+
+            if not isinstance(state_object, UObject) or not isinstance(
+                state_object.payload, UScriptStatePayload
+            ):
+                msg = f"State must be exported before building its functions: {state_path}"
+                raise ValueError(msg)  # noqa: TRY004
+
+            for function in state.functions:
+                with declaration_context(state_path + function.name, function.location):
+                    prepared.append(
+                        self._prepare_function(
+                            function, class_path, state_object.payload, state_path
+                        )
+                    )
+
         return prepared
 
     def _prepare_all_functions(self) -> list[PreparedFunction]:
@@ -325,8 +468,7 @@ class FunctionBuilder(BuildComponent):
 
         for function in prepared:
             scope = function.resolver.scope
-            owner = scope.class_path
-            path = owner + scope.function.name
+            path = function.function_object.reference()
 
             with declaration_context(path, scope.function.location):
                 payload = cast("UFunctionPayload", function.function_object.payload)

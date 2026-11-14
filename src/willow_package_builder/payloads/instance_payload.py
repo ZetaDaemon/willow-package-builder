@@ -51,3 +51,18 @@ class ObjectInstancePayload(ObjectPayload):
         return self.handler.serialize(
             self.owner, self, SerializationContext(package, payload_offset)
         )
+
+
+@dataclass
+class ComponentTemplatePayload(ObjectInstancePayload):
+    """Payload for a component template owned by a class default object."""
+
+    template_name: FName = field(kw_only=True)
+
+    @override
+    def serialize_regular(self, package: Package) -> bytes:
+        return (
+            ReferencePath().serialize(package)
+            + self.template_name.serialize(package)
+            + super().serialize_regular(package)
+        )

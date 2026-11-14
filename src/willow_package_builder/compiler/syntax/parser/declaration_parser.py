@@ -8,6 +8,7 @@ from willow_package_builder.compiler.syntax.declarations import (
     OperatorCategory,
     OperatorDeclaration,
     ParameterDeclaration,
+    StateDeclaration,
     StructDeclaration,
 )
 from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
@@ -587,14 +588,9 @@ class DeclarationParser(DeclarationSyntaxParser):
                 continue
 
             if self.is_state_start():
-                if include_body_tokens:
-                    msg = (
-                        f"State compilation is not implemented in "
-                        f"{declaration.name} at {token.line}:{token.column}"
-                    )
-                    raise NotImplementedError(msg)
-
-                self.skip_state_declaration()
+                declaration.states.append(
+                    self.parse_state_declaration(include_body_tokens=include_body_tokens)
+                )
                 continue
 
             # Check operators before functions: both can begin with native.
@@ -623,21 +619,58 @@ class DeclarationParser(DeclarationSyntaxParser):
 
         return self.peek(offset) == ScriptKeywords.STATE
 
-    def skip_state_declaration(self) -> None:
+    def parse_state_declaration(self, *, include_body_tokens: bool) -> StateDeclaration:
+        start = self.peek()
+        modifiers: list[StateModifier] = []
+
         while self.peek() in StateModifier:
-            self.advance()
+            modifiers.append(StateModifier(self.advance()))
 
         self.expect(ScriptKeywords.STATE)
 
-        if self.peek() == Punctuation.LEFT_PAREN:
-            self.parse_parenthesized_tokens()
+        editable = self.match(Punctuation.LEFT_PAREN)
+        if editable:
+            self.expect(Punctuation.RIGHT_PAREN)
 
-        self.expect_identifier()
-
+        name = self.expect_identifier().fname
+        parent = None
         if self.match(ScriptKeywords.EXTENDS):
-            self.expect_identifier()
+            parent = self.expect_identifier().fname
 
-        self.parse_braced_tokens()
+        body_tokens = self.parse_braced_tokens()
+        closing = self.tokens[self.position - 1]
+        eof = Token(TokenCategory.EOF, "", closing.line, closing.column)
+        parser = DeclarationParser([*body_tokens, eof])
+
+        state = StateDeclaration(
+            name=name,
+            parent=parent,
+            modifiers=tuple(modifiers),
+            editable=editable,
+            location=SourceLocation(start.line, start.column),
+        )
+
+        while parser.peek().category is not TokenCategory.EOF:
+            if parser.match(ScriptKeywords.IGNORES):
+                state.ignores.append(parser.expect_identifier().fname)
+                while parser.match(Punctuation.COMMA):
+                    state.ignores.append(parser.expect_identifier().fname)
+
+                parser.expect(Punctuation.SEMICOLON)
+                continue
+
+            token = parser.peek()
+            if token in FunctionModifier or token in FunctionCategory:
+                state.functions.append(
+                    parser.parse_function_declaration(include_body_tokens=include_body_tokens)
+                )
+                continue
+
+            if include_body_tokens:
+                state.code_tokens = body_tokens[parser.position :]
+            break
+
+        return state
 
     def parse_declared_defaults(
         self, declaration: ClassDeclaration | StructDeclaration, *, reference_only: bool
@@ -651,7 +684,7 @@ class DeclarationParser(DeclarationSyntaxParser):
         parser = DefaultsParser.from_default_tokens(tokens)
 
         try:
-            parsed = parser.parse_defaults(skip_object_definitions=reference_only)
+            parsed = parser.parse_defaults(include_object_properties=not reference_only)
 
             if isinstance(declaration, StructDeclaration) and parser.default_objects:
                 msg = "Object declarations inside struct defaults are not implemented"
@@ -667,5 +700,7 @@ class DeclarationParser(DeclarationSyntaxParser):
         else:
             declaration.parsed_defaults = parsed
             if isinstance(declaration, ClassDeclaration):
-                declaration.default_objects = parser.default_objects
-            declaration.default_parse_error = None
+                if reference_only:
+                    declaration.reference_default_objects = parser.default_objects
+                else:
+                    declaration.default_objects = parser.default_objects

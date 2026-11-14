@@ -36,6 +36,7 @@ class FunctionScope:
     function: FunctionDeclaration
     references: ReferenceDatabase
     parents: Mapping[ReferencePath, ReferencePath | None]
+    state_name: FName | None = field(default=None, kw_only=True)
 
     _variables: dict[FName, VariableSymbol] = field(default_factory=dict, init=False, repr=False)
 

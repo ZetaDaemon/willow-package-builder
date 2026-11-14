@@ -112,6 +112,7 @@ class PackageBuilder:
 
     def compile_classes(self) -> None:
         """Create class definitions, CDOs, fields, and function bytecode exports."""
+        info("Compiling function bodies")
         self.class_builder.reserve_classes()
         self.class_builder.link_classes()
         self.struct_builder.reserve_structs()
@@ -120,6 +121,7 @@ class PackageBuilder:
         self.enums.build_class_enums()
         self.struct_builder.build_struct_fields()
         self.class_builder.build_class_fields()
+        self.class_builder.build_class_states()
         self.functions.build_class_functions()
 
     def build(self) -> Package:
@@ -136,6 +138,13 @@ class PackageBuilder:
         self.compile_classes()
 
         self.object_builder.build_default_objects(templates_by_class)
+        for class_path in self.classes:
+            parent = self.context.parents[class_path]
+            if parent is None or parent in self.classes:
+                continue
+
+            templates = self.defaults.reference_component_templates(parent)
+            self.object_builder.build_reference_components(class_path, templates)
 
         info("Reading objects")
         self.object_builder.read_objects()

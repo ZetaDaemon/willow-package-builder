@@ -8,6 +8,7 @@ from willow_package_builder.upackage import (
     CORE_FUNCTION_PATH,
     CORE_PACKAGE_CLASS_PATH,
     CORE_SCRIPT_STRUCT_PATH,
+    CORE_STATE_PATH,
     DEFAULT_OBJECT_PREFIX,
     FName,
     ReferencePath,
@@ -134,6 +135,17 @@ class PackageReferences(BuildComponent):
         if not owner_path:
             msg = f"Expected a qualified function path: {function_path}"
             raise ValueError(msg)
+
+        if len(owner_path.full_split()) == 3:
+            class_path, state_name = owner_path.split(require_outer=True)
+            class_outer = self.class_object_reference(class_path)
+
+            if class_path.get_outer().name == self.config.name:
+                reference = class_outer + state_name + name
+                return self.package.lookup_object_by_path(reference).reference()
+
+            state_outer = self.ensure_import(state_name, class_outer, *CORE_STATE_PATH.full_split())
+            return self.ensure_import(name, state_outer, *CORE_FUNCTION_PATH.full_split())
 
         member = self.context.references.resolve_function(owner_path, name, self.context.parents)
 

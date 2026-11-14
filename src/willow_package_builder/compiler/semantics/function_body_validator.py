@@ -13,10 +13,16 @@ from willow_package_builder.compiler.syntax.expressions import (
     ArrayCountExpression,
     BinaryExpression,
     CallExpression,
+    CastExpression,
+    ConditionalExpression,
     Expression,
+    GlobalExpression,
     IdentifierExpression,
     IndexExpression,
     MemberExpression,
+    NewExpression,
+    NoneExpression,
+    SuperExpression,
     SelfExpression,
     UnaryExpression,
 )
@@ -154,6 +160,9 @@ class FunctionBodyValidator:
                 if ParameterModifier.OUT in parameter.modifiers:
                     self.require_writable(expression.operand)
 
+            case CastExpression():
+                self.validate_expression(expression.operand)
+
             case CallExpression():
                 self.validate_call(expression)
 
@@ -180,6 +189,16 @@ class FunctionBodyValidator:
             case ArrayCountExpression():
                 self.validate_expression(expression.array)
 
+            case ConditionalExpression():
+                for operand in (expression.condition, expression.when_true, expression.when_false):
+                    self.validate_expression(operand)
+                    if self.resolver.array_dimension_of(operand) != 1:
+                        msg = "Conditional operands cannot be whole fixed arrays"
+                        raise CompilationError(msg)
+
+            case NewExpression():
+                self.validate_expression(expression.outer)
+
             case _:
                 pass
 
@@ -204,10 +223,20 @@ class FunctionBodyValidator:
                 target_type = self.validate_expression(statement.target)
                 value_type = self.validate_expression(statement.value)
 
-                if target_type != value_type:
+                if (
+                    isinstance(statement.value, NoneExpression)
+                    and target_type.category is TypeCategory.OBJECT
+                    and self.resolver.array_dimension_of(statement.target) == 1
+                ):
+                    return
+
+                if (
+                    not self.resolver.accepts_value_type(target_type, value_type)
+                    and self.resolver.assignment_cast_selector(statement) is None
+                ):
                     msg = (
-                        f"Assignment type mismatch: destination is {target_type!r}, "
-                        f"value is {value_type!r}"
+                        f"Assignment type mismatch: destination expects {target_type}, "
+                        f"got {value_type}"
                     )
                     raise CompilationError(msg)
 
@@ -227,9 +256,7 @@ class FunctionBodyValidator:
 
                 value_type = self.validate_expression(statement.value)
 
-                if value_type != return_type:
-                    msg = f"Return type mismatch: expected {return_type!r}, got {value_type!r}"
-                    raise CompilationError(msg)
+                self.resolver.resolve_return_cast(statement.value, value_type, return_type)
 
                 return
 
@@ -410,10 +437,10 @@ class FunctionBodyValidator:
         path = member.owner_class + function.name
 
         match expression.callee:
-            case MemberExpression():
+            case MemberExpression() if self.resolver.resolve_static_call_class(expression) is None:
                 self.validate_expression(expression.callee.object)
 
-            case IdentifierExpression():
+            case IdentifierExpression() | SuperExpression() | GlobalExpression():
                 if (
                     FunctionModifier.STATIC in scope.function.modifiers
                     and FunctionModifier.STATIC not in function.modifiers
@@ -450,8 +477,6 @@ class FunctionBodyValidator:
             msg = f"Missing required arguments for {path}"
             raise CompilationError(msg)
 
-        numeric = {TypeCategory.BYTE, TypeCategory.INT, TypeCategory.FLOAT}
-
         for parameter, argument in zip(parameters[: len(arguments)], arguments, strict=True):
             if argument is None:
                 if ParameterModifier.OPTIONAL not in parameter.modifiers:
@@ -475,11 +500,8 @@ class FunctionBodyValidator:
             )
 
             if ParameterModifier.OUT in parameter.modifiers:
-                if ParameterModifier.CONST in parameter.modifiers:
-                    msg = f"Const-out arguments for {path} are not implemented yet"
-                    raise NotImplementedError(msg)
-
-                self.require_writable(argument)
+                if ParameterModifier.CONST not in parameter.modifiers:
+                    self.require_writable(argument)
 
                 if argument_type != parameter_type:
                     msg = (
@@ -488,19 +510,14 @@ class FunctionBodyValidator:
                     )
                     raise CompilationError(msg)
 
-            elif argument_type != parameter_type:
-                if (
-                    argument_type.category in numeric and parameter_type.category in numeric
-                ) or ParameterModifier.COERCE in parameter.modifiers:
-                    msg = (
-                        f"Argument conversion for {parameter.name!r} "
-                        f"of {path} is not implemented yet"
-                    )
-                    raise NotImplementedError(msg)
-
+            elif (
+                not self.resolver.accepts_value_type(parameter_type, argument_type)
+                and self.resolver.parameter_cast_selector(argument, parameter, member.owner_class)
+                is None
+            ):
                 msg = (
-                    f"Argument {parameter.name!r} of {path} expects "
-                    f"{parameter_type!r}, got {argument_type!r}"
+                    f"Argument {parameter.name} of {path} expects "
+                    f"{parameter_type}, got {argument_type}"
                 )
                 raise CompilationError(msg)
 
@@ -514,14 +531,17 @@ class FunctionBodyValidator:
             actual = self.validate_expression(expression)
             expected = self.resolver.resolve_declared_type(parameter.type_ref, scope.class_path)
 
-            if actual != expected:
+            if (
+                actual != expected
+                and self.resolver.parameter_cast_selector(expression, parameter, scope.class_path)
+                is None
+            ):
                 msg = (
                     f"Default for parameter {parameter.name!r} of "
                     f"{scope.class_path}.{scope.function.name} requires "
-                    f"{expected!r}, got {actual!r}; "
-                    "default argument conversions are not implemented yet"
+                    f"{expected!r}, got {actual!r}"
                 )
-                raise NotImplementedError(msg)
+                raise CompilationError(msg)
 
     def validate_variable_access(
         self, declaration: ParameterDeclaration | VariableDeclaration, owner: ReferencePath

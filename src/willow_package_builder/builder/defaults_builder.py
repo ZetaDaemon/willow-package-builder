@@ -6,7 +6,7 @@ from willow_package_builder.builder.classes.default_objects import DefaultObject
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.declarations import DefaultObjectDeclaration
 from willow_package_builder.compiler.syntax.modifiers import VariableModifier
-from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
+from willow_package_builder.compiler.syntax.parser.defaults_parser import ArrayDefaults
 from willow_package_builder.logging import (
     CompilationError,
     UnknownPropertyError,
@@ -17,7 +17,12 @@ from willow_package_builder.logging import (
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.properties.merge import merge_values
 from willow_package_builder.properties.values import Value
-from willow_package_builder.upackage import DEFAULT_OBJECT_PREFIX, FName, ReferencePath
+from willow_package_builder.upackage import (
+    CORE_COMPONENT_PATH,
+    DEFAULT_OBJECT_PREFIX,
+    FName,
+    ReferencePath,
+)
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.classes.struct_builder import StructBuilder
@@ -42,19 +47,59 @@ class DefaultsBuilder(BuildComponent):
             raise NotImplementedError(msg)
         self._active.append(path)
 
+    def reference_component_templates(
+        self, class_path: ReferencePath
+    ) -> dict[FName, tuple[ReferencePath, ReferencePath]]:
+        """Map each template name to its class and stock object path."""
+        references = self.context.references
+        parents = self.context.parents
+        hierarchy = list(references.iter_class_hierarchy(class_path, parents))
+        templates: dict[FName, tuple[ReferencePath, ReferencePath]] = {}
+
+        for owner, declaration in reversed(hierarchy):
+            if not declaration.reference_default_objects:
+                continue
+
+            package = owner.get_outer()
+            config = next(config for config in self.context.packages if config.name == package.name)
+            visible = collect_visible_packages(config, self.context.packages)
+            cdo_path = package + FName(f"{DEFAULT_OBJECT_PREFIX}{declaration.name}")
+
+            for template in declaration.reference_default_objects:
+                if template.class_name is None:
+                    inherited = templates.get(template.name)
+                    if inherited is not None:
+                        component_class, _ = inherited
+                        templates[template.name] = (component_class, cdo_path + template.name)
+                    continue
+
+                component_class = references.resolve_class_path(
+                    template.class_name, package.name, visible
+                )
+                if references.is_subclass(component_class, CORE_COMPONENT_PATH, parents):
+                    templates[template.name] = (component_class, cdo_path + template.name)
+                else:
+                    templates.pop(template.name, None)
+
+        return templates
+
     def _default_object_scope(self, class_path: ReferencePath) -> dict[FName, ReferencePath]:
         """Resolve root template names beneath the current class's CDO."""
         declaration = self.context.references.classes[class_path]
         cdo_path = ReferencePath(
             FName(f"{DEFAULT_OBJECT_PREFIX}{declaration.name}"), class_path.get_outer()
         )
-        return {
-            child.name: cdo_path + child.name
-            for _, ancestor in self.context.references.iter_class_hierarchy(
-                class_path, self.context.parents
-            )
-            for child in ancestor.default_objects
+        scope = {
+            name: path for name, (_, path) in self.reference_component_templates(class_path).items()
         }
+
+        for _, ancestor in self.context.references.iter_class_hierarchy(
+            class_path, self.context.parents
+        ):
+            for child in ancestor.default_objects:
+                scope[child.name] = cdo_path + child.name
+
+        return scope
 
     def _values_for(self, owner_class: ReferencePath) -> ValueBuilder:
         """Resolve defaults in the declaring package's scope."""
@@ -216,7 +261,7 @@ class DefaultsBuilder(BuildComponent):
     def _prepare_field_type(
         self, definition: VariableDeclaration, resolved: ResolvedType, raw_value: object
     ) -> None:
-        if isinstance(raw_value, IndexedArrayDefaults):
+        if isinstance(raw_value, ArrayDefaults):
             if raw_value.has_initial:
                 self._prepare_field_type(definition, resolved, raw_value.initial)
 
@@ -227,8 +272,9 @@ class DefaultsBuilder(BuildComponent):
             else:
                 element_type = resolved
 
-            for _, element in raw_value.updates:
-                self._prepare_type(element_type, element)
+            for update in raw_value.updates:
+                for element in update.values:
+                    self._prepare_type(element_type, element)
             return
 
         if definition.array_dimension == 1:
@@ -319,6 +365,43 @@ class DefaultsBuilder(BuildComponent):
             pending.extend(template.children.values())
 
         return templates
+
+    def find_reference_component_fields(
+        self, class_path: ReferencePath
+    ) -> dict[FName, tuple[FName, ReferencePath]]:
+        """Find CDO fields that reference component templates declared by this class."""
+        references = self.context.references
+        parents = self.context.parents
+        declaration = references.classes[class_path]
+
+        package_name = class_path.get_outer().name
+        config = next(config for config in self.context.packages if config.name == package_name)
+        visible = collect_visible_packages(config, self.context.packages)
+
+        components: dict[FName, ReferencePath] = {}
+
+        for template in declaration.reference_default_objects:
+            if template.class_name is None:
+                continue
+
+            component_class = references.resolve_class_path(
+                template.class_name, package_name, visible
+            )
+            if references.is_subclass(component_class, CORE_COMPONENT_PATH, parents):
+                components[template.name] = component_class
+
+        fields: dict[FName, tuple[FName, ReferencePath]] = {}
+
+        for field_name, raw_value in declaration.parsed_defaults.items():
+            if not isinstance(raw_value, str) or any(char in raw_value for char in ".:'"):
+                continue
+
+            template_name = FName(raw_value)
+            component_class = components.get(template_name)
+            if component_class is not None:
+                fields[field_name] = (template_name, component_class)
+
+        return fields
 
     def collect_default_object_templates(
         self, class_path: ReferencePath

@@ -23,7 +23,11 @@ from willow_package_builder.objects.definitions import (
 )
 from willow_package_builder.objects.reader import walk_objects_directory
 from willow_package_builder.package_config import OBJECTS_DIRECTORY_NAME, collect_visible_packages
-from willow_package_builder.payloads.instance_payload import ObjectInstancePayload
+from willow_package_builder.payloads.class_payload import ClassFlags, UClassPayload
+from willow_package_builder.payloads.instance_payload import (
+    ComponentTemplatePayload,
+    ObjectInstancePayload,
+)
 from willow_package_builder.properties.conversion import value_to_python
 from willow_package_builder.properties.merge import merge_values
 from willow_package_builder.properties.object_references import import_external_object
@@ -36,6 +40,7 @@ from willow_package_builder.properties.values import (
     Value,
 )
 from willow_package_builder.upackage import (
+    CORE_COMPONENT_PATH,
     CORE_PACKAGE_CLASS_PATH,
     DEFAULT_OBJECT_PREFIX,
     ExportFlags,
@@ -415,6 +420,33 @@ class ObjectBuilder(BuildComponent):
 
         return values
 
+    def _cdo_properties(self, class_path: ReferencePath) -> dict[FName, Value]:
+        declaration = self.context.references.classes[class_path]
+        properties = deepcopy(declaration.defaults)
+        visible = collect_visible_packages(self.config, self.context.packages)
+
+        for variable in declaration.variables:
+            if variable.name in properties or VariableModifier.NATIVE in variable.modifiers:
+                continue
+
+            resolved = self.context.references.resolve_type(
+                variable.type_ref, class_path, visible, self.context.parents
+            )
+            if resolved.category is not TypeCategory.STRUCT:
+                continue
+
+            if variable.array_dimension == 1:
+                properties[variable.name] = self.struct_builder.initial_value(resolved)
+            else:
+                properties[variable.name] = ArrayValue(
+                    [
+                        self.struct_builder.initial_value(resolved)
+                        for _ in range(variable.array_dimension)
+                    ]
+                )
+
+        return properties
+
     def construct_cdo(self, class_path: ReferencePath, class_object: UObject) -> UObject:
         parent = self.context.parents[class_path]
         archetype = ReferencePath()
@@ -429,7 +461,7 @@ class ObjectBuilder(BuildComponent):
             class_object.outer,
             ObjectFlags.CDO_EXPORT,
             archetype,
-            properties=self.class_default_values(class_path),
+            properties=self._cdo_properties(class_path),
         )
 
     def link_archetypes(self) -> None:
@@ -1132,6 +1164,61 @@ class ObjectBuilder(BuildComponent):
         finally:
             instancing.owners.pop()
 
+    def build_reference_components(
+        self, class_path: ReferencePath, templates: dict[FName, tuple[ReferencePath, ReferencePath]]
+    ) -> None:
+        """Export component templates inherited from the direct reference parent."""
+        if not templates:
+            return
+
+        export = self.classes[class_path]
+        cdo = export.default_object
+        cdo_payload = cdo.payload
+        class_payload = export.class_object.payload
+
+        if not isinstance(cdo_payload, ObjectInstancePayload) or not isinstance(
+            class_payload, UClassPayload
+        ):
+            msg = f"Class and CDO must be linked before building components: {class_path}"
+            raise ValueError(msg)  # noqa: TRY004
+
+        remap: dict[ReferencePath, ReferencePath] = {}
+
+        for template_name, (component_class, stock_path) in templates.items():
+            stock_cdo, _ = stock_path.split(require_outer=True)
+            stock_package, stock_cdo_name = stock_cdo.split(require_outer=True)
+            stock_class_name = FName(str(stock_cdo_name).removeprefix(DEFAULT_OBJECT_PREFIX))
+            stock_class = stock_package + stock_class_name
+            stock_outer = self.references.class_object_reference(stock_class, default_object=True)
+            archetype = self.references.ensure_import(
+                template_name, stock_outer, *component_class.full_split()
+            )
+
+            component = UObject(
+                template_name,
+                ObjectFlags.PUBLIC_EXPORT,
+                cdo.reference(),
+                self.references.class_object_reference(component_class),
+                archetype=archetype,
+                payload=ComponentTemplatePayload(
+                    component_class, self.context, template_name=template_name
+                ),
+            )
+            reference = self.package.add_export(component)
+            class_payload.component_defaults[template_name] = reference
+            remap[stock_path] = reference
+
+        effective = self.class_default_values(class_path)
+        effective.update(cdo_payload.properties)
+        remapped = self._remap_default_properties(effective, remap)
+
+        for name, value in remapped.items():
+            if name in cdo_payload.properties or value != effective[name]:
+                cdo_payload.properties[name] = value
+
+        if class_payload.component_defaults:
+            class_payload.class_flags |= ClassFlags.HAS_COMPONENTS
+
     def build_default_objects(
         self, templates_by_class: dict[ReferencePath, dict[FName, DefaultObjectTemplate]]
     ) -> None:
@@ -1150,6 +1237,27 @@ class ObjectBuilder(BuildComponent):
 
             if not tree:
                 continue
+
+            class_payload = export.class_object.payload
+            if not isinstance(class_payload, UClassPayload):
+                msg = f"Class must be linked before registering components: {class_path}"
+                raise TypeError(msg)
+
+            for key, obj in tree.items():
+                if len(key) != 1:
+                    continue
+
+                component_class = templates[key[0]].class_path
+                if not self.context.references.is_subclass(
+                    component_class, CORE_COMPONENT_PATH, self.context.parents
+                ):
+                    continue
+
+                obj.payload = ComponentTemplatePayload(
+                    component_class, self.context, template_name=obj.name
+                )
+                class_payload.component_defaults[obj.name] = obj.reference()
+                class_payload.class_flags |= ClassFlags.HAS_COMPONENTS
 
             remap: dict[ReferencePath, ReferencePath] = {}
             ancestor = parent
@@ -1177,7 +1285,12 @@ class ObjectBuilder(BuildComponent):
                 msg = f"CDO has an invalid payload: {class_path}"
                 raise TypeError(msg)
 
-            payload.properties = self._remap_default_properties(payload.properties, remap)
+            effective = self.class_default_values(class_path)
+            remapped = self._remap_default_properties(effective, remap)
+
+            for name, value in remapped.items():
+                if name in payload.properties or value != effective[name]:
+                    payload.properties[name] = value
 
     def _reserve_default_object_tree(
         self,

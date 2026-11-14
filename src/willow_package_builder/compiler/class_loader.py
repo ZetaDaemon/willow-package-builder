@@ -7,7 +7,7 @@ from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
 from willow_package_builder.compiler.syntax.lexer import Lexer, TokenCategory
 from willow_package_builder.compiler.syntax.modifiers import StructModifier
 from willow_package_builder.compiler.syntax.parser import FunctionParser
-from willow_package_builder.compiler.syntax.parser.defaults_parser import IndexedArrayDefaults
+from willow_package_builder.compiler.syntax.parser.defaults_parser import ArrayDefaults
 from willow_package_builder.compiler.syntax.punctuation import Punctuation
 from willow_package_builder.logging import (
     CompilationError,
@@ -395,7 +395,7 @@ class ClassLoader:
         raw_value: object,
         config: PackageConfig,
     ) -> None:
-        if isinstance(raw_value, IndexedArrayDefaults):
+        if isinstance(raw_value, ArrayDefaults):
             if raw_value.has_initial:
                 self._load_field_default_dependencies(
                     definition, resolved, raw_value.initial, config
@@ -408,8 +408,9 @@ class ClassLoader:
             else:
                 element_type = resolved
 
-            for _, element in raw_value.updates:
-                self._load_default_value_dependencies(element, element_type, config)
+            for update in raw_value.updates:
+                for element in update.values:
+                    self._load_default_value_dependencies(element, element_type, config)
             return
 
         if definition.array_dimension == 1:

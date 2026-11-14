@@ -9,6 +9,7 @@ class Punctuation(StrEnum):
     LEFT_BRACKET = "["
     RIGHT_BRACKET = "]"
     SEMICOLON = ";"
+    COLON = ":"
     COMMA = ","
     DOT = "."
 

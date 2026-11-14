@@ -1,4 +1,34 @@
 # Chagelog
+## [0.5]
+### Additions
+- Compile scripted events, inherited function overrides, and states with
+  state-scoped functions. Link same-named inherited states and their function
+  overrides, and generate class and state probe masks.
+- Support `super.Function()`, `super(ClassName).Function()`, and
+  `global.Function()`, plus class-literal static calls.
+- Emit class-level overrides of existing reliable server RPCs. Multiplayer
+  behavior remains untested.
+- Compile struct-valued returns, conditional expressions, vector literals,
+  object casts, and basic object construction with `new`.
+- Support explicit casts among `byte`, `int`, `float`, and `bool`. Apply
+  implicit numeric conversions in supported expression contexts and allow
+  compatible object and bounded class references. Resolve inherited integer
+  constants and bare or qualified enum members.
+- Apply dynamic-array default operations in source order, including
+  `Add`, `Remove`, `RemoveIndex`, `Replace`, and `Empty`.
+- Export inherited stock component templates for compiled subclasses and
+  remap references to those templates in class defaults, including in
+  component arrays.
+
+### Fixes
+- Preserve struct defaults and partial overrides through CDO and packaged
+  instance inheritance.
+- Report conflicting function declarations as compilation errors. Show
+  UnrealScript type names and paths in type diagnostics and distinguish
+  class preparation from function-body compilation in the build log.
+- Show unsupported-feature errors without a traceback by default.
+  `--debug` includes the traceback.
+
 ## [0.4]
 ### Additions
 - Compile `attribute` fields of type `byte`, `int`, or `float`, including linked

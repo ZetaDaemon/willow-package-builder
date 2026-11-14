@@ -9,14 +9,34 @@ from willow_package_builder.compiler.syntax.modifiers import (
     ClassModifierName,
     FunctionModifier,
     ParameterModifier,
+    StateModifier,
     VariableModifier,
 )
 from willow_package_builder.compiler.syntax.parser.token_parser import TokenParser
 from willow_package_builder.compiler.syntax.punctuation import Punctuation
-from willow_package_builder.logging import CompilationError, WarningCode, info, warn
+from willow_package_builder.games import get_game
+from willow_package_builder.logging import (
+    CompilationError,
+    WarningCode,
+    declaration_context,
+    info,
+    warn,
+)
 from willow_package_builder.package_config import collect_visible_packages
-from willow_package_builder.payloads.class_payload import ClassFlags, StateFlags, UClassPayload
-from willow_package_builder.upackage import NONE_NAME, FName, ObjectFlags, ReferencePath, UObject
+from willow_package_builder.payloads.class_payload import (
+    ClassFlags,
+    StateFlags,
+    UClassPayload,
+    UScriptStatePayload,
+)
+from willow_package_builder.upackage import (
+    CORE_STATE_PATH,
+    NONE_NAME,
+    FName,
+    ObjectFlags,
+    ReferencePath,
+    UObject,
+)
 
 from .exports import ClassExport
 
@@ -100,7 +120,7 @@ class ClassBuilder(BuildComponent):
                 )
                 continue
 
-            info(f"Compiling class {class_path}")
+            info(f"Reserving class exports for {class_path}")
             class_object = UObject(declaration.name, ObjectFlags.CLASS_EXPORT)
             self.package.add_export(class_object)
 
@@ -221,11 +241,16 @@ class ClassBuilder(BuildComponent):
 
                 actual = member.declaration
                 if (
-                    actual.func_category != required.func_category
-                    or (
-                        FunctionModifier.NATIVE in required.modifiers
-                        and FunctionModifier.NATIVE not in actual.modifiers
+                    FunctionModifier.NATIVE in required.modifiers
+                    and FunctionModifier.NATIVE not in actual.modifiers
+                ):
+                    msg = (
+                        f"{class_path}.{actual.name} must be native"
+                        f" to implement {owner}.{required.name}"
                     )
+                    raise CompilationError(msg)
+                if (
+                    actual.func_category != required.func_category
                     or self._interface_method_signature(member.owner_class, actual)
                     != self._interface_method_signature(owner, required)
                 ):
@@ -434,6 +459,7 @@ class ClassBuilder(BuildComponent):
                 class_flags=flags,
                 state_flags=StateFlags.AUTO,
                 config_name=config_name,
+                probe_mask=self._probe_mask(class_path),
             )
 
             interfaces = self._resolve_implemented_interfaces(
@@ -466,6 +492,78 @@ class ClassBuilder(BuildComponent):
             self._apply_editor_modifiers(class_path, payload)
             exports.class_object.payload = payload
 
+    def _resolve_inherited_state(self, class_path: ReferencePath, name: FName) -> ReferencePath:
+        parent = self.context.parents[class_path]
+        if parent is None:
+            return ReferencePath()
+
+        for owner, declaration in self.context.references.iter_class_hierarchy(
+            parent, self.context.parents
+        ):
+            for state in declaration.states:
+                if state.name != name:
+                    continue
+
+                outer = self.references.class_object_reference(owner)
+                if owner.get_outer().name == self.config.name:
+                    return self.package.lookup_object_by_path(outer + state.name).reference()
+
+                return self.references.ensure_import(
+                    state.name, outer, *CORE_STATE_PATH.full_split()
+                )
+
+        return ReferencePath()
+
+    def build_class_states(self) -> None:
+        """Export states and link them into their owning class's fields."""
+        for class_path, exports in self.classes.items():
+            if not exports.declaration.states:
+                continue
+
+            class_payload = exports.class_object.payload
+            if not isinstance(class_payload, UClassPayload):
+                msg = f"Class must be linked before building states: {class_path}"
+                raise ValueError(msg)  # noqa: TRY004
+
+            state_class = self.references.class_object_reference(CORE_STATE_PATH)
+
+            for state in reversed(exports.declaration.states):
+                with declaration_context(class_path + state.name, state.location):
+                    if (
+                        state.parent is not None
+                        or any(
+                            modifier is not StateModifier.SIMULATED for modifier in state.modifiers
+                        )
+                        or state.editable
+                        or state.ignores
+                        or state.code_tokens
+                    ):
+                        msg = (
+                            "State modifiers other than simulated, explicit state "
+                            "inheritance, ignores, and state code are not implemented yet"
+                        )
+                        raise NotImplementedError(msg)
+
+                    parent_reference = self._resolve_inherited_state(class_path, state.name)
+                    obj = UObject(
+                        state.name,
+                        ObjectFlags.PUBLIC_EXPORT,
+                        exports.class_object.reference(),
+                        state_class,
+                        super_object=parent_reference,
+                        payload=UScriptStatePayload(
+                            next_field=class_payload.children,
+                            super_struct=parent_reference,
+                            state_flags=(
+                                StateFlags.SIMULATED
+                                if StateModifier.SIMULATED in state.modifiers
+                                else StateFlags.NONE
+                            ),
+                            probe_mask=self._probe_mask(class_path, state.name),
+                        ),
+                    )
+                    class_payload.children = self.package.add_export(obj)
+
     def build_class_fields(self) -> None:
         for class_path, exports in self.classes.items():
             payload = exports.class_object.payload
@@ -492,3 +590,27 @@ class ClassBuilder(BuildComponent):
                     return True
 
         return False
+
+    def _probe_mask(self, class_path: ReferencePath, state_name: FName | None = None) -> int:
+        probe_bits = get_game().PROBE_BITS
+        mask = 0
+
+        for _, declaration in self.context.references.iter_class_hierarchy(
+            class_path, self.context.parents
+        ):
+            functions = (
+                declaration.functions
+                if state_name is None
+                else (
+                    function
+                    for state in declaration.states
+                    if state.name == state_name
+                    for function in state.functions
+                )
+            )
+
+            for function in functions:
+                if function.has_body or FunctionModifier.NATIVE in function.modifiers:
+                    mask |= probe_bits.get(function.name, 0)
+
+        return mask

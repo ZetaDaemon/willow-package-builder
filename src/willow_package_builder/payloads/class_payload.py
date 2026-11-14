@@ -19,8 +19,12 @@ from willow_package_builder.upackage import (
 class StateFlags(IntFlag):
     """StateFlags."""
 
-    NONE = 0
-    AUTO = 0x2
+    NONE       = 0x0
+
+    EDITABLE   = 0x1
+    AUTO       = 0x2
+    SIMULATED  = 0x4
+    HAS_LOCALS = 0x8
 
 
 class ClassFlags(IntFlag):
@@ -208,6 +212,21 @@ class UStatePayload(UStructPayload, ABC):
 
 
 @dataclass
+class UScriptStatePayload(UStatePayload):
+    """Payload for a state declared inside an UnrealScript class."""
+
+    net_index: int = -1
+
+    @override
+    def serialize(self, package: Package) -> bytes:
+        return (
+            struct.pack("<i", self.net_index)
+            + NONE_NAME.serialize(package)
+            + self.serialize_body(package)
+        )
+
+
+@dataclass
 class UClassPayload(UStatePayload):
     """Class definition payload."""
 
@@ -296,24 +315,25 @@ class UFunctionPayload(UStructPayload):
     operator_precedence: int = 0
     function_flags: FunctionFlags = FunctionFlags.DEFINED
 
+    replication_offset: int = 0xFFFF
+
     @override
     def serialize_body(self, package: Package) -> bytes:
         """Serialize the inherited data and UFunction portion."""
-        return (
-            super().serialize_body(package)
-            + struct.pack(
-                "<HBI", self.native_index, self.operator_precedence, int(self.function_flags)
-            )
-            + self.friendly_name.serialize(package)
+        data = super().serialize_body(package) + struct.pack(
+            "<HBI", self.native_index, self.operator_precedence, int(self.function_flags)
         )
+
+        if self.function_flags & FunctionFlags.NET:
+            data += struct.pack("<H", self.replication_offset)
+
+        return data + self.friendly_name.serialize(package)
 
     @override
     def serialize(self, package: Package) -> bytes:
         """Serialize a complete scripted function payload."""
-        unsupported = FunctionFlags.NATIVE | FunctionFlags.NET
-
-        if self.function_flags & unsupported:
-            msg = "Native and networked functions are not supported yet"
+        if self.function_flags & FunctionFlags.NATIVE:
+            msg = "Cannot serialize a native function as a scripted function"
             raise ValueError(msg)
 
         if self.native_index != 0:
