@@ -204,8 +204,9 @@ class ObjectBuilder(BuildComponent):
             )
             self.exports[definition] = obj
 
-            if isinstance(definition, ObjectDefinition):
-                class_name = str(obj.object_class).rsplit(".", 1)[-1]
+            if isinstance(definition, ObjectDefinition) and isinstance(
+                definition.outer, FolderDefinition
+            ):
                 info(f"Building object {self.package.format_object(obj)}")
 
     def property_default_value(self, class_path: ReferencePath, name: FName) -> Value:

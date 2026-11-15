@@ -22,8 +22,8 @@ from willow_package_builder.compiler.syntax.expressions import (
     MemberExpression,
     NewExpression,
     NoneExpression,
-    SuperExpression,
     SelfExpression,
+    SuperExpression,
     UnaryExpression,
 )
 from willow_package_builder.compiler.syntax.modifiers import (
@@ -46,8 +46,12 @@ from willow_package_builder.compiler.syntax.statements import (
     Statement,
     WhileStatement,
 )
-from willow_package_builder.logging import CompilationError, declaration_context
-from willow_package_builder.upackage import CORE_OBJECT_PATH
+from willow_package_builder.logging import (
+    CompilationError,
+    UnknownPropertyError,
+    declaration_context,
+)
+from willow_package_builder.upackage import CORE_OBJECT_PATH, FName
 
 from .scope import VariableCategory
 from .types import ResolvedType, TypeCategory
@@ -56,6 +60,8 @@ if TYPE_CHECKING:
     from willow_package_builder.upackage import ReferencePath
 
     from .expression_resolver import ExpressionResolver
+
+BASE_CLASS_PARAMETER = FName("BaseClass")
 
 
 @dataclass
@@ -268,7 +274,7 @@ class FunctionBodyValidator:
                 condition_type = self.validate_expression(statement.condition)
 
                 if condition_type.category is not TypeCategory.BOOL:
-                    msg = f"If condition must be bool, got {condition_type!r}"
+                    msg = f"If condition must be bool, got {condition_type}"
                     raise CompilationError(msg)
 
                 for child in statement.then_statements:
@@ -284,7 +290,7 @@ class FunctionBodyValidator:
                 condition_type = self.validate_expression(statement.condition)
 
                 if condition_type.category is not TypeCategory.BOOL:
-                    msg = f"While condition must be bool, got {condition_type!r}"
+                    msg = f"While condition must be bool, got {condition_type}"
                     raise CompilationError(msg)
 
                 for child in statement.statements:
@@ -301,7 +307,7 @@ class FunctionBodyValidator:
                 condition_type = self.validate_expression(statement.condition)
 
                 if condition_type.category is not TypeCategory.BOOL:
-                    msg = f"For condition must be bool, got {condition_type!r}"
+                    msg = f"For condition must be bool, got {condition_type}"
                     raise CompilationError(msg)
 
                 self.validate_statement(statement.increment, return_type)
@@ -322,7 +328,7 @@ class FunctionBodyValidator:
                 condition_type = self.validate_expression(statement.condition)
 
                 if condition_type.category is not TypeCategory.BOOL:
-                    msg = f"Until condition must be bool, got {condition_type!r}"
+                    msg = f"Until condition must be bool, got {condition_type}"
                     raise CompilationError(msg)
 
             case _:
@@ -425,7 +431,7 @@ class FunctionBodyValidator:
                 actual = self.validate_expression(argument)
 
                 if actual != expected:
-                    msg = f"Array {builtin.name} expects {expected!r}, got {actual!r}"
+                    msg = f"Array {builtin.name} expects {expected}, got {actual}"
                     raise CompilationError(msg)
 
             return
@@ -477,7 +483,12 @@ class FunctionBodyValidator:
             msg = f"Missing required arguments for {path}"
             raise CompilationError(msg)
 
-        for parameter, argument in zip(parameters[: len(arguments)], arguments, strict=True):
+        iterator_filter: ResolvedType | None = None
+        iterator_output_type: ResolvedType | None = None
+
+        for index, (parameter, argument) in enumerate(
+            zip(parameters[: len(arguments)], arguments, strict=True)
+        ):
             if argument is None:
                 if ParameterModifier.OPTIONAL not in parameter.modifiers:
                     msg = f"Required parameter {parameter.name!r} of {path} cannot be omitted"
@@ -499,16 +510,50 @@ class FunctionBodyValidator:
                 parameter.type_ref, member.owner_class
             )
 
+            if (
+                index == 0
+                and parameter.name == BASE_CLASS_PARAMETER
+                and FunctionModifier.NATIVE in function.modifiers
+                and FunctionModifier.ITERATOR in function.modifiers
+                and ParameterModifier.OUT not in parameter.modifiers
+                and dimension == 1
+                and parameter_type.category is TypeCategory.CLASS
+                and len(parameter_type.arguments) == 1
+                and argument_type.category is TypeCategory.CLASS
+                and len(argument_type.arguments) == 1
+            ):
+                iterator_filter = parameter_type
+                iterator_output_type = argument_type.arguments[0]
+
             if ParameterModifier.OUT in parameter.modifiers:
                 if ParameterModifier.CONST not in parameter.modifiers:
                     self.require_writable(argument)
 
-                if argument_type != parameter_type:
+                accepts_filtered_output = (
+                    index == 1
+                    and dimension == 1
+                    and ParameterModifier.CONST not in parameter.modifiers
+                    and iterator_filter is not None
+                    and iterator_output_type is not None
+                    and parameter_type.category is TypeCategory.OBJECT
+                    and parameter_type == iterator_filter.arguments[0]
+                    and argument_type.category is TypeCategory.OBJECT
+                    and self.resolver.accepts_value_type(parameter_type, argument_type)
+                    and self.resolver.accepts_value_type(argument_type, iterator_output_type)
+                )
+
+                if argument_type != parameter_type and not accepts_filtered_output:
                     msg = (
                         f"Out argument {parameter.name!r} of {path} requires "
-                        f"{parameter_type!r}, got {argument_type!r}"
+                        f"{parameter_type}, got {argument_type}"
                     )
                     raise CompilationError(msg)
+            elif (
+                isinstance(argument, NoneExpression)
+                and dimension == 1
+                and parameter_type.category in (TypeCategory.OBJECT, TypeCategory.CLASS)
+            ):
+                continue
 
             elif (
                 not self.resolver.accepts_value_type(parameter_type, argument_type)
@@ -539,7 +584,7 @@ class FunctionBodyValidator:
                 msg = (
                     f"Default for parameter {parameter.name!r} of "
                     f"{scope.class_path}.{scope.function.name} requires "
-                    f"{expected!r}, got {actual!r}"
+                    f"{expected}, got {actual}"
                 )
                 raise CompilationError(msg)
 
@@ -587,13 +632,31 @@ class FunctionBodyValidator:
     def validate_foreach(self, statement: ForeachStatement, return_type: ResolvedType) -> None:
         iterator = statement.iterator
         array = iterator.callee
-        array_type = self.validate_expression(array)
 
-        if (
-            array_type.category is not TypeCategory.ARRAY
-            or self.resolver.array_dimension_of(array) != 1
-        ):
-            msg = "foreach currently requires a dynamic array"
+        try:
+            array_type = self.validate_expression(array)
+        except UnknownPropertyError:
+            array_type = None
+
+        if array_type is None or array_type.category is not TypeCategory.ARRAY:
+            member = self.resolver.resolve_call(iterator)
+            modifiers = member.declaration.modifiers
+
+            if (
+                FunctionModifier.NATIVE not in modifiers
+                or FunctionModifier.ITERATOR not in modifiers
+            ):
+                path = member.owner_class + member.declaration.name
+                msg = f"foreach requires a native iterator function, got {path}"
+                raise CompilationError(msg)
+
+            self.validate_call(iterator)
+            for child in statement.statements:
+                self.validate_statement(child, return_type)
+            return
+
+        if self.resolver.array_dimension_of(array) != 1:
+            msg = "foreach requires a single dynamic array"
             raise CompilationError(msg)
 
         arguments = iterator.arguments
@@ -613,7 +676,7 @@ class FunctionBodyValidator:
             actual = self.validate_expression(output)
 
             if actual != expected or self.resolver.array_dimension_of(output) != 1:
-                msg = f"Array foreach output must be a single value of type {expected!r}"
+                msg = f"Array foreach output must be a single value of type {expected}"
                 raise CompilationError(msg)
 
         for child in statement.statements:

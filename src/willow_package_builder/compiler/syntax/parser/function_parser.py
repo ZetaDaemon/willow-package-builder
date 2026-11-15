@@ -45,7 +45,7 @@ from willow_package_builder.compiler.syntax.statements import (
     Statement,
     WhileStatement,
 )
-from willow_package_builder.logging import CompilationError, SourceLocation
+from willow_package_builder.logging import CompilationError, SourceLocation, declaration_context
 from willow_package_builder.upackage import FName, ReferencePath
 
 from .declaration_syntax_parser import DeclarationSyntaxParser
@@ -427,8 +427,21 @@ class FunctionParser(DeclarationSyntaxParser):
 
     def parse_statement(self) -> Statement:
         token = self.peek()
-        statement = self._parse_statement()
-        statement.location = SourceLocation(token.line, token.column)
+        location = SourceLocation(token.line, token.column)
+        resolver = self.expression_resolver
+
+        if resolver is None:
+            statement = self._parse_statement()
+        else:
+            scope = resolver.scope
+            path = scope.class_path
+            if scope.state_name is not None:
+                path += scope.state_name
+
+            with declaration_context(path + scope.function.name, location):
+                statement = self._parse_statement()
+
+        statement.location = location
         return statement
 
     def parse_function_body(self) -> FunctionBody:

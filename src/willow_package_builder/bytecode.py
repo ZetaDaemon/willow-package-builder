@@ -388,6 +388,28 @@ class Bytecode:
         self += self._opcodes.ITERATOR_POP
 
     @contextmanager
+    def native_foreach(self, call: Bytecode, *, skip: BytecodeLabel) -> Generator[LoopBlock]:
+        """Emit a native iterator and its loop exit."""
+        advance = BytecodeLabel()
+        cleanup = BytecodeLabel()
+        loop = LoopBlock(self, advance, cleanup, iterator=True)
+
+        self += self._opcodes.ITERATOR
+        self += call
+        self += BytecodeJump(cleanup)
+
+        try:
+            yield loop
+        finally:
+            loop.active = False
+
+        self += advance
+        self += self._opcodes.ITERATOR_NEXT
+        self += cleanup
+        self += self._opcodes.ITERATOR_POP
+        self += skip
+
+    @contextmanager
     def for_statement(
         self, initializer: Bytecode, condition: Bytecode, increment: Bytecode
     ) -> Generator[LoopBlock]:
@@ -451,18 +473,24 @@ class Bytecode:
 
     @contextmanager
     def object_context(
-        self, receiver: Bytecode, result_property: ReferencePath, *, class_context: bool = False
+        self,
+        receiver: Bytecode,
+        result_property: ReferencePath,
+        *,
+        class_context: bool = False,
+        skip: BytecodeLabel | None = None,
     ) -> Generator[None]:
         origin = BytecodeLabel()
-        end = BytecodeLabel()
+        end = BytecodeLabel() if skip is None else skip
 
         self += self._opcodes.CLASS_CONTEXT if class_context else self._opcodes.CONTEXT
         self += receiver
         self += BytecodeRelativeJump(origin, end)
         self += BytecodeReference(result_property)
-        self += struct.pack("<B", 0)  # Unused fallback type when a property is supplied.
+        self += struct.pack("<B", 0)
         self += origin
 
         yield
 
-        self += end
+        if skip is None:
+            self += end

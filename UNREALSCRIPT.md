@@ -49,11 +49,10 @@ An abstract class may be emitted, but bodyless scripted functions are not yet im
   and `forcescriptorder(true|false)`.
 - `noexport` emits the C++ header export flag. The class still has a UPK export.
 
-`implements(...)` supports imported interfaces. The compiler checks the
-required methods and rejects redeclaring an interface already listed by a
-superclass. Local interface exports and calls through interface-typed
-expressions remain unsupported. `nativereplication` and `defaulttoinstanced`
-are also unsupported.
+Calls through existing interfaces, object-to-interface casts, and interface
+comparisons with `None` are supported. `QueryInterface(class'SomeInterface')`
+uses the class literal to infer the result type. Compiling new interface
+exports and serializing explicit interface property values remain unsupported.
 
 ## States
 
@@ -273,10 +272,14 @@ Implemented:
 - `break` and `continue` within loops.
 - Braced blocks and supported single-statement branches.
 - Dynamic-array `foreach`, including optional index output, `break`, `continue`, and early returns.
+- Native iterator `foreach`, such as `Actor.CollidingActors(...)`. For native
+  iterators whose first parameter is `BaseClass` of type `class<T>` and whose
+  second parameter is `out T`, the output variable can use a narrower type
+  when it can hold every result allowed by the filter. For example,
+  `class'WillowPawn'` allows a `WillowPawn` output for `CollidingActors`.
 
 Not yet implemented:
 
-- Native iterator calls.
 - `switch` / `case` / `default`.
 - Labels and `goto`.
 - State-control statements and state labels.

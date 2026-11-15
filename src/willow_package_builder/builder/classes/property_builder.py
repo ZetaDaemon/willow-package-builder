@@ -20,6 +20,7 @@ from willow_package_builder.payloads.property_payloads import (
     UClassPropertyPayload,
     UFloatPropertyPayload,
     UIntPropertyPayload,
+    UInterfacePropertyPayload,
     UNamePropertyPayload,
     UNumericAttributePropertyPayload,
     UObjectPropertyPayload,
@@ -172,6 +173,17 @@ class PropertyBuilder(BuildComponent):
                     property_class=self.references.class_object_reference(resolved.declaration_path)
                 )
 
+            case TypeCategory.INTERFACE:
+                if resolved.declaration_path is None:
+                    msg = "Resolved interface type has no declaration path"
+                    raise ValueError(msg)
+
+                payload = UInterfacePropertyPayload(
+                    interface_class=self.references.class_object_reference(
+                        resolved.declaration_path
+                    )
+                )
+
             case TypeCategory.BYTE:
                 payload = UBytePropertyPayload()
 
@@ -226,7 +238,7 @@ class PropertyBuilder(BuildComponent):
                     flags |= PropertyFlags.NEED_CTOR_LINK
 
             case _:
-                msg = f"Property {owner.reference()}.{name} requires unsupported type {resolved!r}"
+                msg = f"Property {owner.reference()}.{name} requires unsupported type {resolved}"
                 raise NotImplementedError(msg)
 
         instancing_flags = PropertyFlags.EDIT_INLINE | PropertyFlags.EXPORT_OBJECT

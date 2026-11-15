@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
 import struct
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from willow_package_builder.bytecode import (
@@ -17,7 +17,7 @@ from willow_package_builder.compiler.semantics.expression_resolver import (
 from willow_package_builder.compiler.semantics.function_body_validator import FunctionBodyValidator
 from willow_package_builder.compiler.semantics.reference_database import PRIMITIVE_TYPES
 from willow_package_builder.compiler.semantics.scope import VariableCategory
-from willow_package_builder.compiler.semantics.types import TypeCategory
+from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.declarations import (
     ParameterDeclaration,
     VariableDeclaration,
@@ -47,11 +47,13 @@ from willow_package_builder.compiler.syntax.expressions import (
     UnaryExpression,
     VectorExpression,
 )
+from willow_package_builder.compiler.syntax.keyword import Keyword
 from willow_package_builder.compiler.syntax.modifiers import (
     FunctionModifier,
     ParameterModifier,
     VariableModifier,
 )
+from willow_package_builder.compiler.syntax.punctuation import Operator
 from willow_package_builder.compiler.syntax.statements import (
     AssignmentStatement,
     BreakStatement,
@@ -67,9 +69,21 @@ from willow_package_builder.compiler.syntax.statements import (
     WhileStatement,
 )
 from willow_package_builder.games import get_game
-from willow_package_builder.logging import CompilationError, declaration_context
+from willow_package_builder.logging import (
+    CompilationError,
+    UnknownPropertyError,
+    declaration_context,
+)
 from willow_package_builder.payloads.property_payloads import UArrayPropertyPayload
-from willow_package_builder.upackage import RETURN_VALUE_NAME, FName, ReferencePath, UObject
+from willow_package_builder.upackage import (
+    CORE_FUNCTION_PATH,
+    CORE_INTERFACE_PATH,
+    CORE_OBJECT_PATH,
+    RETURN_VALUE_NAME,
+    FName,
+    ReferencePath,
+    UObject,
+)
 
 if TYPE_CHECKING:
     from willow_package_builder.builder.classes.prepared_function import PreparedFunction
@@ -77,6 +91,12 @@ if TYPE_CHECKING:
     from willow_package_builder.opcode import Opcodes
 
     from .emission_context import EmissionContext
+
+
+INTERFACE_COMPARISON_NAMES: dict[Operator | Keyword, FName] = {
+    Operator.EQUAL_EQUAL: FName("EqualEqual_InterfaceInterface"),
+    Operator.NOT_EQUAL: FName("NotEqual_InterfaceInterface"),
+}
 
 
 @dataclass
@@ -109,8 +129,9 @@ class FunctionEmitter:
             TypeCategory.ARRAY,
             TypeCategory.BYTE,
             TypeCategory.STRUCT,
+            TypeCategory.INTERFACE,
         ):
-            msg = f"Variable bytecode for type {resolved!r} is not supported yet"
+            msg = f"Variable bytecode for type {resolved} is not supported yet"
             raise NotImplementedError(msg)
 
         if not array_operand and symbol.declaration.array_dimension != 1:
@@ -144,6 +165,12 @@ class FunctionEmitter:
         expected = self.resolver.resolve_declared_type(parameter.type_ref, owner)
         script = Bytecode()
 
+        if expected.category is TypeCategory.INTERFACE and isinstance(expression, NoneExpression):
+            script += self._opcodes.INTERFACE_CAST
+            script += BytecodeReference(self.builder.class_object_reference(CORE_INTERFACE_PATH))
+            script += self._opcodes.NO_OBJECT
+            return script
+
         if actual.category is TypeCategory.ENUM and expected.category is TypeCategory.INT:
             selector = get_game().PRIMITIVE_CAST_SELECTORS.BYTE_TO_INT
         else:
@@ -161,11 +188,36 @@ class FunctionEmitter:
         member = self.resolver.resolve_operator(expression)
         operator = member.declaration
 
-        if operator.native_index is None or operator.native_index == 0:
-            msg = (
-                f"Scripted operator calls are not supported yet: "
-                f"{member.owner_class}.{operator.name}"
-            )
+        if not operator.native_index:
+            export_name = INTERFACE_COMPARISON_NAMES.get(expression.operator)
+            if (
+                member.owner_class == CORE_OBJECT_PATH
+                and FunctionModifier.NATIVE in operator.modifiers
+                and export_name is not None
+                and all(
+                    self.resolver.resolve_declared_type(parameter.type_ref, member.owner_class)
+                    == ResolvedType(TypeCategory.INTERFACE, CORE_INTERFACE_PATH)
+                    for parameter in operator.parameters
+                )
+            ):
+                outer = self.builder.class_object_reference(member.owner_class)
+                reference = self.builder.ensure_import(
+                    export_name, outer, *CORE_FUNCTION_PATH.full_split()
+                )
+
+                script = Bytecode()
+                script += self._opcodes.FINAL_FUNCTION
+                script += BytecodeReference(reference)
+                script += self._emit_operator_operand(
+                    expression.left, operator.parameters[0], member.owner_class
+                )
+                script += self._emit_operator_operand(
+                    expression.right, operator.parameters[1], member.owner_class
+                )
+                script += self._opcodes.END_FUNCTION_PARAMS
+                return script
+
+            msg = f"Operator {member.owner_class}.{operator.name} has no supported call encoding"
             raise NotImplementedError(msg)
 
         if ParameterModifier.SKIP in operator.parameters[0].modifiers:
@@ -281,8 +333,15 @@ class FunctionEmitter:
         result_property = self._call_return_property(expression)
 
         static_class = self.resolver.resolve_static_call_class(expression)
+
         if static_class is None:
-            receiver = self.emit_expression(expression.callee.object)
+            receiver_expression = expression.callee.object
+            receiver = Bytecode()
+            if self.resolver.type_of(receiver_expression).category is TypeCategory.INTERFACE:
+                receiver += self._opcodes.INTERFACE_CONTEXT
+
+            receiver += self.emit_expression(receiver_expression)
+
         else:
             receiver = Bytecode()
             receiver += self._opcodes.OBJECT_CONST
@@ -325,7 +384,7 @@ class FunctionEmitter:
             TypeCategory.ENUM,
             TypeCategory.STRUCT,
         ):
-            msg = f"Member bytecode for type {resolved!r} is not implemented yet"
+            msg = f"Member bytecode for type {resolved} is not implemented yet"
             raise NotImplementedError(msg)
 
         receiver_type = self.resolver.type_of(expression.object)
@@ -442,9 +501,18 @@ class FunctionEmitter:
             case CastExpression():
                 if expression.target.name not in PRIMITIVE_TYPES:
                     target = self.resolver.resolve_object_cast(expression)
+                    path = target.declaration_path
+                    if path is None:
+                        msg = f"Cast target {target} has no declaration path"
+                        raise ValueError(msg)
+
                     script = Bytecode()
-                    script += self._opcodes.DYNAMIC_CAST
-                    script += BytecodeReference(self.builder.class_object_reference(target))
+                    script += (
+                        self._opcodes.INTERFACE_CAST
+                        if target.category is TypeCategory.INTERFACE
+                        else self._opcodes.DYNAMIC_CAST
+                    )
+                    script += BytecodeReference(self.builder.class_object_reference(path))
                     script += self.emit_expression(expression.operand)
                     return script
 
@@ -727,19 +795,40 @@ class FunctionEmitter:
 
     def _emit_foreach_statement(self, statement: ForeachStatement) -> Bytecode:
         iterator = statement.iterator
-        array = self._emit_array_operand(iterator.callee)
-        item = iterator.arguments[0]
-        index = iterator.arguments[1] if len(iterator.arguments) == 2 else None
-
-        if item is None:
-            msg = "Array foreach requires an item output"
-            raise CompilationError(msg)
-
+        callee = iterator.callee
         script = Bytecode()
-        item_code = self.emit_expression(item)
-        index_code = None if index is None else self.emit_expression(index)
 
-        with script.array_foreach(array, item_code, index_code) as loop:
+        try:
+            callee_type = self.resolver.type_of(callee)
+        except UnknownPropertyError:
+            callee_type = None
+
+        if callee_type is not None and callee_type.category is TypeCategory.ARRAY:
+            array = self._emit_array_operand(callee)
+            item = iterator.arguments[0]
+            index = iterator.arguments[1] if len(iterator.arguments) == 2 else None
+
+            if item is None:
+                msg = "Array foreach requires an item output"
+                raise CompilationError(msg)
+
+            item_code = self.emit_expression(item)
+            index_code = None if index is None else self.emit_expression(index)
+            loop_context = script.array_foreach(array, item_code, index_code)
+        else:
+            skip = BytecodeLabel()
+            call = self._emit_call_body(iterator)
+
+            if isinstance(callee, MemberExpression):
+                receiver = self.emit_expression(callee.object)
+                contextual_call = Bytecode()
+                with contextual_call.object_context(receiver, ReferencePath(), skip=skip):
+                    contextual_call += call
+                call = contextual_call
+
+            loop_context = script.native_foreach(call, skip=skip)
+
+        with loop_context as loop:
             self._loops.append(loop)
             try:
                 for child in statement.statements:

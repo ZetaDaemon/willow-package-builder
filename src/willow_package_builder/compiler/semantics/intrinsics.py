@@ -69,6 +69,7 @@ PROPERTY_CLASS_PATHS: dict[TypeCategory, ReferencePath] = {
         TypeCategory.CLASS: "Core.ClassProperty",
         TypeCategory.STRUCT: "Core.StructProperty",
         TypeCategory.ENUM: "Core.ByteProperty",
+        TypeCategory.INTERFACE: "Core.InterfaceProperty",
     }.items()
 }
 

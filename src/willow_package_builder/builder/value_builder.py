@@ -249,6 +249,9 @@ class ValueBuilder(BuildComponent):
                     msg = f"{context}: {error}"
                     raise ValueBuildError(msg) from error
 
+            case TypeCategory.INTERFACE, None:
+                return NullValue()
+
             case TypeCategory.OBJECT, _:
                 return self._build_object_value(context, value, resolved_type)
 

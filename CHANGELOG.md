@@ -1,4 +1,24 @@
 # Chagelog
+## [0.6]
+### Additions
+- Compile native `foreach` iterators such as `CollidingActors`. For supported
+  `BaseClass` iterator signatures, the class filter can narrow the writable
+  output variable's type.
+- Support interface-typed variables, calls through existing interfaces,
+  object-to-interface casts, and interface comparisons with `None`.
+  `QueryInterface()` infers the result type from an interface class literal.
+
+### Fixes
+- Resolve class literals in property defaults to the correct local class export.
+- Accept `None` for scalar object and class arguments and return values.
+- Support equality comparisons between class references and `None`.
+- Report statement locations for errors raised while parsing function bodies.
+
+### Build output
+- Log `Building object` for objects placed directly in package folders.
+  Subobjects are built quietly, including those defined in an object's
+  matching folder.
+  
 ## [0.5.1]
 ### Performance
 - Index structs and enums by name to speed up type resolution during builds.

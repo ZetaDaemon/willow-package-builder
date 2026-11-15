@@ -20,6 +20,7 @@ class TypeCategory(StrEnum):
     STRUCT = "struct"
     ENUM = "enum"
     DELEGATE = "delegate"
+    INTERFACE = "interface"
 
 
 @dataclass(frozen=True)

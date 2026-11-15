@@ -284,9 +284,8 @@ class ValueSerializer:
             class_package, object_class = CORE_CLASS_PATH.full_split()
 
             if package_path.name == self.package.name:
-                reference = package_path + class_name
-                target = self.package.lookup_object_by_path(reference)
-                return target.reference().serialize(self.package)
+                reference = ReferencePath(class_name)
+                return reference.serialize(self.package)
 
             config = next(
                 config for config in self.context.packages if config.name == package_path.name

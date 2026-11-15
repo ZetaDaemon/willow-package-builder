@@ -391,8 +391,8 @@ class ReferenceDatabase:
             )
             bound = self.resolve_type(bound_ref, current_class, visible_packages, parents)
 
-            if bound.category is not TypeCategory.OBJECT:
-                msg = "class requires an object class as its bound"
+            if bound.category not in (TypeCategory.OBJECT, TypeCategory.INTERFACE):
+                msg = "class requires a class or interface as its bound"
                 raise CompilationError(msg)
 
             return ResolvedType(TypeCategory.CLASS, arguments=(bound,))
@@ -435,6 +435,12 @@ class ReferenceDatabase:
         class_path = self.resolve_class_path(
             name, current_package, visible_packages, include_intrinsics=True
         )
+        declaration = self.classes.get(class_path)
+        if class_path == CORE_INTERFACE_PATH or (
+            declaration is not None and declaration.is_interface
+        ):
+            return ResolvedType(TypeCategory.INTERFACE, class_path)
+
         return ResolvedType(TypeCategory.OBJECT, class_path)
 
     def resolve_struct(
@@ -521,8 +527,15 @@ class ReferenceDatabase:
 
         if (
             name in (Operator.EQUAL_EQUAL, Operator.NOT_EQUAL)
-            and actual.category is TypeCategory.OBJECT
+            and actual.category in (TypeCategory.OBJECT, TypeCategory.CLASS)
             and expected == ResolvedType(TypeCategory.OBJECT, CORE_OBJECT_PATH)
+        ):
+            return 1
+
+        if (
+            name in (Operator.EQUAL_EQUAL, Operator.NOT_EQUAL)
+            and actual.category is TypeCategory.INTERFACE
+            and expected == ResolvedType(TypeCategory.INTERFACE, CORE_INTERFACE_PATH)
         ):
             return 1
 
@@ -575,12 +588,12 @@ class ReferenceDatabase:
                 best = [operator for cost, operator in matches if cost == fewest_conversions]
 
                 if len(best) > 1:
-                    msg = f"Ambiguous overload of {name!r} on {owner} for {left!r} and {right!r}"
+                    msg = f"Ambiguous overload of {name!r} on {owner} for {left} and {right}"
                     raise CompilationError(msg)
 
                 return ResolvedMember(owner, best[0])
 
-        msg = f"No exact overload of {name!r} for {left!r} and {right!r}"
+        msg = f"No exact overload of {name!r} for {left} and {right}"
         raise CompilationError(msg)
 
     def lookup_class(self, path: ReferencePath) -> ClassDeclaration | IntrinsicDefinition:
@@ -640,14 +653,13 @@ class ReferenceDatabase:
                 best = [operator for cost, operator in matches if cost == best_cost]
                 if len(best) > 1:
                     msg = (
-                        f"Ambiguous {category.value} overload of {name!r} "
-                        f"on {owner} for {operand!r}"
+                        f"Ambiguous {category.value} overload of {name!r} on {owner} for {operand}"
                     )
                     raise CompilationError(msg)
 
                 return ResolvedMember(owner, best[0])
 
-        msg = f"No matching {category.value} overload of {name!r} for {operand!r}"
+        msg = f"No matching {category.value} overload of {name!r} for {operand}"
         raise CompilationError(msg)
 
     def resolve_struct_variable(

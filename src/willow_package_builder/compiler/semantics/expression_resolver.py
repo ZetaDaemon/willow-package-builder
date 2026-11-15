@@ -46,9 +46,11 @@ from willow_package_builder.logging import (
 )
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.upackage import (
+    CORE_INTERFACE_PATH,
     CORE_OBJECT_PATH,
     CORE_VECTOR_PATH,
     ENGINE_ACTOR_PATH,
+    QUERY_INTERFACE_PATH,
     FName,
     ReferencePath,
 )
@@ -154,6 +156,17 @@ class ExpressionResolver:
     def resolve_operator(self, expression: BinaryExpression) -> ResolvedMember[OperatorDeclaration]:
         left = self.type_of(expression.left)
         right = self.type_of(expression.right)
+
+        if expression.operator in (Operator.EQUAL_EQUAL, Operator.NOT_EQUAL):
+            if left.category is TypeCategory.INTERFACE and isinstance(
+                expression.right, NoneExpression
+            ):
+                right = ResolvedType(TypeCategory.INTERFACE, CORE_INTERFACE_PATH)
+            elif right.category is TypeCategory.INTERFACE and isinstance(
+                expression.left, NoneExpression
+            ):
+                left = ResolvedType(TypeCategory.INTERFACE, CORE_INTERFACE_PATH)
+
         if self.scope.class_path.outer is None:
             msg = f"Expected fully qualified class, got {self.scope.class_path}"
             raise ValueError(msg)
@@ -263,6 +276,12 @@ class ExpressionResolver:
         self, expression: Expression, source: ResolvedType, target: ResolvedType
     ) -> Opcode | None:
         if self.array_dimension_of(expression) == 1:
+            if isinstance(expression, NoneExpression) and target.category in (
+                TypeCategory.OBJECT,
+                TypeCategory.CLASS,
+            ):
+                return None
+
             if self.accepts_value_type(target, source):
                 return None
 
@@ -287,20 +306,20 @@ class ExpressionResolver:
             for package_name in self._visibility[package] | {package}
         )
 
-    def resolve_object_cast(self, expression: CastExpression) -> ReferencePath:
+    def resolve_object_cast(self, expression: CastExpression) -> ResolvedType:
         target = self.resolve_declared_type(expression.target, self.scope.class_path)
         source = self.type_of(expression.operand)
 
         if (
-            target.category is not TypeCategory.OBJECT
+            target.category not in (TypeCategory.OBJECT, TypeCategory.INTERFACE)
             or target.declaration_path is None
             or source.category is not TypeCategory.OBJECT
             or self.array_dimension_of(expression.operand) != 1
         ):
-            msg = f"Object cast requires a scalar object operand and a class target: {target!r}"
+            msg = f"Cast to {target} requires a scalar object and a class or interface target"
             raise CompilationError(msg)
 
-        return target.declaration_path
+        return target
 
     def resolve_primitive_cast(
         self, expression: CastExpression
@@ -424,8 +443,9 @@ class ExpressionResolver:
     def type_of(self, expression: Expression) -> ResolvedType:
         match expression:
             case ClassLiteralExpression(path=path):
-                target = ResolvedType(TypeCategory.OBJECT, self.resolve_class_literal(path))
-                return ResolvedType(TypeCategory.CLASS, arguments=(target,))
+                class_path = self.resolve_class_literal(path)
+                bound = self.resolve_declared_type(TypeReference(class_path), self.scope.class_path)
+                return ResolvedType(TypeCategory.CLASS, arguments=(bound,))
 
             case NewExpression():
                 target = self.resolve_class_literal(expression.object_class.path)
@@ -490,7 +510,7 @@ class ExpressionResolver:
 
             case CastExpression():
                 if expression.target.name not in PRIMITIVE_TYPES:
-                    return ResolvedType(TypeCategory.OBJECT, self.resolve_object_cast(expression))
+                    return self.resolve_object_cast(expression)
 
                 target, _ = self.resolve_primitive_cast(expression)
                 return target
@@ -507,6 +527,16 @@ class ExpressionResolver:
                     return ResolvedType(result)
 
                 function = self.resolve_call(expression)
+
+                function_path = function.owner_class + function.declaration.name
+                if (
+                    function_path == QUERY_INTERFACE_PATH
+                    and len(expression.arguments) == 1
+                    and isinstance(expression.arguments[0], ClassLiteralExpression)
+                ):
+                    (bound,) = self.type_of(expression.arguments[0]).arguments
+                    if bound.category is TypeCategory.INTERFACE:
+                        return bound
 
                 return self.resolve_declared_type(
                     function.declaration.return_type, function.owner_class
@@ -579,7 +609,7 @@ class ExpressionResolver:
                     return true_type
 
                 if true_type != false_type:
-                    msg = f"Conditional branches must match, got {true_type!r} and {false_type!r}"
+                    msg = f"Conditional branches must match, got {true_type} and {false_type}"
                     raise CompilationError(msg)
 
                 return true_type
@@ -637,7 +667,7 @@ class ExpressionResolver:
         if len(precedences) > 1:
             msg = (
                 f"Cannot determine precedence for {name!r} from "
-                f"left operand type {left!r}; right-dependent precedence "
+                f"left operand type {left}; right-dependent precedence "
                 "is not supported yet"
             )
             raise NotImplementedError(msg)
@@ -798,7 +828,7 @@ class ExpressionResolver:
             case MemberExpression():
                 receiver = self.type_of(expression.callee.object)
 
-                if receiver.category is not TypeCategory.OBJECT:
+                if receiver.category not in (TypeCategory.OBJECT, TypeCategory.INTERFACE):
                     msg = f"Function calls on {receiver.category.value} are not implemented yet"
                     raise NotImplementedError(msg)
 
@@ -956,7 +986,7 @@ class ExpressionResolver:
         for parameter in function.parameters:
             parameter_type = self.resolve_declared_type(parameter.type_ref, member.owner_class)
             if parameter.array_dimension != 1 or parameter_type != element_type:
-                msg = f"Sort comparator parameter {parameter.name} must have type {element_type!r}"
+                msg = f"Sort comparator parameter {parameter.name} must have type {element_type}"
                 raise CompilationError(msg)
 
         return member
@@ -1053,9 +1083,9 @@ class ExpressionResolver:
 
             return self.accepts_value_type(expected.arguments[0], actual.arguments[0])
 
-        if (
-            expected.category is not TypeCategory.OBJECT
-            or actual.category is not TypeCategory.OBJECT
+        if expected.category != actual.category or expected.category not in (
+            TypeCategory.OBJECT,
+            TypeCategory.INTERFACE,
         ):
             return False
 

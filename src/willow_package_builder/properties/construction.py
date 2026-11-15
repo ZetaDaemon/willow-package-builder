@@ -33,7 +33,7 @@ def initial_scalar_value(resolved_type: ResolvedType) -> Value:
         case TypeCategory.NAME:
             return NameValue()
 
-        case TypeCategory.OBJECT | TypeCategory.CLASS:
+        case TypeCategory.OBJECT | TypeCategory.CLASS | TypeCategory.INTERFACE:
             return NullValue()
 
         case TypeCategory.ARRAY:
