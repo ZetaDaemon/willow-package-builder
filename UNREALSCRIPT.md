@@ -165,7 +165,10 @@ Delegate variables and qualified comparator expressions are unsupported for
 
 - Delegate signatures may be parsed from reference declarations, but delegate property construction and delegate invocation/assignment are not yet implemented by the custom class compiler.
 - Native `map` type resolution is not yet implemented.
-- Function expressions can use unqualified class constants initialized with integer literals, including inherited constants. General constant-expression evaluation remains unsupported.
+- Function expressions can use unqualified class constants initialized with
+  integer or float literals, including negative literals and constants
+  inherited from a superclass. General constant-expression evaluation remains
+  unsupported.
 
 ## Functions
 

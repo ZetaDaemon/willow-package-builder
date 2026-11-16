@@ -389,7 +389,7 @@ class ExpressionResolver:
 
         return EnumMemberExpression(enum_path, enum.members.index(name))
 
-    def resolve_integer_constant(self, name: FName) -> IntegerExpression | None:
+    def resolve_numeric_constant(self, name: FName) -> IntegerExpression | FloatExpression | None:
         try:
             self.scope.resolve_variable(name)
         except UnknownPropertyError:
@@ -413,7 +413,18 @@ class ExpressionResolver:
                     ):
                         return IntegerExpression(-int(value))
 
-                msg = f"Constant {owner + name} must be an integer literal in function expressions"
+                    case [Token(category=TokenCategory.FLOAT) as value]:
+                        return FloatExpression(float(value))
+
+                    case [sign, Token(category=TokenCategory.FLOAT) as value] if (
+                        sign == Operator.SUBTRACT
+                    ):
+                        return FloatExpression(-float(value))
+
+                    case _:
+                        pass
+
+                msg = f"Constant {owner + name} must be a numeric literal in function expressions"
                 raise NotImplementedError(msg)
 
         return None

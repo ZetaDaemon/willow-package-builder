@@ -43,6 +43,18 @@ EMPTY_MIP_COUNT = 0
 BYTES_PER_PIXEL = 4
 MAX_EXPERIMENTAL_DIMENSION = 4096
 
+SIZE_X_FIELD = FName("SizeX")
+SIZE_Y_FIELD = FName("SizeY")
+ORIGINAL_SIZE_X_FIELD = FName("OriginalSizeX")
+ORIGINAL_SIZE_Y_FIELD = FName("OriginalSizeY")
+FORMAT_FIELD = FName("Format")
+NEVER_STREAM_FIELD = FName("NeverStream")
+MIP_TAIL_BASE_IDX_FIELD = FName("MipTailBaseIdx")
+TEXTURE_FILE_CACHE_NAME_FIELD = FName("TextureFileCacheName")
+MIP_GEN_SETTINGS_FIELD = FName("MipGenSettings")
+LOD_GROUP_FIELD = FName("LODGroup")
+GORE_TEXTURE_FIELD = FName("bGoreTexture")
+
 
 class BulkDataFlags(IntFlag):
     """Bulk-data storage flags used by this experiment."""
@@ -85,7 +97,7 @@ class Texture2DHandler(ClassHandler[Texture2DFields]):
         self._pixels = b""
 
     @override
-    def initialize(self, obj: UObject) -> None:
+    def build_properties(self, obj: UObject) -> None:
         payload = cast("ObjectInstancePayload", obj.payload)
         if payload.class_path != self.CLASS_PATH:
             msg = "Experimental texture handling supports Texture2D itself, not native subclasses"
@@ -132,6 +144,21 @@ class Texture2DHandler(ClassHandler[Texture2DFields]):
         self.reference.MipGenSettings = NO_MIPMAPS_NAME
         self.reference.LODGroup = UI_TEXTURE_GROUP_NAME
         self.reference.bGoreTexture = False
+
+        for field in (
+            SIZE_X_FIELD,
+            SIZE_Y_FIELD,
+            ORIGINAL_SIZE_X_FIELD,
+            ORIGINAL_SIZE_Y_FIELD,
+            FORMAT_FIELD,
+            NEVER_STREAM_FIELD,
+            MIP_TAIL_BASE_IDX_FIELD,
+            TEXTURE_FILE_CACHE_NAME_FIELD,
+            MIP_GEN_SETTINGS_FIELD,
+            LOD_GROUP_FIELD,
+            GORE_TEXTURE_FIELD,
+        ):
+            self.build_property(field)
 
     @override
     def serialize(

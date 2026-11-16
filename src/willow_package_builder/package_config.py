@@ -52,8 +52,14 @@ class PackageConfig:
             msg = f"{directory}: Package must contain Classes or Objects"
             raise ConfigError(msg)
 
-        with (directory / PACKAGE_CONFIG_FILENAME).open("rb") as file:
-            data = tomllib.load(file)
+        config_path = directory / PACKAGE_CONFIG_FILENAME
+
+        try:
+            with config_path.open("rb") as file:
+                data = tomllib.load(file)
+        except (OSError, tomllib.TOMLDecodeError) as error:
+            msg = f"{config_path}: {error}"
+            raise ConfigError(msg) from error
 
         name = data.get("name")
         references = cls._resolve_paths(directory, data, "references")

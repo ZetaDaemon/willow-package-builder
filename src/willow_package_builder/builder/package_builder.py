@@ -137,31 +137,31 @@ class PackageBuilder:
     def build(self) -> Package:
         info(f"Preparing package {self.config.name}")
         class_names = tuple(self.context.loader.class_names(self.config.name))
+        if class_names:
+            info("Building class defaults")
+            start = perf_counter()
+            self.prepare_class_defaults(class_names)
+            info(f"Built class defaults in {perf_counter() - start:.3f}s")
 
-        info("Building class defaults")
-        start = perf_counter()
-        self.prepare_class_defaults(class_names)
-        info(f"Built class defaults in {perf_counter() - start:.3f}s")
+            info("Preparing default subobjects")
+            start = perf_counter()
+            templates_by_class = {
+                class_path: self.defaults.prepare_default_objects(class_path)
+                for class_path in class_names
+            }
+            info(f"Prepared default subobjects in {perf_counter() - start:.3f}s")
 
-        info("Preparing default subobjects")
-        start = perf_counter()
-        templates_by_class = {
-            class_path: self.defaults.prepare_default_objects(class_path)
-            for class_path in class_names
-        }
-        info(f"Prepared default subobjects in {perf_counter() - start:.3f}s")
+            info("Compiling classes")
+            self.compile_classes()
 
-        info("Compiling classes")
-        self.compile_classes()
+            self.object_builder.build_default_objects(templates_by_class)
+            for class_path in self.classes:
+                parent = self.context.parents[class_path]
+                if parent is None or parent in self.classes:
+                    continue
 
-        self.object_builder.build_default_objects(templates_by_class)
-        for class_path in self.classes:
-            parent = self.context.parents[class_path]
-            if parent is None or parent in self.classes:
-                continue
-
-            templates = self.defaults.reference_component_templates(parent)
-            self.object_builder.build_reference_components(class_path, templates)
+                templates = self.defaults.reference_component_templates(parent)
+                self.object_builder.build_reference_components(class_path, templates)
 
         info("Reading objects")
         self.object_builder.read_objects()

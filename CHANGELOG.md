@@ -1,4 +1,25 @@
 # Chagelog
+## [0.7]
+### Additions
+- Skip rebuilding unchanged packages when their UPK and manifest are present.
+  Editing an objects-only package can reuse its required class package.
+- Support inline `AttributeInitializationData` for weights and game stages in
+  BL2 `WeaponPartListDefinition` and `WeaponPartListCollectionDefinition` YAML.
+  WPB generates `ConsolidatedAttributeInitData` and the corresponding indexes.
+  Collections can reuse a local archetype's table and append entries while
+  preserving inherited indexes.
+- Support unqualified class constants initialized with float literals in
+  UnrealScript function expressions, including inherited constants.
+- Provide a `package.tosd` template for schema-aware editors and tools.
+
+### Fixes
+- Include the YAML file, document number, and part-row path in part-list index
+  errors.
+- Report malformed or unreadable `package.toml` files as configuration errors
+  with the file path.
+- Skip class-loading and class-compilation messages for packages with no class
+  sources of their own.
+
 ## [0.6]
 ### Additions
 - Compile native `foreach` iterators such as `CollidingActors`. For supported

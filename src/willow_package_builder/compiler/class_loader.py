@@ -624,6 +624,10 @@ class ClassLoader:
     def load_declarations(self) -> None:
         """Load all configured declarations in package dependency order."""
         for config in self.packages:
+            class_names = self.class_names(config.name)
+            if not class_names:
+                continue
+
             reference_only = config.directory not in self.build_packages
             category = "reference package" if reference_only else "package"
             info(f"Loading declarations for {category} {config.name}")
@@ -631,7 +635,7 @@ class ClassLoader:
             start = perf_counter()
             count = 0
 
-            for key in sorted((self.class_names(config.name))):
+            for key in sorted(class_names):
                 if self._load_class_declaration(key) is not None:
                     count += 1
 

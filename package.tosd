@@ -1,0 +1,25 @@
+[toml-schema]
+version = "1.0.0"
+
+[types.packagePath]
+type = "string"
+minlength = 1
+
+[elements.name]
+type = "string"
+pattern = '[^ \t\n\r\f\v]'
+description = "Name of the Unreal package and its output UPK."
+
+[elements.required]
+type = "array"
+itemtype = "types.packagePath"
+optional = true
+default = []
+description = "Package directories to build before this package. Relative paths resolve from the directory containing package.toml."
+
+[elements.references]
+type = "array"
+itemtype = "types.packagePath"
+optional = true
+default = []
+description = "Package directories to read for class and type declarations. Relative paths resolve from the directory containing package.toml."

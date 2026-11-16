@@ -344,11 +344,16 @@ class ObjectBuilder(BuildComponent):
                         handler.extra_values = self._build_handler_extras(handler, obj)
                         payload.handler = handler
                         payload.owner = obj
-                        handler.object_reference.bind(
-                            partial(self._read_handler_field, handler, obj),
-                            partial(self._write_handler_field, handler, obj),
+                        handler.bind_property_access(
+                            partial(self._build_handler_property, handler, obj),
+                            partial(self._read_handler_archetype_property, obj),
+                            partial(self._read_handler_archetype_input, obj),
                         )
-                        handler.initialize(obj)
+                        try:
+                            handler.build_properties(obj)
+                        except ObjectDefinitionError as error:
+                            msg = f"{definition.source}, document {definition.document}: {error}"
+                            raise ObjectDefinitionError(msg) from error
 
                 except ValueBuildError as error:
                     msg = str(error)
@@ -740,65 +745,11 @@ class ObjectBuilder(BuildComponent):
 
         return payload
 
-    def _read_handler_field(self, handler: ClassHandler, obj: UObject, name: FName) -> object:
-        """Read handler input or an effective constructed property."""
-        definition = handler.definition
-
-        if name in handler.EXTRA_FIELDS:
-            try:
-                if handler.EXTRA_FIELDS[name] is None:
-                    return deepcopy(definition.properties[name])
-
-                return value_to_python(handler.extra_values[name])
-            except KeyError:
-                msg = f"Object {definition.reference} has no extra field {name}"
-                raise AttributeError(msg) from None
-
-        payload = self._handler_payload(obj)
-        member = self.context.references.resolve_variable(
-            payload.class_path, name, self.context.parents
-        )
-        name = member.declaration.name
-
-        if name in payload.properties:
-            return value_to_python(payload.properties[name])
-
-        if name in handler.HANDLED_PROPERTIES and name in definition.properties:
-            return deepcopy(definition.properties[name])
-
-        external = self.external_archetype(obj)
-
-        if external is not None and name not in self.known_archetype_properties(obj):
-            msg = (
-                f"Cannot determine {obj.reference()}.{name}: "
-                f"external archetype values are unavailable for {external}"
-            )
-            raise NotImplementedError(msg)
-
-        value = self.archetype_property_value(obj, payload.class_path, name)
-        return value_to_python(value)
-
-    def _write_handler_field(
+    def _build_handler_property(
         self, handler: ClassHandler, obj: UObject, name: FName, value: object
     ) -> None:
         """Update handler input or construct an explicit property override."""
         definition = handler.definition
-
-        if name in handler.EXTRA_FIELDS:
-            resolved = handler.EXTRA_FIELDS[name]
-
-            if resolved is not None:
-                values = replace(
-                    self.values,
-                    reference_base=obj.reference(),
-                    external_archetype=None,
-                    known_archetype_properties=frozenset(),
-                )
-                context = f"{definition.source}, document {definition.document}, extra field {name}"
-                handler.extra_values[name] = values.build_value(context, value, resolved)
-
-            definition.properties[name] = deepcopy(value)
-            return
 
         payload = self._handler_payload(obj)
         member = self.context.references.resolve_variable(
@@ -830,6 +781,46 @@ class ObjectBuilder(BuildComponent):
         payload.properties[name] = values.build_field_value(
             context, variable, value, resolved, existing
         )
+
+    def _read_handler_archetype_input(self, obj: UObject, name: FName) -> object:
+        """Find the nearest exported override and read its handler input."""
+        current = obj.archetype
+
+        while not current.is_none():
+            target = self.package.lookup_object_by_path(current)
+            if not isinstance(target, UObject):
+                break
+
+            payload = self._handler_payload(target)
+            if name in payload.properties:
+                if payload.handler is None:
+                    msg = f"Cannot read build input for {target.reference()}.{name}"
+                    raise ObjectDefinitionError(msg)
+
+                return payload.handler.read_built_property_input(name)
+
+            current = target.archetype
+
+        inherited = self._read_handler_archetype_property(obj, name)
+        if isinstance(inherited, ArrayValue) and not inherited.elements:
+            return []
+
+        msg = f"Cannot read inherited build input for {name}; supply it explicitly"
+        raise ObjectDefinitionError(msg)
+
+    def _read_handler_archetype_property(self, obj: UObject, name: FName) -> Value:
+        payload = self._handler_payload(obj)
+        member = self.context.references.resolve_variable(
+            payload.class_path, name, self.context.parents
+        )
+        name = member.declaration.name
+
+        external = self.external_archetype(obj)
+        if external is not None and name not in self.known_archetype_properties(obj):
+            msg = f"Cannot read inherited {name} from external archetype {external}"
+            raise ObjectDefinitionError(msg)
+
+        return self.archetype_property_value(obj, payload.class_path, name)
 
     @staticmethod
     def properties_are_instanced(modifiers: tuple[VariableModifier, ...]) -> bool:

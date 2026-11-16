@@ -1,10 +1,16 @@
+from hashlib import sha256
 import json
 from collections.abc import Mapping
 from pathlib import Path
 from time import perf_counter
 
+from willow_package_builder.build_fingerprints import (
+    builder_code_fingerprint,
+    package_build_fingerprints,
+)
 from willow_package_builder.compiler.class_loader import ClassLoader
 from willow_package_builder.compiler.semantics.reference_database import ReferenceDatabase
+from willow_package_builder.games import get_game
 from willow_package_builder.package_config import collect_build_packages, load_package_graph
 
 from .builder.build_context import BuildContext
@@ -61,11 +67,41 @@ def build_package(
 
     with logger.catch_errors_and_warnings():
         context = prepare_build(target_directory)
+        fingerprints = package_build_fingerprints(
+            context.packages,
+            target=get_game().TARGET.value,
+            builder_identity=json.dumps(
+                {
+                    "code": builder_code_fingerprint(),
+                    "warnings": {
+                        code.value: action.value for code, action in (warning_actions or {}).items()
+                    },
+                },
+                sort_keys=True,
+            ),
+        )
         outputs: list[Path] = []
 
         for config in context.packages:
             if config.directory not in context.build_packages:
                 continue
+
+            output_path = config.output_path(output_directory)
+            manifest_path = output_path.with_suffix(".manifest.json")
+            output_key = sha256(str(output_path).encode("utf-8")).hexdigest()
+            stamp_path = config.directory / ".willow-cache" / "builds" / f"{output_key}.fingerprint"
+            fingerprint = fingerprints[config.directory]
+
+            if output_path.is_file() and manifest_path.is_file():
+                try:
+                    previous_fingerprint = stamp_path.read_text(encoding="utf-8").strip()
+                except OSError, UnicodeError:
+                    previous_fingerprint = None
+
+                if previous_fingerprint == fingerprint:
+                    info(f"Skipping {config.name}; package is up to date")
+                    outputs.append(output_path)
+                    continue
 
             try:
                 builder = PackageBuilder(context, config)
@@ -76,17 +112,18 @@ def build_package(
                 msg = f"Failed to build package {config.name!r}: {exc}"
                 raise CompilationError(msg) from exc
 
-            output_path = config.output_path(output_directory)
             output_path.parent.mkdir(parents=True, exist_ok=True)
+            stamp_path.unlink(missing_ok=True)
             output_path.write_bytes(data)
 
             outputs.append(output_path)
             info(f"Wrote {config.name} to {output_path}")
 
-            manifest_path = output_path.with_suffix(".manifest.json")
             manifest_path.write_text(
                 json.dumps(builder.manifest(), indent=2, ensure_ascii=False) + "\n",
                 encoding="utf-8",
             )
+            stamp_path.parent.mkdir(parents=True, exist_ok=True)
+            stamp_path.write_text(f"{fingerprint}\n", encoding="utf-8")
 
     return tuple(outputs)

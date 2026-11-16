@@ -11,8 +11,7 @@ from willow_package_builder.games import TargetGame
 from willow_package_builder.logging import ObjectDefinitionError
 from willow_package_builder.objects.definitions import FolderDefinition
 from willow_package_builder.payloads.instance_payload import ObjectInstancePayload
-from willow_package_builder.properties.reference_text import parse_reference_text
-from willow_package_builder.properties.values import IntValue
+from willow_package_builder.properties.values import IntValue, ObjectValue
 from willow_package_builder.upackage import FName, ReferencePath, UObject
 
 from .class_handler import ClassHandler
@@ -39,6 +38,9 @@ HEIGHT_FIELD = FName("Height")
 SOURCE_FIELD = FName("Source")
 
 MOVIE_HEADER = struct.Struct("<3sBI")
+
+RAW_DATA_NAME = FName("RawData")
+REFERENCES_FIELD = FName("References")
 
 
 class MovieSignature(Enum):
@@ -84,7 +86,7 @@ class SwfMovieHandler(ClassHandler[SwfMovieFields]):
         self._texture_path = ReferencePath()
 
     @override
-    def initialize(self, obj: UObject) -> None:
+    def build_properties(self, obj: UObject) -> None:
         outer = self.definition.outer
 
         if not isinstance(outer, FolderDefinition) or outer.outer is not None:
@@ -171,33 +173,23 @@ class SwfMovieHandler(ClassHandler[SwfMovieFields]):
             raise ObjectDefinitionError(msg)
 
         self.reference.RawData = list(data)
+        self.build_property(RAW_DATA_NAME)
 
     def _initialize_texture(self) -> None:
-        """Resolve the texture input for image-movie generation."""
-        raw = self.reference.Texture
-        if isinstance(raw, ReferencePath):
-            path = raw
-
-        elif isinstance(raw, str):  # pyright: ignore[reportUnnecessaryIsInstance]
-            annotation, path = parse_reference_text(
-                str(self.definition.reference), raw, self.definition.reference
-            )
-            if annotation is not None and annotation not in (
-                TEXTURE_2D_PATH,
-                TEXTURE_2D_SHORT_PATH,
-            ):
-                msg = f"{self.definition.reference}: Expected a Texture2D annotation"
-                raise ObjectDefinitionError(msg)
-
-        else:
-            msg = f"{self.definition.reference}: Texture must be an object reference"
+        """Use the resolved texture input for image-movie generation."""
+        texture = self.extra_values.get(TEXTURE_FIELD)
+        if not isinstance(texture, ObjectValue):
+            msg = f"{self.definition.reference}: Texture must be a non-null object reference"
             raise ObjectDefinitionError(msg)
 
+        path = texture.reference if texture.reference is not None else texture.path
         if path.is_none():
             msg = f"{self.definition.reference}: Texture cannot be None"
             raise ObjectDefinitionError(msg)
+
         self._texture_path = path
         self.reference.References = [path]
+        self.build_property(REFERENCES_FIELD)
 
     @override
     def prepare(self, obj: UObject) -> None:
@@ -261,3 +253,4 @@ class SwfMovieHandler(ClassHandler[SwfMovieFields]):
             msg = f"{self.definition.reference}: {error}"
             raise ObjectDefinitionError(msg) from error
         self.reference.RawData = list(movie)
+        self.build_property(RAW_DATA_NAME)

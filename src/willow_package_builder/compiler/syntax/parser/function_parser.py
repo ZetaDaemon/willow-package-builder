@@ -198,7 +198,7 @@ class FunctionParser(DeclarationSyntaxParser):
                             Punctuation.LEFT_PAREN,
                             Punctuation.DOT,
                         ):
-                            constant = resolver.resolve_integer_constant(token.fname)
+                            constant = resolver.resolve_numeric_constant(token.fname)
                             if constant is not None:
                                 return constant
 
