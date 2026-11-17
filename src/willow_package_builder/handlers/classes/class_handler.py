@@ -17,21 +17,26 @@ from typing import (
     is_typeddict,
 )
 
-from willow_package_builder.logging import ObjectDefinitionError
-from willow_package_builder.upackage import FName
+from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
+from willow_package_builder.compiler.syntax.keyword import Keyword, KeywordEnum
+from willow_package_builder.logging import CompilationError, ObjectDefinitionError
+from willow_package_builder.package_config import collect_visible_packages
+from willow_package_builder.properties.reference_text import parse_reference_text
+from willow_package_builder.properties.value_serializer import ValueSerializer
+from willow_package_builder.properties.values import ObjectValue
+from willow_package_builder.upackage import FName, ReferencePath
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from willow_package_builder.builder.build_state import PackageBuildState
-    from willow_package_builder.compiler.semantics.types import ResolvedType
     from willow_package_builder.games import TargetGame
     from willow_package_builder.handlers import SerializationContext
     from willow_package_builder.objects.definitions import ObjectDefinition
     from willow_package_builder.payloads.instance_payload import ObjectInstancePayload
     from willow_package_builder.properties.values import Value
-    from willow_package_builder.upackage import ReferencePath, UObject
+    from willow_package_builder.upackage import UObject
 
 
 class ObjectReference[Fields]:
@@ -210,7 +215,7 @@ class ClassHandler[Fields = Any](ABC):
             msg = f"{self.definition.reference}: Missing field {name}"
             raise ObjectDefinitionError(msg) from None
 
-        error = _field_validation_error(value, annotations[name], str(name))
+        error = field_validation_error(value, annotations[name], str(name))
         if error is not None:
             msg = f"{self.definition.reference}: {error}"
             raise ObjectDefinitionError(msg)
@@ -222,6 +227,45 @@ class ClassHandler[Fields = Any](ABC):
             raise ObjectDefinitionError(msg)
 
         return deepcopy(self._built_property_inputs[name])
+
+    def resolve_object_reference(
+        self, context: str, text: str | None, expected_class: ReferencePath
+    ) -> ReferencePath:
+        """Resolve a YAML reference to a registered package path."""
+        if text is None:
+            return ReferencePath()
+
+        annotation, path = parse_reference_text(
+            context,
+            text,
+            reference_base=self.definition.reference,
+            yaml_root=self.definition.yaml_root,
+        )
+        if path.is_none():
+            return ReferencePath()
+
+        state = self.state
+        references = state.context.references
+        class_path = expected_class
+
+        if annotation is not None:
+            visible = collect_visible_packages(state.config, state.context.packages)
+            try:
+                class_path = references.resolve_class_path(
+                    annotation, state.config.name, visible, include_intrinsics=True
+                )
+            except CompilationError as error:
+                msg = f"{context}: {error}"
+                raise ObjectDefinitionError(msg) from error
+
+        serializer = ValueSerializer(state.package, state.context)
+        try:
+            return serializer.resolve_object_reference(
+                ObjectValue(class_path, path), ResolvedType(TypeCategory.OBJECT, expected_class)
+            )
+        except (ValueError, ObjectDefinitionError) as error:
+            msg = f"{context}: {error}"
+            raise ObjectDefinitionError(msg) from error
 
 
 @cache
@@ -239,7 +283,7 @@ def _field_annotations(handler_type: type) -> dict[FName, object]:
     return {}
 
 
-def _field_validation_error(value: object, annotation: object, path: str) -> str | None:
+def field_validation_error(value: object, annotation: object, path: str) -> str | None:
     if annotation is Any:
         return None
 
@@ -247,7 +291,7 @@ def _field_validation_error(value: object, annotation: object, path: str) -> str
 
     if origin in (Required, NotRequired):
         (inner_type,) = get_args(annotation)
-        return _field_validation_error(value, inner_type, path)
+        return field_validation_error(value, inner_type, path)
 
     if origin is UnionType:
         options = get_args(annotation)
@@ -256,10 +300,10 @@ def _field_validation_error(value: object, annotation: object, path: str) -> str
             if value is None:
                 return None
             inner_type = next(option for option in options if option is not type(None))
-            return _field_validation_error(value, inner_type, path)
+            return field_validation_error(value, inner_type, path)
 
         for option in options:
-            if _field_validation_error(value, option, path) is None:
+            if field_validation_error(value, option, path) is None:
                 return None
 
         return f"{path}: expected {annotation}, got {type(value).__name__}"
@@ -270,7 +314,7 @@ def _field_validation_error(value: object, annotation: object, path: str) -> str
 
         (element_type,) = get_args(annotation)
         for index, element in enumerate(cast("list[object]", value)):
-            error = _field_validation_error(element, element_type, f"{path}[{index}]")
+            error = field_validation_error(element, element_type, f"{path}[{index}]")
             if error is not None:
                 return error
 
@@ -296,11 +340,22 @@ def _field_validation_error(value: object, annotation: object, path: str) -> str
             if not isinstance(key, str) or key not in fields:
                 return f"{path}: unknown field {key!r}"
 
-            error = _field_validation_error(item, fields[key], f"{path}.{key}")
+            error = field_validation_error(item, fields[key], f"{path}.{key}")
             if error is not None:
                 return error
 
         return None
+
+    if isinstance(annotation, type) and issubclass(annotation, KeywordEnum):
+        if isinstance(value, str):
+            try:
+                annotation(Keyword(value))
+            except ValueError:
+                pass
+            else:
+                return None
+
+        return f"{path}: expected a {annotation.__name__} value, got {value!r}"
 
     if annotation is float and type(value) in (int, float):
         return None

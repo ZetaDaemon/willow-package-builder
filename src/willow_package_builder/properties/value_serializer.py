@@ -300,14 +300,20 @@ class ValueSerializer:
         return reference.serialize(self.package)
 
     def serialize_object_reference(self, value: ObjectValue, resolved_type: ResolvedType) -> bytes:
-        """Resolve and serialize an object reference without modifying its value."""
+        """Serialize an object or class reference as a package index."""
         if resolved_type.category is TypeCategory.CLASS:
             return self.serialize_class_reference(value, resolved_type)
 
+        return self.resolve_object_reference(value, resolved_type).serialize(self.package)
+
+    def resolve_object_reference(
+        self, value: ObjectValue, resolved_type: ResolvedType
+    ) -> ReferencePath:
+        """Find a registered object or create its external import."""
         if value.reference is not None:
             target = self.package.lookup_object_by_path(value.reference)
             self.validate_object_reference(value, target, resolved_type)
-            return target.reference().serialize(self.package)
+            return target.reference()
 
         path = value.path
         candidates = [path]
@@ -325,12 +331,12 @@ class ValueSerializer:
                 continue
 
             self.validate_object_reference(value, target, resolved_type)
-            return target.reference().serialize(self.package)
+            return target.reference()
 
         reference = import_external_object(value, self.package, self.context)
         target = self.package.lookup_object_by_path(reference)
         self.validate_object_reference(value, target, resolved_type)
-        return reference.serialize(self.package)
+        return reference
 
     def serialize_value(self, value: Value, resolved_type: ResolvedType) -> bytes:
         """Serialize raw value data without a property tag."""

@@ -61,3 +61,6 @@ class ObjectDefinition(Definition):
     archetype: str | None = None
 
     handler: ClassHandler | None = field(default=None)
+
+    _: KW_ONLY
+    yaml_root: ReferencePath | None = field(default=None, kw_only=True)

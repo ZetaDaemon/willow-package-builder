@@ -1,5 +1,9 @@
 from typing import TYPE_CHECKING
 
+from willow_package_builder.handlers.classes.behavior_provider_definition_handler import (
+    BehaviorProviderDefinitionHandler,
+)
+from willow_package_builder.handlers.classes.component_handler import ComponentHandler
 from willow_package_builder.handlers.classes.weapon_partlist_handler import (
     WeaponPartListDefinitionHandler,
 )
@@ -18,4 +22,6 @@ CLASS_HANDLERS: tuple[type[ClassHandler], ...] = (
     SwfMovieHandler,
     WeaponPartListDefinitionHandler,
     WeaponPartListCollectionDefinitionHandler,
+    BehaviorProviderDefinitionHandler,
+    ComponentHandler,
 )

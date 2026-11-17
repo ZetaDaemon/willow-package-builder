@@ -3,7 +3,11 @@ from willow_package_builder.upackage import ReferencePath
 
 
 def parse_reference_text(
-    context: str, value: str, reference_base: ReferencePath | None
+    context: str,
+    value: str,
+    *,
+    reference_base: ReferencePath | None = None,
+    yaml_root: ReferencePath | None = None,
 ) -> tuple[ReferencePath | None, ReferencePath]:
     """Parse a reference and expand an explicitly relative object path."""
     text = value.strip()
@@ -32,13 +36,18 @@ def parse_reference_text(
     path_text = path_text.replace(":", ".")
     outer = None
 
-    if path_text.startswith("./"):
-        if reference_base is None or reference_base.is_none():
-            msg = f"{context}: Relative reference requires a containing object"
+    if path_text.startswith(("./", "~/")):
+        prefix = path_text[:2]
+        outer = yaml_root if prefix == "~/" else reference_base
+
+        if outer is None or outer.is_none():
+            msg = f"{context}: {prefix} requires a reference base"
             raise ValueBuildError(msg)
 
         path_text = path_text[2:]
-        outer = reference_base
+        if not path_text:
+            msg = f"{context}: Expected an object path after {prefix}"
+            raise ValueBuildError(msg)
 
     if "/" in path_text or "\\" in path_text:
         msg = f"{context}: Invalid reference path: {value!r}"

@@ -59,6 +59,7 @@ class ValueBuilder(BuildComponent):
     implicit_fixed_index: bool = field(default=False, kw_only=True)
     allow_dump_fixups: bool = field(default=False, kw_only=True)
     reference_base: ReferencePath | None = field(default=None, kw_only=True)
+    yaml_root: ReferencePath | None = field(default=None, kw_only=True)
     external_archetype: ReferencePath | None = field(default=None, kw_only=True)
     known_archetype_properties: frozenset[FName] = field(default_factory=frozenset)
     reference_scope: Mapping[FName, ReferencePath] = field(default_factory=dict, kw_only=True)
@@ -76,7 +77,9 @@ class ValueBuilder(BuildComponent):
             annotation = None
             path = value
         elif isinstance(value, str) and value.strip():
-            annotation, path = parse_reference_text(context, value, self.reference_base)
+            annotation, path = parse_reference_text(
+                context, value, reference_base=self.reference_base, yaml_root=self.yaml_root
+            )
         else:
             msg = f"{context}: Expected an object reference or null, got {value!r}"
             raise ValueBuildError(msg)
@@ -104,7 +107,7 @@ class ValueBuilder(BuildComponent):
             annotation = None
             path = value
         elif isinstance(value, str) and value.strip():
-            annotation, path = parse_reference_text(context, value, None)
+            annotation, path = parse_reference_text(context, value)
         else:
             msg = f"{context}: Expected a class reference or null, got {value!r}"
             raise ValueBuildError(msg)

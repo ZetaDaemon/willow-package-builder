@@ -280,6 +280,7 @@ class ObjectBuilder(BuildComponent):
             reference_base=obj.reference(),
             external_archetype=self.external_archetype(obj),
             known_archetype_properties=self.known_archetype_properties(obj),
+            yaml_root=definition.yaml_root,
         )
         return values.build_class_values(context, class_path, properties, defaults)
 
@@ -291,6 +292,7 @@ class ObjectBuilder(BuildComponent):
             reference_base=obj.reference(),
             external_archetype=None,
             known_archetype_properties=frozenset(),
+            yaml_root=definition.yaml_root,
         )
         result: dict[FName, Value] = {}
 
@@ -481,7 +483,10 @@ class ObjectBuilder(BuildComponent):
 
             context = f"{definition.source}, document {definition.document}"
             annotation, path = parse_reference_text(
-                context, definition.archetype, definition.reference
+                context,
+                definition.archetype,
+                reference_base=definition.reference,
+                yaml_root=definition.yaml_root,
             )
 
             try:
@@ -775,6 +780,7 @@ class ObjectBuilder(BuildComponent):
             reference_base=obj.reference(),
             external_archetype=external,
             known_archetype_properties=known,
+            yaml_root=definition.yaml_root,
         )
         context = f"{definition.source}, document {definition.document}, property {name}"
 

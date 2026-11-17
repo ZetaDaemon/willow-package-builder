@@ -172,7 +172,15 @@ def read_object_file(source: Path, root: Definition | None) -> list[ObjectDefini
                     properties[key] = raw_value
 
                 definition = ObjectDefinition(
-                    name, outer, source, class_name, properties, document, flags, archetype
+                    name,
+                    outer,
+                    source,
+                    class_name,
+                    properties,
+                    document,
+                    flags,
+                    archetype,
+                    yaml_root=definitions[0].reference if definitions else local_path,
                 )
 
                 registered[local_path] = definition

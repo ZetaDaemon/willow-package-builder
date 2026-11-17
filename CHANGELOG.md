@@ -1,4 +1,24 @@
-# Chagelog
+# Changelog
+## [0.8]
+### Additions
+- Build BL2 `BehaviorProviderDefinition` objects from YAML, including native
+  values for variables declared in `BehaviorSequences`.
+- Support `~/` in YAML object references. It resolves from the first object in
+  the same YAML file. `./` continues to resolve from the current object.
+
+### Fixes
+- Write the native header for ordinary component exports. Verified in BL2 with
+  a projectile `CylinderComponent` and a weapon `WillowPointLight` with
+  `TimeShift` data.
+
+### Verification
+- BL2 readback verified bool, int, float, vector, null object, named variable,
+  attribute, instance data, direction vector, attachment location, unary math,
+  and binary math variables across multiple behavior sequences.
+- Flag, all-players, named Kismet variables, non-null object values, and
+  non-null attribute initialization definition references remain unverified
+  in game.
+
 ## [0.7]
 ### Additions
 - Skip rebuilding unchanged packages when their UPK and manifest are present.

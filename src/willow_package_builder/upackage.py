@@ -5,7 +5,7 @@ import struct
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import IntFlag
-from typing import Literal, overload, override
+from typing import Annotated, Literal, overload, override
 from uuid import UUID, uuid4
 from warnings import deprecated
 
@@ -184,7 +184,7 @@ class FName:
         return str(self) < str(other)
 
     def serialize(self, package: Package) -> bytes:
-        """Convert to bytes."""
+        """Convert to 8 bytes."""
         return struct.pack("<ii", package.name_index(self.name), self.number)
 
     def is_none(self) -> bool:
@@ -283,7 +283,7 @@ class ReferencePath:
         return self.outer is None and self.name.is_none()
 
     def serialize(self, package: Package) -> bytes:
-        """Serialize the referenced object's package index."""
+        """Serialize the referenced object's package index into 4 bytes."""
         index = 0 if self.is_none() else package.object_index(package.lookup_object_by_path(self))
         return struct.pack("<i", index)
 

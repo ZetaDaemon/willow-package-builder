@@ -349,7 +349,7 @@ class ClassLoader:
 
                 context = f"Default reference in {config.name}"
                 try:
-                    annotation, path = parse_reference_text(context, value, None)
+                    annotation, path = parse_reference_text(context, value)
                 except ValueBuildError as error:
                     msg = str(error)
                     raise CompilationError(msg) from error

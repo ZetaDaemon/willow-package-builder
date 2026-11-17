@@ -331,6 +331,9 @@ component fields and arrays are remapped to the generated CDO's templates.
 This requires reference declarations that identify the original templates
 and their references.
 
+Ordinary component objects declared in YAML also receive their native
+component header. For YAML object reference syntax, see [Usage](USAGE.md).
+
 Limits:
 
 - Reference-only object definitions supply metadata for inherited component
