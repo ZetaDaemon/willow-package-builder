@@ -1,6 +1,6 @@
-from hashlib import sha256
 import json
 from collections.abc import Mapping
+from hashlib import sha256
 from pathlib import Path
 from time import perf_counter
 
@@ -11,6 +11,7 @@ from willow_package_builder.build_fingerprints import (
 from willow_package_builder.compiler.class_loader import ClassLoader
 from willow_package_builder.compiler.semantics.reference_database import ReferenceDatabase
 from willow_package_builder.games import get_game
+from willow_package_builder.handlers.registry import configure_class_handlers
 from willow_package_builder.package_config import collect_build_packages, load_package_graph
 
 from .builder.build_context import BuildContext
@@ -20,10 +21,10 @@ from .logging import CompilationError, Logger, WarningAction, WarningCode, info
 __all__ = ["build_package"]
 
 
-def prepare_build(target_directory: Path) -> BuildContext:
+def prepare_build(target_directory: Path, reference_paths: tuple[Path, ...] = ()) -> BuildContext:
     target_directory = target_directory.resolve()
 
-    packages = load_package_graph(target_directory)
+    packages = load_package_graph(target_directory, reference_paths)
     build_packages = collect_build_packages(target_directory, packages)
     references = ReferenceDatabase()
     loader = ClassLoader(packages, build_packages, references)
@@ -51,6 +52,7 @@ def build_package(
     debug: bool = False,
     silent_console: bool = False,
     warning_actions: Mapping[WarningCode, WarningAction] | None = None,
+    reference_paths: tuple[Path, ...] = (),
 ) -> tuple[Path, ...]:
     """Build the target package and its required packages."""
     target_directory = Path(target_directory).resolve()
@@ -66,7 +68,8 @@ def build_package(
     )
 
     with logger.catch_errors_and_warnings():
-        context = prepare_build(target_directory)
+        context = prepare_build(target_directory, reference_paths)
+        configure_class_handlers(context.packages)
         fingerprints = package_build_fingerprints(
             context.packages,
             target=get_game().TARGET.value,

@@ -493,13 +493,36 @@ class ReferenceDatabase:
 
     @staticmethod
     def binary_operand_cost(
-        name: Operator | Keyword, actual: ResolvedType, expected: ResolvedType, *, out: bool = False
+        name: Operator | Keyword,
+        actual: ResolvedType,
+        expected: ResolvedType,
+        *,
+        out: bool = False,
+        coerce: bool = False,
     ) -> int | None:
         if actual == expected:
             return 0
 
         if out:
             return None
+
+        if (
+            coerce
+            and expected.category is TypeCategory.STRING
+            and actual.category
+            in (
+                TypeCategory.BYTE,
+                TypeCategory.ENUM,
+                TypeCategory.INT,
+                TypeCategory.BOOL,
+                TypeCategory.FLOAT,
+                TypeCategory.OBJECT,
+                TypeCategory.CLASS,
+                TypeCategory.NAME,
+                TypeCategory.INTERFACE,
+            )
+        ):
+            return 4
 
         match actual.category, expected.category:
             case TypeCategory.BYTE, TypeCategory.INT:
@@ -567,6 +590,7 @@ class ReferenceDatabase:
                     left,
                     left_type,
                     out=ParameterModifier.OUT in operator.parameters[0].modifiers,
+                    coerce=ParameterModifier.COERCE in operator.parameters[0].modifiers,
                 )
                 if left_cost is None:
                     continue
@@ -579,6 +603,7 @@ class ReferenceDatabase:
                     right,
                     right_type,
                     out=ParameterModifier.OUT in operator.parameters[1].modifiers,
+                    coerce=ParameterModifier.COERCE in operator.parameters[1].modifiers,
                 )
                 if right_cost is not None:
                     matches.append((max(left_cost, right_cost), operator))
@@ -643,7 +668,11 @@ class ReferenceDatabase:
                     parameter.type_ref, owner, visible_packages, parents
                 )
                 cost = self.binary_operand_cost(
-                    name, operand, parameter_type, out=ParameterModifier.OUT in parameter.modifiers
+                    name,
+                    operand,
+                    parameter_type,
+                    out=ParameterModifier.OUT in parameter.modifiers,
+                    coerce=ParameterModifier.COERCE in parameter.modifiers,
                 )
                 if cost is not None:
                     matches.append((cost, operator))

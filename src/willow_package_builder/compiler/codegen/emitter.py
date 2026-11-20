@@ -378,6 +378,7 @@ class FunctionEmitter:
             TypeCategory.FLOAT,
             TypeCategory.STRING,
             TypeCategory.OBJECT,
+            TypeCategory.CLASS,
             TypeCategory.BYTE,
             TypeCategory.NAME,
             TypeCategory.ARRAY,

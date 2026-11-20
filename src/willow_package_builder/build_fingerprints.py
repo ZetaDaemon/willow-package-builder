@@ -1,5 +1,5 @@
-from hashlib import file_digest, sha256
 import json
+from hashlib import file_digest, sha256
 from pathlib import Path
 
 from willow_package_builder.package_config import (
@@ -8,15 +8,19 @@ from willow_package_builder.package_config import (
     PackageConfig,
 )
 
+HANDLERS_DIRECTORY_NAME = "Handlers"
+
 
 def package_source_fingerprint(config: PackageConfig) -> str:
     """Hash the source inputs owned by one package."""
     root = config.directory
     objects = root / OBJECTS_DIRECTORY_NAME
+    handlers = root / HANDLERS_DIRECTORY_NAME
     paths = [
         root / PACKAGE_CONFIG_FILENAME,
         *config.source_files(),
         *(path for path in objects.rglob("*") if path.is_file()),
+        *(path for path in handlers.rglob("*.py") if path.is_file()),
     ]
 
     digest = sha256()

@@ -248,6 +248,8 @@ class FunctionBuilder(BuildComponent):
             FunctionModifier.SIMULATED,
             FunctionModifier.RELIABLE,
             FunctionModifier.SERVER,
+            FunctionModifier.PRIVATE,
+            FunctionModifier.FINAL,
         }
 
         if FunctionModifier.NATIVE in function.modifiers:

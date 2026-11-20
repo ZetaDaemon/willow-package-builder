@@ -179,7 +179,7 @@ Delegate variables and qualified comparator expressions are unsupported for
 | Return types `int`, `byte`, `bool`, `float`, `string`, `name`, object references, class references, dynamic arrays, and structs | Implemented |
 | Enum returns and other return types | Not yet implemented |
 | Local variables before executable statements | Implemented |
-| `static`, `protected`, and `simulated` function modifiers | Implemented |
+| `static`, `private`, `protected`, `final`, and `simulated` function modifiers | Implemented |
 | `reliable server` | Supported for class-level overrides of existing RPCs. Multiplayer behavior remains untested |
 | Other function modifiers | Not yet implemented for custom function declarations |
 | Scripted `event` declarations | Implemented |
@@ -208,16 +208,20 @@ Current limitations include:
 
 - Optional fixed-array parameters.
 - Compiling parameter modifiers other than `out`, `const`, and `optional`.
-- Const-out argument handling.
 - Some optional-out combinations.
 - Delegate calls.
 - New RPC declarations and replication blocks.
 
-Calls remain subject to type compatibility and visibility rules. Ordinary
-by-value parameters accept supported numeric conversions and compatible object
-and bounded class references. A `coerce` parameter on an existing declaration
-can also use the supported primitive conversions involving `bool`. `out`
-parameters require writable arguments of the matching type.
+Calls are checked for type compatibility. Ordinary by-value parameters accept
+supported numeric conversions and compatible object and bounded class
+references. Parameters declared `coerce` can use the supported primitive
+conversions, including conversions to string. `out` parameters require
+assignable arguments of the matching type.
+
+WPB permits access to private and protected members and writes to const
+variables and parameters. Declaration flags are preserved. Final functions
+retain direct-call behavior, and overriding them is rejected. Restrictions
+from `privatewrite` and `protectedwrite` remain enforced.
 
 ## Function expressions
 
@@ -234,7 +238,7 @@ Implemented expression forms:
 - Native binary, prefix, and postfix operators, where the referenced overload and operand types are supported.
 - Native short-circuit operators using their declared skip behavior.
 - Name literals such as `'FieldName'`.
-- Bare and enum-qualified enum members and supported enum comparisons.
+- Bare and enum-qualified enum members and supported enum comparisons. Assignments can resolve bare members using the destination's enum type. Explicit owner qualification is supported through forms such as `class'Engine.AttributeDefinition'.enum'EAttributeTranslationStyle'.ATTRSTYLE_ModifierText`.
 - Class literals, such as `class'SomeClass'`, and `None` in supported
   object-reference expressions.
 - Conditional expressions (`Condition ? WhenTrue : WhenFalse`).
@@ -242,6 +246,8 @@ Implemented expression forms:
   casts such as `SomeClass(Expression)`.
 - Vector literals with numeric components, such as `vect(0, 0, 1)`.
 - Object construction with `new(Outer) class'SomeClass'`.
+- String coercion for supported scalar operands of `coerce string` operator  parameters, including object references, class references, names, enums,
+  numeric values, bools, and interfaces.
 
 Operator overloads and precedence come from the parsed reference declarations. An operator symbol's presence in the lexer does not guarantee that its source expression can be resolved and emitted.
 
@@ -288,7 +294,8 @@ Not yet implemented:
 - State-control statements and state labels.
 - `assert` and other statement forms not listed above.
 
-Local declarations must precede executable statements. The validator rejects assignments to const/read-only targets, invalid out arguments, inaccessible members, and expressions with no effect.
+Local declarations must precede executable statements. The validator checks assignment destinations, argument compatibility, privatewrite/protectedwrite
+restrictions, and expressions with no effect.
 
 ## Default properties
 

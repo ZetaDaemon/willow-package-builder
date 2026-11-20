@@ -93,17 +93,6 @@ class FunctionBodyValidator:
                 msg = "Assignment destination must be a writable variable"
                 raise CompilationError(msg)
 
-        match declaration:
-            case ParameterDeclaration():
-                is_const = ParameterModifier.CONST in declaration.modifiers
-
-            case VariableDeclaration():
-                is_const = VariableModifier.CONST in declaration.modifiers
-
-        if is_const:
-            msg = f"Cannot assign to const variable {owner}.{declaration.name}"
-            raise CompilationError(msg)
-
         if (
             VariableModifier.PRIVATE_WRITE in declaration.modifiers
             and owner != self.resolver.scope.class_path
@@ -131,7 +120,6 @@ class FunctionBodyValidator:
         match expression:
             case IdentifierExpression():
                 symbol = self.resolver.scope.resolve_variable(expression.name)
-                self.validate_variable_access(symbol.declaration, symbol.owner_class)
 
                 if (
                     FunctionModifier.STATIC in self.resolver.scope.function.modifiers
@@ -174,13 +162,6 @@ class FunctionBodyValidator:
 
             case MemberExpression():
                 self.validate_expression(expression.object)
-
-                if (
-                    self.resolver.resolve_builtin_member(expression)
-                    is not BuiltinMember.ARRAY_LENGTH
-                ):
-                    member = self.resolver.resolve_member(expression)
-                    self.validate_variable_access(member.declaration, member.owner_class)
 
             case SelfExpression():
                 if FunctionModifier.STATIC in self.resolver.scope.function.modifiers:
@@ -457,19 +438,6 @@ class FunctionBodyValidator:
             case _:
                 pass
 
-        if (
-            FunctionModifier.PRIVATE in function.modifiers
-            and member.owner_class != scope.class_path
-        ):
-            msg = f"Cannot access private function {path}"
-            raise CompilationError(msg)
-
-        if FunctionModifier.PROTECTED in function.modifiers and not self.can_access_protected(
-            member.owner_class
-        ):
-            msg = f"Cannot access protected function {path}"
-            raise CompilationError(msg)
-
         parameters = function.parameters
         arguments = expression.arguments
 
@@ -587,24 +555,6 @@ class FunctionBodyValidator:
                     f"{expected}, got {actual}"
                 )
                 raise CompilationError(msg)
-
-    def validate_variable_access(
-        self, declaration: ParameterDeclaration | VariableDeclaration, owner: ReferencePath
-    ) -> None:
-        if not isinstance(declaration, VariableDeclaration):
-            return
-
-        current = self.resolver.scope.class_path
-
-        if VariableModifier.PRIVATE in declaration.modifiers and current != owner:
-            msg = f"Cannot access private variable {owner}.{declaration.name}"
-            raise CompilationError(msg)
-
-        if VariableModifier.PROTECTED in declaration.modifiers and not self.can_access_protected(
-            owner
-        ):
-            msg = f"Cannot access protected variable {owner}.{declaration.name}"
-            raise CompilationError(msg)
 
     def can_access_protected(self, owner: ReferencePath) -> bool:
         references = self.resolver.context.references

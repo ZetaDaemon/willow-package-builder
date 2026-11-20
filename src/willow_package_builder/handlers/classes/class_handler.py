@@ -271,7 +271,8 @@ class ClassHandler[Fields = Any](ABC):
 @cache
 def _field_annotations(handler_type: type) -> dict[FName, object]:
     for base in get_original_bases(handler_type):
-        if get_origin(base) is not ClassHandler:
+        origin = get_origin(base)
+        if not isinstance(origin, type) or not issubclass(origin, ClassHandler):
             continue
 
         (protocol,) = get_args(base)

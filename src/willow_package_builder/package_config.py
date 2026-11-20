@@ -1,12 +1,10 @@
 import tomllib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from pathlib import Path
+from typing import Any, cast
 
 from willow_package_builder.logging.diagnostics import ConfigError
 from willow_package_builder.upackage import FName
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 PACKAGE_CONFIG_FILENAME = "package.toml"
 CLASSES_DIRECTORY_NAME = "Classes"
@@ -23,7 +21,9 @@ class PackageConfig:
     required: tuple[Path, ...]
 
     @staticmethod
-    def _resolve_paths(directory: Path, data: dict[str, Any], key: str) -> tuple[Path, ...]:
+    def _resolve_paths(
+        directory: Path, data: dict[str, Any], key: str, *, reference_paths: tuple[Path, ...] = ()
+    ) -> tuple[Path, ...]:
         values = data.get(key, [])
 
         if not isinstance(values, list) or not all(
@@ -33,10 +33,40 @@ class PackageConfig:
             raise ConfigError(msg)
 
         values = cast("list[str]", values)
-        return tuple((directory / value).resolve() for value in values)
+        resolved: list[Path] = []
+
+        for value in values:
+            explicit_path = (
+                Path(value).is_absolute() or "/" in value or "\\" in value or value in (".", "..")
+            )
+
+            if key != "references" or explicit_path:
+                resolved.append((directory / value).resolve())
+                continue
+
+            name = FName(value)
+            matches = {
+                candidate.resolve()
+                for root in reference_paths
+                for candidate in root.iterdir()
+                if candidate.is_dir() and FName(candidate.name) == name
+            }
+
+            if not matches:
+                msg = f"{directory}: Reference package {value!r} was not found in reference search directories"
+                raise ConfigError(msg)
+
+            if len(matches) > 1:
+                candidates = ", ".join(str(path) for path in sorted(matches))
+                msg = f"{directory}: Ambiguous reference package {value!r}: {candidates}"
+                raise ConfigError(msg)
+
+            resolved.append(matches.pop())
+
+        return tuple(resolved)
 
     @classmethod
-    def load(cls, directory: Path) -> PackageConfig:
+    def load(cls, directory: Path, reference_paths: tuple[Path, ...] = ()) -> PackageConfig:
         """Load the configuration for a package directory."""
         directory = directory.resolve()
         source_directories = (
@@ -62,19 +92,16 @@ class PackageConfig:
             raise ConfigError(msg) from error
 
         name = data.get("name")
-        references = cls._resolve_paths(directory, data, "references")
+        references = cls._resolve_paths(
+            directory, data, "references", reference_paths=reference_paths
+        )
         required = cls._resolve_paths(directory, data, "required")
 
         if not isinstance(name, str) or not name.strip():
             msg = f"{directory}: package name must be a nonempty string"
             raise ConfigError(msg)
 
-        return cls(
-            directory=directory,
-            name=FName(name),
-            references=tuple((directory / reference).resolve() for reference in references),
-            required=tuple((directory / r).resolve() for r in required),
-        )
+        return cls(directory=directory, name=FName(name), references=references, required=required)
 
     def source_files(self) -> tuple[Path, ...]:
         """Get all UnrealScript source files, if Classes is present."""
@@ -89,7 +116,15 @@ class PackageConfig:
         return target_directory.resolve() / f"{self.name}.upk"
 
 
-def load_package_graph(directory: Path) -> tuple[PackageConfig, ...]:
+def load_package_graph(
+    directory: Path, reference_paths: tuple[Path, ...] = ()
+) -> tuple[PackageConfig, ...]:
+    reference_paths = tuple(path.resolve() for path in reference_paths)
+    for path in reference_paths:
+        if not path.is_dir():
+            msg = f"Expected a reference search directory: {path}"
+            raise ConfigError(msg)
+
     ordered: list[PackageConfig] = []
     completed: set[Path] = set()
     active: list[Path] = []
@@ -108,7 +143,7 @@ def load_package_graph(directory: Path) -> tuple[PackageConfig, ...]:
         if package_directory in completed:
             return
 
-        config = PackageConfig.load(package_directory)
+        config = PackageConfig.load(package_directory, reference_paths)
 
         name_key = config.name
         existing_directory = package_names.get(name_key)

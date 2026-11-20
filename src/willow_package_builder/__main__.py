@@ -51,6 +51,13 @@ def main() -> None:
         default=[],
         help="Treat a warning category as an error; may be repeated",
     )
+    parser.add_argument(
+        "--reference-path",
+        type=Path,
+        action="append",
+        default=[],
+        help="Directory containing reference package folders; may be repeated",
+    )
     args = parser.parse_args()
 
     conflicting = set(args.ignore_warning) & set(args.error_warning)
@@ -71,6 +78,7 @@ def main() -> None:
             debug=args.debug,
             silent_console=args.silent_console,
             warning_actions=warning_actions,
+            reference_paths=tuple(args.reference_path),
         )
 
 

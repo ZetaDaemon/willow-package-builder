@@ -62,9 +62,9 @@ def resolve_part_data(
     )
 
 
-class WeaponPartListCollectionDefinitionHandler(
-    ClassHandler[WeaponPartListCollectionDefinitionFields]
-):
+class WeaponPartListCollectionDefinitionHandler[
+    Fields: WeaponPartListCollectionDefinitionFields = WeaponPartListCollectionDefinitionFields
+](ClassHandler[Fields]):
     """Consolidate the AttributeInitializationData on a WeaponPartListCollectionDefinition."""
 
     CLASS_PATH: ClassVar[ReferencePath] = WEAPON_PART_LIST_COLLECTION_PATH
@@ -85,6 +85,20 @@ class WeaponPartListCollectionDefinitionHandler(
         }
     )
 
+    SLOT_NAMES: ClassVar[frozenset[FName]] = frozenset(
+        {
+            BODY_PARTS_NAME,
+            GRIP_PARTS_NAME,
+            BARREL_PARTS_NAME,
+            SIGHT_PARTS_NAME,
+            STOCK_PARTS_NAME,
+            ELEMENTAL_PARTS_NAME,
+            ACC1_PARTS_NAME,
+            ACC2_PARTS_NAME,
+            MATERIAL_PARTS_NAME,
+        }
+    )
+
     def handle_part_data(
         self,
         part_data_name: FName,
@@ -102,18 +116,7 @@ class WeaponPartListCollectionDefinitionHandler(
 
     @override
     def build_properties(self, obj: UObject) -> None:
-        slot_names = (
-            BODY_PARTS_NAME,
-            GRIP_PARTS_NAME,
-            BARREL_PARTS_NAME,
-            SIGHT_PARTS_NAME,
-            STOCK_PARTS_NAME,
-            ELEMENTAL_PARTS_NAME,
-            ACC1_PARTS_NAME,
-            ACC2_PARTS_NAME,
-            MATERIAL_PARTS_NAME,
-        )
-        supplied_slots = [name for name in slot_names if self.has_yaml_field(name)]
+        supplied_slots = [name for name in self.SLOT_NAMES if self.has_yaml_field(name)]
         has_table = self.has_yaml_field(CONSOLIDATED_ATTRIBUTE_INIT_DATA_NAME)
 
         table: list[AttributeInitializationData] = []

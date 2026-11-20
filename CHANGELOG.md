@@ -1,4 +1,34 @@
 # Changelog
+## [0.9]
+### Additions
+- Load package-provided class handlers from `Handlers/__init__.py` through
+  its exported `CLASS_HANDLERS` tuple. Dependency packages can supply handlers
+  for custom classes.
+- Include handler Python files in package fingerprints so handler changes
+  trigger rebuilds.
+- Support extending the weapon part-list collection handler with custom
+  field protocols and additional part processing.
+- Add repeatable `--reference-path` directories for resolving standalone
+  package names in `package.toml` references. Explicit relative and absolute
+  paths remain supported.
+- Support class-qualified enum expressions such as
+  `class'AttributeDefinition'.enum'EAttributeTranslationStyle'.ATTRSTYLE_ModifierText`.
+- Support string coercion for supported scalar operands of operators with
+  `coerce string` parameters, including `$` and `@`.
+- Accept `private` and `final` on compiled scripted functions.
+
+### Changes
+- Allow access to private and protected members and assignments to const
+  variables and parameters. Declaration flags are preserved.
+- Continue enforcing final-function override restrictions and
+  privatewrite/protectedwrite assignment restrictions.
+
+### Fixes
+- Resolve bare enum members using the assignment destination's enum type,
+  including assignments in for-loop clauses.
+- Emit member reads of class-reference properties such as
+  `class<DamageType>`.
+
 ## [0.8]
 ### Additions
 - Build BL2 `BehaviorProviderDefinition` objects from YAML, including native

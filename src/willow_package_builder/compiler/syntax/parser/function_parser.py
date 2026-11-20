@@ -418,7 +418,18 @@ class FunctionParser(DeclarationSyntaxParser):
         expression = self.parse_expression()
 
         if self.match(Operator.EQUAL):
-            value = self.parse_expression()
+            resolver = self.expression_resolver
+            if resolver is None:
+                msg = "Statement parsing requires an expression resolver"
+                raise ValueError(msg)
+            target_type = resolver.type_of(expression)
+            value = self.parse_expression(
+                enum_hint=(
+                    target_type.declaration_path
+                    if target_type.category is TypeCategory.ENUM
+                    else None
+                )
+            )
             self.expect(Punctuation.SEMICOLON)
             return AssignmentStatement(expression, value)
 
@@ -470,7 +481,18 @@ class FunctionParser(DeclarationSyntaxParser):
         expression = self.parse_expression()
 
         if self.match(Operator.EQUAL):
-            value = self.parse_expression()
+            resolver = self.expression_resolver
+            if resolver is None:
+                msg = "Statement parsing requires an expression resolver"
+                raise ValueError(msg)
+            target_type = resolver.type_of(expression)
+            value = self.parse_expression(
+                enum_hint=(
+                    target_type.declaration_path
+                    if target_type.category is TypeCategory.ENUM
+                    else None
+                )
+            )
             return AssignmentStatement(expression, value, location=location)
 
         return ExpressionStatement(expression, location=location)
@@ -515,6 +537,27 @@ class FunctionParser(DeclarationSyntaxParser):
 
         while True:
             if self.match(Punctuation.DOT):
+                if isinstance(expression, ClassLiteralExpression) and self.match(
+                    ScriptKeywords.ENUM
+                ):
+                    literal = self.peek()
+                    if literal.category is not TokenCategory.NAME:
+                        msg = f"Expected a quoted enum name at {literal.line}:{literal.column}"
+                        raise CompilationError(msg)
+
+                    self.advance()
+                    enum_name = str(literal)[1:-1]
+                    if not enum_name or "\\" in enum_name or "." in enum_name:
+                        msg = f"Invalid enum name at {literal.line}:{literal.column}"
+                        raise CompilationError(msg)
+
+                    self.expect(Punctuation.DOT)
+                    member_name = self.expect_identifier().fname
+                    expression = resolver.resolve_class_enum_member(
+                        expression.path, FName(enum_name), member_name
+                    )
+                    continue
+
                 name = self.expect_identifier().fname
 
                 if isinstance(expression, IdentifierExpression):

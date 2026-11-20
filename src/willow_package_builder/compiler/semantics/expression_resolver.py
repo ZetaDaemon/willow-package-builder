@@ -184,6 +184,32 @@ class ExpressionResolver:
     def primitive_cast_selector(self, source: ResolvedType, target: ResolvedType) -> Opcode | None:
         selectors = get_game().PRIMITIVE_CAST_SELECTORS
 
+        if target.category is TypeCategory.STRING:
+            match source.category:
+                case TypeCategory.BYTE | TypeCategory.ENUM:
+                    return selectors.BYTE_TO_STRING
+
+                case TypeCategory.INT:
+                    return selectors.INT_TO_STRING
+
+                case TypeCategory.BOOL:
+                    return selectors.BOOL_TO_STRING
+
+                case TypeCategory.FLOAT:
+                    return selectors.FLOAT_TO_STRING
+
+                case TypeCategory.OBJECT | TypeCategory.CLASS:
+                    return selectors.OBJECT_TO_STRING
+
+                case TypeCategory.NAME:
+                    return selectors.NAME_TO_STRING
+
+                case TypeCategory.INTERFACE:
+                    return selectors.INTERFACE_TO_STRING
+
+                case _:
+                    return None
+
         match source.category:
             case TypeCategory.FLOAT:
                 match target.category:
@@ -340,6 +366,22 @@ class ExpressionResolver:
             raise NotImplementedError(msg)
 
         return target, selector
+
+    def resolve_class_enum_member(
+        self, class_path: ReferencePath, enum_name: FName, member_name: FName
+    ) -> EnumMemberExpression:
+        """Resolve an enum member declared on an explicit class."""
+        owner = self.resolve_class_literal(class_path)
+        member = self.context.references.resolve_enum(owner, enum_name, self.context.parents)
+        declaration = member.declaration
+
+        if member_name not in declaration.members:
+            msg = f"Unknown enum member {member_name} in {member.owner_class + enum_name}"
+            raise CompilationError(msg)
+
+        return EnumMemberExpression(
+            member.owner_class + declaration.name, declaration.members.index(member_name)
+        )
 
     def resolve_qualified_enum_member(
         self, enum_name: FName, member_name: FName
