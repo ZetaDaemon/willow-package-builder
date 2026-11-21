@@ -184,7 +184,40 @@ class FunctionBodyValidator:
                         raise CompilationError(msg)
 
             case NewExpression():
-                self.validate_expression(expression.outer)
+                self.validate_expression(expression.object_class)
+                for operand in (
+                    expression.outer,
+                    expression.name,
+                    expression.flags,
+                    expression.template,
+                ):
+                    if operand is not None:
+                        self.validate_expression(operand)
+
+                for operand, expected, label in (
+                    (expression.name, TypeCategory.STRING, "name"),
+                    (expression.flags, TypeCategory.INT, "flags"),
+                ):
+                    if operand is None:
+                        continue
+
+                    actual = self.resolver.type_of(operand)
+                    if (
+                        actual.category is not expected
+                        or self.resolver.array_dimension_of(operand) != 1
+                    ):
+                        msg = f"new {label} expects a scalar {expected.value}, got {actual}"
+                        raise CompilationError(msg)
+
+                if expression.template is not None:
+                    template_type = self.resolver.type_of(expression.template)
+                    target_type = self.resolver.type_of(expression)
+                    if self.resolver.array_dimension_of(expression.template) != 1 or (
+                        not isinstance(expression.template, NoneExpression)
+                        and not self.resolver.accepts_value_type(target_type, template_type)
+                    ):
+                        msg = f"new template expects {target_type}, got {template_type}"
+                        raise CompilationError(msg)
 
             case _:
                 pass
@@ -411,7 +444,7 @@ class FunctionBodyValidator:
             for argument, expected in zip(arguments, expected_types, strict=True):
                 actual = self.validate_expression(argument)
 
-                if actual != expected:
+                if not self.resolver.accepts_value_type(expected, actual):
                     msg = f"Array {builtin.name} expects {expected}, got {actual}"
                     raise CompilationError(msg)
 

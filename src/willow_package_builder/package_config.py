@@ -1,3 +1,4 @@
+from functools import lru_cache
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -193,6 +194,13 @@ def collect_build_packages(target: Path, packages: tuple[PackageConfig, ...]) ->
 def collect_visible_packages(
     config: PackageConfig, packages: tuple[PackageConfig, ...]
 ) -> set[FName]:
+    return set(_collect_visible_packages(config, packages))
+
+
+@lru_cache(maxsize=256)
+def _collect_visible_packages(
+    config: PackageConfig, packages: tuple[PackageConfig, ...]
+) -> frozenset[FName]:
     configs = {package.directory: package for package in packages}
 
     visited: set[Path] = {config.directory}
@@ -212,4 +220,4 @@ def collect_visible_packages(
     for reference in (*config.references, *config.required):
         visit(reference)
 
-    return visible
+    return frozenset(visible)

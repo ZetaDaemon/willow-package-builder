@@ -15,7 +15,10 @@ from willow_package_builder.compiler.semantics.expression_resolver import (
     BuiltinMember,
 )
 from willow_package_builder.compiler.semantics.function_body_validator import FunctionBodyValidator
-from willow_package_builder.compiler.semantics.reference_database import PRIMITIVE_TYPES
+from willow_package_builder.compiler.semantics.reference_database import (
+    BUILTIN_CAST_TYPES,
+    PRIMITIVE_TYPES,
+)
 from willow_package_builder.compiler.semantics.scope import VariableCategory
 from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.declarations import (
@@ -500,7 +503,7 @@ class FunctionEmitter:
                 return self._emit_unary_expression(expression)
 
             case CastExpression():
-                if expression.target.name not in PRIMITIVE_TYPES:
+                if expression.target.name not in BUILTIN_CAST_TYPES:
                     target = self.resolver.resolve_object_cast(expression)
                     path = target.declaration_path
                     if path is None:
@@ -554,11 +557,19 @@ class FunctionEmitter:
             case NewExpression():
                 script = Bytecode()
                 script += self._opcodes.NEW
-                script += self.emit_expression(expression.outer)
-                script += self._opcodes.NOTHING  # Name.
-                script += self._opcodes.NOTHING  # Flags.
-                script += self.emit_expression(expression.object_class)
-                script += self._opcodes.NOTHING  # Template.
+
+                for operand in (
+                    expression.outer,
+                    expression.name,
+                    expression.flags,
+                    expression.object_class,
+                    expression.template,
+                ):
+                    if operand is None:
+                        script += self._opcodes.NOTHING
+                    else:
+                        script += self.emit_expression(operand)
+
                 return script
 
             case IndexExpression():

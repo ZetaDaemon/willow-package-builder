@@ -173,7 +173,7 @@ wheels = [
 
 [[package]]
 name = "willow-package-builder"
-version = "0.8"
+version = "0.9"
 source = { editable = "." }
 dependencies = [
     { name = "pillow" },

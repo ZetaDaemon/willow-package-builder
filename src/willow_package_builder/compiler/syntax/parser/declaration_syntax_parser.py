@@ -37,8 +37,9 @@ class DeclarationSyntaxParser(TokenParser):
         modifiers: list[VariableModifier] = []
 
         if allow_modifiers:
-            while self.peek() in VariableModifier:
-                modifiers.append(VariableModifier(self.advance()))
+            while (modifier := self.peek_keyword_enum(VariableModifier)) is not None:
+                self.advance()
+                modifiers.append(modifier)
 
         name = self.parse_qualified_name()
         arguments: list[TypeReference] = []
@@ -79,8 +80,9 @@ class DeclarationSyntaxParser(TokenParser):
             if self.peek() == Punctuation.LEFT_PAREN:
                 category_tokens = self.parse_parenthesized_tokens()
 
-            while self.peek() in VariableModifier:
-                modifiers.append(VariableModifier(self.advance()))
+            while (modifier := self.peek_keyword_enum(VariableModifier)) is not None:
+                self.advance()
+                modifiers.append(modifier)
 
         type_ref = self.parse_type()
 

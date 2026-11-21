@@ -1,6 +1,9 @@
 from typing import TYPE_CHECKING, Self
 
-from willow_package_builder.compiler.semantics.reference_database import PRIMITIVE_TYPES
+from willow_package_builder.compiler.semantics.reference_database import (
+    BUILTIN_CAST_TYPES,
+    PRIMITIVE_TYPES,
+)
 from willow_package_builder.compiler.semantics.types import TypeCategory
 from willow_package_builder.compiler.syntax.declarations import OperatorCategory, TypeReference
 from willow_package_builder.compiler.syntax.expressions import (
@@ -174,23 +177,31 @@ class FunctionParser(DeclarationSyntaxParser):
                         return ArrayCountExpression(array)
 
                     case ScriptKeywords.NEW:
-                        self.expect(Punctuation.LEFT_PAREN)
-                        outer = self.parse_expression()
-                        self.expect(Punctuation.RIGHT_PAREN)
+                        arguments: list[Expression | None] = []
+                        if self.peek() == Punctuation.LEFT_PAREN:
+                            arguments = self.parse_call_arguments()
 
-                        if (
-                            self.peek() != ScriptKeywords.CLASS
-                            or self.peek(1).category is not TokenCategory.NAME
-                        ):
-                            msg = "Expected a class literal after new(Outer)"
+                        if len(arguments) > 3:  # noqa: PLR2004
+                            msg = "new accepts at most Outer, Name, and Flags"
                             raise CompilationError(msg)
 
-                        object_class = self.parse_primary_expression()
-                        if not isinstance(object_class, ClassLiteralExpression):
-                            msg = "Expected a class literal after new(Outer)"
-                            raise CompilationError(msg)
+                        arguments.extend([None] * (3 - len(arguments)))
+                        outer, name, flags = arguments
 
-                        return NewExpression(outer, object_class)
+                        object_class = self.parse_postfix_expression(allow_calls=False)
+
+                        template = None
+                        if self.match(Punctuation.LEFT_PAREN):
+                            template = self.parse_expression()
+                            self.expect(Punctuation.RIGHT_PAREN)
+
+                        return NewExpression(
+                            outer=outer,
+                            object_class=object_class,
+                            name=name,
+                            flags=flags,
+                            template=template,
+                        )
 
                     case _:
                         resolver = self.expression_resolver
@@ -526,7 +537,7 @@ class FunctionParser(DeclarationSyntaxParser):
 
         return DoUntilStatement(statements, condition)
 
-    def parse_postfix_expression(self) -> Expression:
+    def parse_postfix_expression(self, *, allow_calls: bool = True) -> Expression:
         resolver = self.expression_resolver
 
         if resolver is None:
@@ -570,10 +581,12 @@ class FunctionParser(DeclarationSyntaxParser):
                 continue
 
             if self.peek() == Punctuation.LEFT_PAREN:
+                if not allow_calls:
+                    return expression
                 arguments = self.parse_call_arguments()
 
                 if isinstance(expression, IdentifierExpression) and (
-                    (target := ReferencePath(expression.name)) in PRIMITIVE_TYPES
+                    (target := ReferencePath(expression.name)) in BUILTIN_CAST_TYPES
                     or resolver.is_object_cast_target(expression.name)
                 ):
                     if len(arguments) != 1 or (operand := arguments[0]) is None:

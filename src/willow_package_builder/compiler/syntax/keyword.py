@@ -1,6 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import override
+from typing import Self, override
 
 
 @dataclass(frozen=True, eq=False)
@@ -8,17 +8,24 @@ class Keyword:
     """Text preserving its spelling with case-insensitive equality."""
 
     text: str
+    _comparison_key: str = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_comparison_key", self.text.casefold())
+
+    def __deepcopy__(self, memo: dict[int, object]) -> Self:
+        return self
 
     @override
     def __hash__(self) -> int:
-        return hash(self.text.casefold())
+        return hash(self._comparison_key)
 
     @override
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Keyword):
             return NotImplemented
 
-        return self.text.casefold() == other.text.casefold()
+        return self._comparison_key == other._comparison_key
 
     @override
     def __str__(self) -> str:

@@ -1,16 +1,22 @@
 from copy import deepcopy
-
-from willow_package_builder.upackage import FName
+from typing import TYPE_CHECKING
 
 from .values import ArrayValue, EmptyValue, StructValue, Value
+
+if TYPE_CHECKING:
+    from willow_package_builder.upackage import FName
 
 
 def merge_values(defaults: dict[FName, Value], overrides: dict[FName, Value]) -> dict[FName, Value]:
     """Apply overrides without modifying either input."""
-    result = deepcopy(defaults)
+    result: dict[FName, Value] = {}
 
-    for name, supplied in overrides.items():
-        previous = result.get(name)
+    for name, previous in defaults.items():
+        if name not in overrides:
+            result[name] = deepcopy(previous)
+            continue
+
+        supplied = overrides[name]
 
         match previous, supplied:
             case StructValue(), StructValue():
@@ -20,13 +26,16 @@ def merge_values(defaults: dict[FName, Value], overrides: dict[FName, Value]) ->
                 )
 
             case StructValue(), EmptyValue():
-                # An empty struct update preserves its existing fields.
-                pass
+                result[name] = deepcopy(previous)
 
             case ArrayValue(), EmptyValue():
                 result[name] = ArrayValue()
 
             case _:
                 result[name] = deepcopy(supplied)
+
+    for name, supplied in overrides.items():
+        if name not in defaults:
+            result[name] = deepcopy(supplied)
 
     return result

@@ -39,8 +39,11 @@ class ClassLiteralExpression(Expression):
 
 @dataclass
 class NewExpression(Expression):
-    outer: Expression
-    object_class: ClassLiteralExpression
+    outer: Expression | None
+    object_class: Expression
+    name: Expression | None = None
+    flags: Expression | None = None
+    template: Expression | None = None
 
 
 @dataclass

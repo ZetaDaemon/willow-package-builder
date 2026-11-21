@@ -1,4 +1,29 @@
 # Changelog
+## [0.10]
+### Additions
+- Support dynamic class expressions and optional outer, name, flags, and
+  template operands in `new` expressions.
+- Support explicit conversions between vectors and rotators.
+- Compile custom interface exports and bodyless scripted function declarations.
+- Add `--force` to rebuild unchanged packages.
+- Add `--re-cache` to reparse class sources and regenerate declaration caches.
+
+### Fixes
+- Initialize local struct variables using their declared struct defaults.
+- Accept compatible object subclasses in dynamic-array `AddItem()` calls.
+- Recognize interfaces through their class ancestry when reference dumps
+  declare them using class syntax.
+- Include source file and location in invalid `implements(...)` diagnostics.
+
+### Performance
+- Cache resolved types, struct lookups, expression lookups, and package visibility.
+- Index package names to avoid repeated linear searches during serialization.
+- Cache case-insensitive comparison keys for names, reference paths, and keywords.
+- Reduce copying of property defaults and share immutable scalar values safely.
+- Use binary declaration caches and regenerate incompatible cache entries.
+- Speed up tokenization and modifier parsing by reducing repeated scanning,
+  keyword construction, and enum lookups.
+
 ## [0.9]
 ### Additions
 - Load package-provided class handlers from `Handlers/__init__.py` through

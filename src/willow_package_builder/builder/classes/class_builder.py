@@ -3,7 +3,6 @@ from time import perf_counter
 from typing import TYPE_CHECKING
 
 from willow_package_builder.builder.build_component import BuildComponent
-from willow_package_builder.compiler.syntax.declarations import FunctionDeclaration
 from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
 from willow_package_builder.compiler.syntax.modifiers import (
@@ -18,10 +17,9 @@ from willow_package_builder.compiler.syntax.punctuation import Punctuation
 from willow_package_builder.games import get_game
 from willow_package_builder.logging import (
     CompilationError,
-    WarningCode,
+    SourceLocation,
     declaration_context,
     info,
-    warn,
 )
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import (
@@ -31,6 +29,7 @@ from willow_package_builder.payloads.class_payload import (
     UScriptStatePayload,
 )
 from willow_package_builder.upackage import (
+    CORE_INTERFACE_PATH,
     CORE_STATE_PATH,
     NONE_NAME,
     FName,
@@ -44,7 +43,10 @@ from .exports import ClassExport
 if TYPE_CHECKING:
     from willow_package_builder.builder.objects.object_builder import ObjectBuilder
     from willow_package_builder.builder.references import PackageReferences
-    from willow_package_builder.compiler.syntax.declarations import ClassModifier
+    from willow_package_builder.compiler.syntax.declarations import (
+        ClassModifier,
+        FunctionDeclaration,
+    )
 
     from .property_builder import PropertyBuilder
 
@@ -120,15 +122,6 @@ class ClassBuilder(BuildComponent):
                 continue
 
             declaration = self.context.references.classes[class_path]
-
-            if declaration.is_interface:
-                warn(
-                    WarningCode.UNSUPPORTED_INTERFACE_COMPILATION,
-                    f"Interface {class_path!r} is available for reference only; "
-                    "its export will be omitted because interface compilation "
-                    "is not supported yet.",
-                )
-                continue
 
             info(f"Reserving class exports for {class_path}")
             class_object = UObject(declaration.name, ObjectFlags.CLASS_EXPORT)
@@ -239,7 +232,7 @@ class ClassBuilder(BuildComponent):
         parents = self.context.parents
 
         for owner, declaration in references.iter_class_hierarchy(interface, parents):
-            if not declaration.is_interface:
+            if not references.is_subclass(owner, CORE_INTERFACE_PATH, parents):
                 break
 
             for required in declaration.functions:
@@ -291,14 +284,21 @@ class ClassBuilder(BuildComponent):
             parser = TokenParser([*arguments, eof])
 
             while True:
+                name_token = parser.peek()
                 name = parser.parse_qualified_name()
-                path, declaration = self.context.references.resolve_class(
+                path, _declaration = self.context.references.resolve_class(
                     name, package_name, visible
                 )
 
-                if not declaration.is_interface:
-                    msg = f"{class_path}: {path} is not an interface"
-                    raise CompilationError(msg)
+                if not self.context.references.is_subclass(
+                    path, CORE_INTERFACE_PATH, self.context.parents
+                ):
+                    msg = f"{path} is not an interface"
+                    raise CompilationError(
+                        msg,
+                        location=SourceLocation(name_token.line, name_token.column),
+                        context=str(self.context.loader.source_path(class_path)),
+                    )
 
                 if path in interfaces:
                     msg = f"{class_path}: Interface {path} is listed more than once"
@@ -404,6 +404,10 @@ class ClassBuilder(BuildComponent):
 
             flags = ClassFlags.COMPILED | ClassFlags.PARSED
             flags |= self.resolve_inherited_modifier_flags(class_path)
+
+            if exports.declaration.is_interface:
+                flags |= ClassFlags.INTERFACE | ClassFlags.ABSTRACT
+
             config_name = self.resolve_config_name(class_path)
             if config_name == NONE_NAME and any(
                 VariableModifier.CONFIG in variable.modifiers

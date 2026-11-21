@@ -21,13 +21,15 @@ from .logging import CompilationError, Logger, WarningAction, WarningCode, info
 __all__ = ["build_package"]
 
 
-def prepare_build(target_directory: Path, reference_paths: tuple[Path, ...] = ()) -> BuildContext:
+def prepare_build(
+    target_directory: Path, reference_paths: tuple[Path, ...] = (), *, re_cache: bool = False
+) -> BuildContext:
     target_directory = target_directory.resolve()
 
     packages = load_package_graph(target_directory, reference_paths)
     build_packages = collect_build_packages(target_directory, packages)
     references = ReferenceDatabase()
-    loader = ClassLoader(packages, build_packages, references)
+    loader = ClassLoader(packages, build_packages, references, re_cache=re_cache)
 
     loader.load_declarations()
 
@@ -49,10 +51,13 @@ def prepare_build(target_directory: Path, reference_paths: tuple[Path, ...] = ()
 def build_package(
     target_directory: str | Path,
     output_directory: str | Path | None = None,
-    debug: bool = False,
-    silent_console: bool = False,
     warning_actions: Mapping[WarningCode, WarningAction] | None = None,
     reference_paths: tuple[Path, ...] = (),
+    *,
+    debug: bool = False,
+    silent_console: bool = False,
+    force: bool = False,
+    re_cache: bool = False,
 ) -> tuple[Path, ...]:
     """Build the target package and its required packages."""
     target_directory = Path(target_directory).resolve()
@@ -68,7 +73,7 @@ def build_package(
     )
 
     with logger.catch_errors_and_warnings():
-        context = prepare_build(target_directory, reference_paths)
+        context = prepare_build(target_directory, reference_paths, re_cache=re_cache)
         configure_class_handlers(context.packages)
         fingerprints = package_build_fingerprints(
             context.packages,
@@ -95,7 +100,7 @@ def build_package(
             stamp_path = config.directory / ".willow-cache" / "builds" / f"{output_key}.fingerprint"
             fingerprint = fingerprints[config.directory]
 
-            if output_path.is_file() and manifest_path.is_file():
+            if not force and output_path.is_file() and manifest_path.is_file():
                 try:
                     previous_fingerprint = stamp_path.read_text(encoding="utf-8").strip()
                 except OSError, UnicodeError:

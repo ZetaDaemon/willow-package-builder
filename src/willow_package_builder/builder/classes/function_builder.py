@@ -14,6 +14,7 @@ from willow_package_builder.compiler.syntax.declarations import (
 )
 from willow_package_builder.compiler.syntax.modifiers import FunctionModifier, ParameterModifier
 from willow_package_builder.compiler.syntax.parser import FunctionParser
+from willow_package_builder.compiler.syntax.statements import FunctionBody
 from willow_package_builder.logging import CompilationError, declaration_context, info
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.payloads.class_payload import (
@@ -300,14 +301,18 @@ class FunctionBuilder(BuildComponent):
 
         resolver = ExpressionResolver(self.context, scope)
 
-        if not function.has_body:
-            msg = (
-                f"Bodyless scripted function compilation is not supported yet: "
-                f"{class_path}.{function.name}"
-            )
-            raise NotImplementedError(msg)
+        is_interface = self.context.references.classes[class_path].is_interface
 
-        body = FunctionParser.from_function_body(function, resolver).parse_function_body()
+        if is_interface and function.has_body:
+            msg = f"Interface function {class_path}.{function.name} cannot have a body"
+            raise CompilationError(msg)
+
+        if function.has_body:
+            body = FunctionParser.from_function_body(function, resolver).parse_function_body()
+        else:
+            flags &= ~FunctionFlags.DEFINED
+            body = FunctionBody([], [])
+
         parameter_defaults = self._parse_parameter_defaults(function, resolver)
         FunctionBodyValidator(resolver).validate_parameter_defaults(parameter_defaults)
 
@@ -386,6 +391,9 @@ class FunctionBuilder(BuildComponent):
             path = owner + function.name + local.name
 
             with declaration_context(path, local.location):
+                resolved = resolver.resolve_declared_type(local.type_ref, class_path)
+                if resolved.category is TypeCategory.STRUCT:
+                    function_payload.function_flags |= FunctionFlags.HAS_DEFAULTS
                 obj = self.properties.create_property(
                     function_object,
                     local.name,
@@ -478,6 +486,9 @@ class FunctionBuilder(BuildComponent):
         for function in prepared:
             scope = function.resolver.scope
             path = function.function_object.reference()
+
+            if not scope.function.has_body:
+                continue
 
             with declaration_context(path, scope.function.location):
                 payload = cast("UFunctionPayload", function.function_object.payload)

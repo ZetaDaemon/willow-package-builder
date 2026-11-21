@@ -13,7 +13,7 @@ WPB handles two different uses of UnrealScript source:
 - **Compiled packages:** WPB constructs class/property exports, default objects, and function bytecode from your source.
 - **Reference packages:** WPB reads declarations and defaults to resolve types, members, native function indexes, and operator precedence. It does not compile their function bodies.
 
-A feature appearing in a reference dump does not mean WPB can compile that feature in a custom class. In particular, replication and state blocks are skipped in reference-only source, while custom classes containing them are rejected.
+A feature appearing in a reference dump does not mean WPB can compile that feature in a custom class. Replication blocks are not compiled. State support and its limitations are described below.
 
 The availability of a bytecode opcode or payload class also does not imply that the source compiler supports the corresponding language feature.
 
@@ -28,12 +28,12 @@ The availability of a bytecode opcode or payload class also does not imply that 
 | Class modifiers | See below |
 | `implements(...)` for existing interfaces | Implemented with method signature checks |
 | New root classes without a superclass | Not yet implemented |
-| Compiling interfaces | Not yet implemented; declaration is retained for reference and export is omitted with a warning |
+| Compiling interfaces | Implemented for scripted interface declarations and bodyless methods |
 | Native class implementation | Not compiled; native declarations belong in reference packages |
 | States and state-specific functions | See [States](#states) |
 | Replication blocks | Not yet implemented |
 
-An abstract class may be emitted, but bodyless scripted functions are not yet implemented. Marking a class abstract does not bypass that limitation.
+Bodyless scripted function declarations are supported, including in concrete classes. Interface methods must be bodyless. Abstract classes can be emitted but cannot be explicitly constructed.
 
 ### Class modifiers
 
@@ -49,10 +49,10 @@ An abstract class may be emitted, but bodyless scripted functions are not yet im
   and `forcescriptorder(true|false)`.
 - `noexport` emits the C++ header export flag. The class still has a UPK export.
 
-Calls through existing interfaces, object-to-interface casts, and interface
-comparisons with `None` are supported. `QueryInterface(class'SomeInterface')`
-uses the class literal to infer the result type. Compiling new interface
-exports and serializing explicit interface property values remain unsupported.
+Calls through interfaces, object-to-interface casts, and interface comparisons
+with `None` are supported. `QueryInterface(class'SomeInterface')` uses the class
+literal to infer the result type. Custom interface exports are supported;
+serializing explicit interface property values remains unsupported.
 
 ## States
 
@@ -261,7 +261,7 @@ Not yet implemented:
 - Calling scripted operator implementations.
 - Precedence that cannot be determined from the left operand type alone.
 - Casts outside the supported primitive and object conversions.
-- Rotator literals and other forms of `new`.
+- Rotator literals.
 - String escape decoding in function-body literals.
 
 Some discarded string expressions also have emission restrictions. Returning a string or assigning a supported string expression is separate from evaluating and discarding an arbitrary string result.

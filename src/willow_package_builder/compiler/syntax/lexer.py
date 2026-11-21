@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum, auto
+from functools import cached_property
 from typing import override
 
 from willow_package_builder.compiler.syntax.keyword import Keyword
@@ -59,7 +60,7 @@ class Token:
         base = 16 if self._text.startswith(("0x", "0X")) else 10
         return int(self._text, base)
 
-    @property
+    @cached_property
     def keyword(self) -> Keyword | None:
         """Interpret an identifier as a keyword."""
         if self.category is not TokenCategory.IDENTIFIER:
@@ -142,32 +143,38 @@ OPERATORS = tuple(
         reverse=True,
     )
 )
+OPERATORS_BY_FIRST: dict[str, tuple[str, ...]] = {
+    character: tuple(operator for operator in OPERATORS if operator[0] == character)
+    for character in {operator[0] for operator in OPERATORS}
+}
 
 
 class Lexer:
     source: str
+    _source_length: int
     position: int = 0
     line: int = 1
     column: int = 1
 
     def __init__(self, source: str) -> None:
         self.source = source
+        self._source_length = len(source)
 
     def peek(self, offset: int = 0) -> str:
         position = self.position + offset
 
-        if position >= len(self.source):
+        if position >= self._source_length:
             return ""
 
         return self.source[position]
 
     def advance(self) -> str:
-        character = self.peek()
-
-        if not character:
+        position = self.position
+        if position >= self._source_length:
             return ""
 
-        self.position += 1
+        character = self.source[position]
+        self.position = position + 1
 
         if character == "\n":
             self.line += 1
@@ -183,17 +190,36 @@ class Lexer:
             character = self.peek()
 
             if character and character.isspace():
-                self.advance()
+                source = self.source
+                source_length = self._source_length
+                start = self.position
+                position = start + 1
+
+                while position < source_length and source[position].isspace():
+                    position += 1
+
+                whitespace = source[start:position]
+                newline_count = whitespace.count("\n")
+
+                if newline_count:
+                    self.line += newline_count
+                    self.column = len(whitespace) - whitespace.rfind("\n")
+                else:
+                    self.column += position - start
+
+                self.position = position
                 continue
 
             # Line comment.
             if character == "/" and self.peek(1) == "/":
-                self.advance()
-                self.advance()
+                start = self.position
+                end = self.source.find("\n", start + 2)
 
-                while self.peek() and self.peek() != "\n":
-                    self.advance()
+                if end == -1:
+                    end = self._source_length
 
+                self.position = end
+                self.column += end - start
                 continue
 
             # Block comment, including nested block comments.
@@ -320,12 +346,20 @@ class Lexer:
             return Token(TokenCategory.EOF, "", line, column)
 
         if character.isalpha() or character == "_":
-            self.advance()
+            source = self.source
+            source_length = self._source_length
+            position = start + 1
 
-            while self.peek() and (self.peek().isalnum() or self.peek() == "_"):
-                self.advance()
+            while position < source_length:
+                character = source[position]
+                if not (character.isalnum() or character == "_"):
+                    break
+                position += 1
 
-            return Token(TokenCategory.IDENTIFIER, self.source[start : self.position], line, column)
+            self.position = position
+            self.column += position - start
+
+            return Token(TokenCategory.IDENTIFIER, source[start:position], line, column)
 
         if character.isdigit() or (character == "." and self.peek(1).isdigit()):
             return self.read_number()
@@ -337,10 +371,11 @@ class Lexer:
         if character in ('"', "'"):
             return self.read_quoted()
 
-        for operator in OPERATORS:
-            if self.source.startswith(operator, self.position):
-                for _ in operator:
-                    self.advance()
+        for operator in OPERATORS_BY_FIRST.get(character, ()):
+            if self.source.startswith(operator, start):
+                length = len(operator)
+                self.position = start + length
+                self.column += length
 
                 return Token(TokenCategory.SYMBOL, operator, line, column)
 

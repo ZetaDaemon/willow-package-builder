@@ -2,14 +2,13 @@ from dataclasses import dataclass, field
 from time import perf_counter
 from typing import TYPE_CHECKING
 
-from willow_package_builder.builder.classes.default_objects import DefaultObjectTemplate
 from willow_package_builder.builder.defaults_builder import DefaultsBuilder
 from willow_package_builder.builder.value_builder import ValueBuilder
 from willow_package_builder.games import get_game
 from willow_package_builder.logging import info
 from willow_package_builder.objects.definitions import ObjectDefinition, ObjectDefinitionFlag
 from willow_package_builder.package_config import collect_visible_packages
-from willow_package_builder.upackage import FName, Package, ReferencePath
+from willow_package_builder.upackage import Package, ReferencePath
 
 from .build_state import PackageBuildState
 from .classes.class_builder import ClassBuilder

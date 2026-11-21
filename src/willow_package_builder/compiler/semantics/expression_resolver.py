@@ -46,8 +46,10 @@ from willow_package_builder.logging import (
 )
 from willow_package_builder.package_config import collect_visible_packages
 from willow_package_builder.upackage import (
+    CLASS_CLASS_NAME,
     CORE_INTERFACE_PATH,
     CORE_OBJECT_PATH,
+    CORE_ROTATOR_PATH,
     CORE_VECTOR_PATH,
     ENGINE_ACTOR_PATH,
     QUERY_INTERFACE_PATH,
@@ -55,7 +57,7 @@ from willow_package_builder.upackage import (
     ReferencePath,
 )
 
-from .reference_database import ResolvedMember
+from .reference_database import BUILTIN_CAST_TYPES, ResolvedMember
 from .types import ResolvedType, TypeCategory
 
 if TYPE_CHECKING:
@@ -134,6 +136,15 @@ class ExpressionResolver:
     scope: FunctionScope
 
     _visibility: dict[FName, set[FName]] = field(default_factory=dict, init=False, repr=False)
+    _declared_types: dict[tuple[TypeReference | None, ReferencePath], ResolvedType] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _binary_operators: dict[
+        tuple[Operator | Keyword, ResolvedType, ResolvedType], ResolvedMember[OperatorDeclaration]
+    ] = field(default_factory=dict, init=False, repr=False)
+    _members: dict[tuple[ResolvedType, FName], ResolvedMember[VariableDeclaration]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self._visibility = {
@@ -144,14 +155,21 @@ class ExpressionResolver:
     def resolve_declared_type(
         self, type_ref: TypeReference | None, owner_class: ReferencePath
     ) -> ResolvedType:
+        key = (type_ref, owner_class)
+        cached = self._declared_types.get(key)
+        if cached is not None:
+            return cached
+
         if owner_class.outer is None:
             msg = f"Expected fully qualified class, got {owner_class}"
             raise ValueError(msg)
-        package_name = owner_class.outer.name
 
-        return self.context.references.resolve_type(
+        package_name = owner_class.outer.name
+        resolved = self.context.references.resolve_type(
             type_ref, owner_class, self._visibility[package_name], self.context.parents
         )
+        self._declared_types[key] = resolved
+        return resolved
 
     def resolve_operator(self, expression: BinaryExpression) -> ResolvedMember[OperatorDeclaration]:
         left = self.type_of(expression.left)
@@ -167,12 +185,17 @@ class ExpressionResolver:
             ):
                 left = ResolvedType(TypeCategory.INTERFACE, CORE_INTERFACE_PATH)
 
+        key = (expression.operator, left, right)
+        cached = self._binary_operators.get(key)
+        if cached is not None:
+            return cached
+
         if self.scope.class_path.outer is None:
             msg = f"Expected fully qualified class, got {self.scope.class_path}"
             raise ValueError(msg)
         package_name = self.scope.class_path.outer.name
 
-        return self.context.references.resolve_binary_operator(
+        resolved = self.context.references.resolve_binary_operator(
             expression.operator,
             left,
             right,
@@ -180,9 +203,26 @@ class ExpressionResolver:
             self._visibility[package_name],
             self.context.parents,
         )
+        self._binary_operators[key] = resolved
+        return resolved
 
     def primitive_cast_selector(self, source: ResolvedType, target: ResolvedType) -> Opcode | None:
         selectors = get_game().PRIMITIVE_CAST_SELECTORS
+
+        if source.category is TypeCategory.STRUCT and target.category is TypeCategory.STRUCT:
+            match source.declaration_path, target.declaration_path:
+                case source_path, target_path if (
+                    source_path == CORE_ROTATOR_PATH and target_path == CORE_VECTOR_PATH
+                ):
+                    return selectors.ROTATOR_TO_VECTOR
+
+                case source_path, target_path if (
+                    source_path == CORE_VECTOR_PATH and target_path == CORE_ROTATOR_PATH
+                ):
+                    return selectors.VECTOR_TO_ROTATOR
+
+                case _:
+                    pass
 
         if target.category is TypeCategory.STRING:
             match source.category:
@@ -351,7 +391,7 @@ class ExpressionResolver:
         self, expression: CastExpression
     ) -> tuple[ResolvedType, Opcode | None]:
         source = self.type_of(expression.operand)
-        target = self.resolve_declared_type(expression.target, self.scope.class_path)
+        target = BUILTIN_CAST_TYPES[expression.target.name]
 
         if self.array_dimension_of(expression.operand) != 1:
             msg = "A primitive cast requires a scalar operand"
@@ -501,18 +541,23 @@ class ExpressionResolver:
                 return ResolvedType(TypeCategory.CLASS, arguments=(bound,))
 
             case NewExpression():
-                target = self.resolve_class_literal(expression.object_class.path)
-                outer = self.type_of(expression.outer)
+                class_type = self.type_of(expression.object_class)
+                if (
+                    class_type.category is not TypeCategory.CLASS
+                    or len(class_type.arguments) != 1
+                    or self.array_dimension_of(expression.object_class) != 1
+                ):
+                    msg = "new requires a scalar class reference"
+                    raise CompilationError(msg)
+
+                bound = class_type.arguments[0]
+                target = bound.declaration_path
+                if target is None:
+                    msg = "new requires a class reference with a resolved class bound"
+                    raise CompilationError(msg)
+
                 references = self.context.references
                 parents = self.context.parents
-
-                if (
-                    outer.category is not TypeCategory.OBJECT
-                    or outer.declaration_path is None
-                    or self.array_dimension_of(expression.outer) != 1
-                ):
-                    msg = "new requires a scalar object as its outer"
-                    raise CompilationError(msg)
 
                 if ENGINE_ACTOR_PATH in references.classes and references.is_subclass(
                     target, ENGINE_ACTOR_PATH, parents
@@ -520,16 +565,28 @@ class ExpressionResolver:
                     msg = f"Use Spawn to construct actor class {target}"
                     raise CompilationError(msg)
 
-                if references.classes[target].is_abstract:
-                    msg = f"Cannot construct abstract class {target}"
-                    raise CompilationError(msg)
+                if isinstance(expression.object_class, ClassLiteralExpression):
+                    declaration = references.classes.get(target)
+                    if declaration is not None and declaration.is_abstract:
+                        msg = f"Cannot construct abstract class {target}"
+                        raise CompilationError(msg)
 
-                within = references.resolve_within_class(target, parents, self.context.packages)
-                if not references.is_subclass(outer.declaration_path, within, parents):
-                    msg = f"new {target} requires an outer of type {within}, got {outer}"
-                    raise CompilationError(msg)
+                if expression.outer is not None:
+                    outer = self.type_of(expression.outer)
+                    if (
+                        outer.category is not TypeCategory.OBJECT
+                        or outer.declaration_path is None
+                        or self.array_dimension_of(expression.outer) != 1
+                    ):
+                        msg = "new requires a scalar object as its outer"
+                        raise CompilationError(msg)
 
-                return ResolvedType(TypeCategory.OBJECT, target)
+                    within = references.resolve_within_class(target, parents, self.context.packages)
+                    if not references.is_subclass(outer.declaration_path, within, parents):
+                        msg = f"new {target} requires an outer of type {within}, got {outer}"
+                        raise CompilationError(msg)
+
+                return bound
 
             case IntegerExpression():
                 return ResolvedType(TypeCategory.INT)
@@ -562,7 +619,7 @@ class ExpressionResolver:
                 )
 
             case CastExpression():
-                if expression.target.name not in PRIMITIVE_TYPES:
+                if expression.target.name not in BUILTIN_CAST_TYPES:
                     return self.resolve_object_cast(expression)
 
                 target, _ = self.resolve_primitive_cast(expression)
@@ -600,6 +657,13 @@ class ExpressionResolver:
                     return ResolvedType(TypeCategory.INT)
 
                 member = self.resolve_member(expression)
+                if (
+                    member.owner_class == CORE_OBJECT_PATH
+                    and member.declaration.name == CLASS_CLASS_NAME
+                ):
+                    receiver = self.type_of(expression.object)
+                    if receiver.category is TypeCategory.OBJECT:
+                        return ResolvedType(TypeCategory.CLASS, arguments=(receiver,))
 
                 return self.resolve_declared_type(member.declaration.type_ref, member.owner_class)
 
@@ -899,6 +963,11 @@ class ExpressionResolver:
 
     def resolve_member(self, expression: MemberExpression) -> ResolvedMember[VariableDeclaration]:
         receiver = self.type_of(expression.object)
+        key = (receiver, expression.name)
+        cached = self._members.get(key)
+        if cached is not None:
+            return cached
+
         if receiver.category is TypeCategory.STRUCT:
             struct_path = receiver.declaration_path
             if struct_path is None:
@@ -906,21 +975,24 @@ class ExpressionResolver:
                 raise ValueError(msg)
 
             package_name = struct_path.get_outer().get_outer().name
-            return self.context.references.resolve_struct_variable(
+            member = self.context.references.resolve_struct_variable(
                 struct_path, expression.name, self.context.parents, self._visibility[package_name]
             )
+        else:
+            if receiver.category is not TypeCategory.OBJECT:
+                msg = f"Member access for {receiver.category.value} is not implemented yet"
+                raise NotImplementedError(msg)
 
-        if receiver.category is not TypeCategory.OBJECT:
-            msg = f"Member access for {receiver.category.value} is not implemented yet"
-            raise NotImplementedError(msg)
+            if receiver.declaration_path is None:
+                msg = "Object type has no declaring class"
+                raise ValueError(msg)
 
-        if receiver.declaration_path is None:
-            msg = "Object type has no declaring class"
-            raise ValueError(msg)
+            member = self.context.references.resolve_variable(
+                receiver.declaration_path, expression.name, self.context.parents
+            )
 
-        return self.context.references.resolve_variable(
-            receiver.declaration_path, expression.name, self.context.parents
-        )
+        self._members[key] = member
+        return member
 
     def resolve_local_array_dimension(self, declaration: VariableDeclaration) -> None:
         name = declaration.array_dimension_name

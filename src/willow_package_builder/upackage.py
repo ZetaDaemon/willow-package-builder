@@ -88,19 +88,21 @@ class Name:
     """String with case insensitive comparisons."""
 
     name: str
+    _comparison_key: str = field(init=False, repr=False)
 
     def __init__(self, name: str) -> None:
         object.__setattr__(self, "name", name)
+        object.__setattr__(self, "_comparison_key", name.casefold())
 
     @override
     def __hash__(self) -> int:
-        return hash(self.name.casefold())
+        return hash(self._comparison_key)
 
     @override
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, Name):
-            return self.name.casefold() == other.name.casefold()
-        return NotImplemented
+        if not isinstance(other, Name):
+            return NotImplemented
+        return self._comparison_key == other._comparison_key
 
     @override
     def __str__(self) -> str:
@@ -110,9 +112,12 @@ class Name:
     def __repr__(self) -> str:
         return str(self)
 
+    def __deepcopy__(self, memo: dict[int, object]) -> Name:  # noqa: D105
+        return self
+
     def is_none(self) -> bool:
         """Check if the value is none."""
-        return self.name.casefold() == "none"
+        return self._comparison_key == "none"
 
 
 UINT8_MAX = (1 << 8) - 1
@@ -166,9 +171,12 @@ class FName:
     def __repr__(self) -> str:
         return str(self)
 
+    def __deepcopy__(self, memo: dict[int, object]) -> FName:  # noqa: D105
+        return self
+
     @override
     def __hash__(self) -> int:
-        return hash(str(self).casefold())
+        return hash((self.name, self.number))
 
     @override
     def __eq__(self, other: object) -> bool:
@@ -198,6 +206,7 @@ class ReferencePath:
 
     name: FName
     outer: ReferencePath | None
+    _comparison_key: str = field(init=False, repr=False)
 
     @overload
     def __init__(self) -> None: ...
@@ -239,16 +248,22 @@ class ReferencePath:
             msg = "Outer cannot be a null ReferencePath; omit it for a root path"
             raise ValueError(msg)
 
+        key = str(name).casefold()
+        if outer is not None:
+            key = f"{outer._comparison_key}.{key}"
+
+        object.__setattr__(self, "_comparison_key", key)
+
     @override
     def __hash__(self) -> int:
-        return hash(str(self).casefold())
+        return hash(self._comparison_key)
 
     @override
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ReferencePath):
             return NotImplemented
 
-        return str(self).casefold() == str(other).casefold()
+        return self._comparison_key == other._comparison_key
 
     @override
     def __str__(self) -> str:
@@ -261,6 +276,9 @@ class ReferencePath:
     @override
     def __repr__(self) -> str:
         return str(self)
+
+    def __deepcopy__(self, memo: dict[int, object]) -> ReferencePath:  # noqa: D105
+        return self
 
     def __add__(self, other: Name | FName | ReferencePath) -> ReferencePath:
         if isinstance(other, ReferencePath):
@@ -433,9 +451,14 @@ class Package:
         default_factory=dict, init=False, repr=False
     )
     _names: list[Name] | tuple[Name, ...] = field(default_factory=list)
+    _name_indices: dict[Name, int] = field(default_factory=dict, init=False, repr=False)
+
+    def __post_init__(self) -> None:  # noqa: D105
+        for index, name in enumerate(self._names):
+            self._name_indices.setdefault(name, index)
 
     def add_name(self, name: Name | FName) -> None:
-        """Add a name to the list, without duplication."""
+        """Register a name, preserving its first spelling and index."""
         if isinstance(self._names, tuple):
             msg = "Cannot add a name after name-table serialization."
             raise RuntimeError(msg)  # noqa: TRY004
@@ -443,7 +466,8 @@ class Package:
         if isinstance(name, FName):
             name = name.name
 
-        if name not in self._names:
+        if name not in self._name_indices:
+            self._name_indices[name] = len(self._names)
             self._names.append(name)
 
     def add_import(self, obj: ExternalReference) -> ReferencePath:
@@ -483,19 +507,17 @@ class Package:
         return key
 
     def name_index(self, name: Name) -> int:
-        """Get the index of a name."""
-        key = name
-
-        for index, existing in enumerate(self._names):
-            if existing == key:
-                return index
+        """Get or register a name's index."""
+        index = self._name_indices.get(name)
+        if index is not None:
+            return index
 
         if isinstance(self._names, tuple):
             msg = f"Name table is finalized; name is not registered: {name}"
             raise ValueError(msg)  # noqa: TRY004
 
         self.add_name(name)
-        return self.name_index(name)
+        return self._name_indices[name]
 
     def lookup_object_by_path(self, path: ReferencePath) -> UObject | ExternalReference:
         """Lookup an object by the path."""
@@ -759,6 +781,7 @@ ATTRIBUTE_MODIFIER_CLASS_NAME = FName("AttributeModifier")
 BYTE_ATTR_PROPERTY_CLASS_NAME = FName("ByteAttributeProperty")
 COMPONENT_CLASS_NAME = FName("Component")
 VECTOR_CLASS_NAME = FName("Vector")
+ROTATOR_CLASS_NAME = FName("Rotator")
 QUERY_INTERFACE_NAME = FName("QueryInterface")
 
 CORE_PACKAGE_PATH = ReferencePath(CORE_PACKAGE_NAME)
@@ -777,6 +800,7 @@ CORE_ATTRIBUTE_MODIFIER_CLASS_PATH = CORE_PACKAGE_PATH + ATTRIBUTE_MODIFIER_CLAS
 CORE_BYTE_ATTRIBUTE_PROPERTY_CLASS_PATH = CORE_PACKAGE_PATH + BYTE_ATTR_PROPERTY_CLASS_NAME
 CORE_COMPONENT_PATH = CORE_PACKAGE_PATH + COMPONENT_CLASS_NAME
 CORE_VECTOR_PATH = CORE_OBJECT_PATH + VECTOR_CLASS_NAME
+CORE_ROTATOR_PATH = CORE_OBJECT_PATH + ROTATOR_CLASS_NAME
 QUERY_INTERFACE_PATH = CORE_OBJECT_PATH + QUERY_INTERFACE_NAME
 
 RETURN_VALUE_NAME = FName("ReturnValue")

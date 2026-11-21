@@ -1,5 +1,6 @@
 from abc import ABC
 from dataclasses import dataclass, field
+from typing import Self
 
 from willow_package_builder.upackage import NONE_NAME, FName, ReferencePath
 
@@ -8,42 +9,49 @@ class Value(ABC):
     """Serializable property data."""
 
 
-@dataclass
-class NullValue(Value): ...
+class ImmutableValue(Value):
+    """Property value that can be shared safely when copying."""
+
+    def __deepcopy__(self, memo: dict[int, object]) -> Self:
+        return self
 
 
-@dataclass
-class IntValue(Value):
+@dataclass(frozen=True)
+class NullValue(ImmutableValue): ...
+
+
+@dataclass(frozen=True)
+class IntValue(ImmutableValue):
     value: int = 0
 
 
-@dataclass
-class FloatValue(Value):
+@dataclass(frozen=True)
+class FloatValue(ImmutableValue):
     value: float = 0.0
 
 
-@dataclass
-class ByteValue(Value):
+@dataclass(frozen=True)
+class ByteValue(ImmutableValue):
     value: int = 0
 
 
-@dataclass
-class BoolValue(Value):
+@dataclass(frozen=True)
+class BoolValue(ImmutableValue):
     value: bool = False
 
 
-@dataclass
-class StringValue(Value):
+@dataclass(frozen=True)
+class StringValue(ImmutableValue):
     value: str = ""
 
 
-@dataclass
-class NameValue(Value):
+@dataclass(frozen=True)
+class NameValue(ImmutableValue):
     value: FName = field(default_factory=lambda: NONE_NAME)
 
 
-@dataclass
-class IdentifierValue(Value):
+@dataclass(frozen=True)
+class IdentifierValue(ImmutableValue):
     name: ReferencePath
 
 
@@ -60,8 +68,8 @@ class ArrayValue(Value):
     elements: list[Value] = field(default_factory=list)
 
 
-@dataclass
-class EmptyValue(Value):
+@dataclass(frozen=True)
+class EmptyValue(ImmutableValue):
     """Empty parentheses awaiting interpretation for the target property."""
 
 
@@ -71,14 +79,14 @@ class StructValue(Value):
     struct_path: ReferencePath | None = field(default=None, kw_only=True)
 
 
-@dataclass
-class EnumValue(Value):
+@dataclass(frozen=True)
+class EnumValue(ImmutableValue):
     enum_name: FName
     member_name: FName
     index: int
 
 
-@dataclass
-class DelegateValue(Value):
+@dataclass(frozen=True)
+class DelegateValue(ImmutableValue):
     target: ReferencePath = field(default_factory=ReferencePath)
     function_name: FName = field(default_factory=lambda: NONE_NAME)

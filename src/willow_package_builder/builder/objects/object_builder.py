@@ -204,11 +204,6 @@ class ObjectBuilder(BuildComponent):
             )
             self.exports[definition] = obj
 
-            if isinstance(definition, ObjectDefinition) and isinstance(
-                definition.outer, FolderDefinition
-            ):
-                info(f"Building object {self.package.format_object(obj)}")
-
     def property_default_value(self, class_path: ReferencePath, name: FName) -> Value:
         member = self.context.references.resolve_variable(class_path, name, self.context.parents)
         definition = member.declaration
@@ -339,6 +334,9 @@ class ObjectBuilder(BuildComponent):
                     raise ValueError(msg)  # noqa: TRY004
 
                 try:
+                    if isinstance(definition.outer, FolderDefinition):
+                        info(f"Building object {self.package.format_object(obj)}")
+
                     payload.properties = self._build_properties(definition, visible)
 
                     if definition.handler is not None:
@@ -351,6 +349,7 @@ class ObjectBuilder(BuildComponent):
                             partial(self._read_handler_archetype_property, obj),
                             partial(self._read_handler_archetype_input, obj),
                         )
+
                         try:
                             handler.build_properties(obj)
                         except ObjectDefinitionError as error:

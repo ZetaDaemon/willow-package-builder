@@ -58,6 +58,16 @@ def main() -> None:
         default=[],
         help="Directory containing reference package folders; may be repeated",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Rebuild packages even when their outputs are up to date",
+    )
+    parser.add_argument(
+        "--re-cache",
+        action="store_true",
+        help="Reparse class sources and regenerate declaration caches",
+    )
     args = parser.parse_args()
 
     conflicting = set(args.ignore_warning) & set(args.error_warning)
@@ -79,6 +89,8 @@ def main() -> None:
             silent_console=args.silent_console,
             warning_actions=warning_actions,
             reference_paths=tuple(args.reference_path),
+            force=args.force,
+            re_cache=args.re_cache,
         )
 
 

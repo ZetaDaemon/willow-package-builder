@@ -39,6 +39,9 @@ class FunctionScope:
     state_name: FName | None = field(default=None, kw_only=True)
 
     _variables: dict[FName, VariableSymbol] = field(default_factory=dict, init=False, repr=False)
+    _instance_variables: dict[FName, VariableSymbol] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         for parameter in self.function.parameters:
@@ -77,10 +80,14 @@ class FunctionScope:
 
     def resolve_variable(self, name: FName) -> VariableSymbol:
         local = self._variables.get(name)
-
         if local is not None:
             return local
 
-        member = self.references.resolve_variable(self.class_path, name, self.parents)
+        cached = self._instance_variables.get(name)
+        if cached is not None:
+            return cached
 
-        return VariableSymbol(VariableCategory.INSTANCE, member.owner_class, member.declaration)
+        member = self.references.resolve_variable(self.class_path, name, self.parents)
+        symbol = VariableSymbol(VariableCategory.INSTANCE, member.owner_class, member.declaration)
+        self._instance_variables[name] = symbol
+        return symbol

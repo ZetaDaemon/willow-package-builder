@@ -56,13 +56,6 @@ class PackageReferences(BuildComponent):
         package_key = class_path.outer.name
 
         if package_key == self.config.name:
-            if definition.is_interface:
-                msg = (
-                    f"Cannot reference interface {class_path!r} as a local export: "
-                    "interface compilation is not supported yet"
-                )
-                raise CompilationError(msg)
-
             exports = self.classes[class_path]
             obj = exports.default_object if default_object else exports.class_object
             return obj.reference()

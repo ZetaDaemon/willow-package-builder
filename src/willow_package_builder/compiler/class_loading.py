@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -21,3 +22,5 @@ class ClassLoading(Protocol):
     def load_property_dependencies(
         self, class_path: ReferencePath, properties: dict[FName, object], current_package: FName
     ) -> None: ...
+
+    def source_path(self, class_path: ReferencePath) -> Path: ...

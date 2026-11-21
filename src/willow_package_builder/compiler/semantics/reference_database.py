@@ -25,6 +25,10 @@ from willow_package_builder.package_config import PackageConfig, collect_visible
 from willow_package_builder.upackage import (
     CORE_INTERFACE_PATH,
     CORE_OBJECT_PATH,
+    CORE_ROTATOR_PATH,
+    CORE_VECTOR_PATH,
+    ROTATOR_CLASS_NAME,
+    VECTOR_CLASS_NAME,
     FName,
     ReferencePath,
 )
@@ -58,6 +62,11 @@ PRIMITIVE_TYPES = {
         TypeCategory.NAME,
     )
 }
+BUILTIN_CAST_TYPES = {
+    **PRIMITIVE_TYPES,
+    ReferencePath(VECTOR_CLASS_NAME): ResolvedType(TypeCategory.STRUCT, CORE_VECTOR_PATH),
+    ReferencePath(ROTATOR_CLASS_NAME): ResolvedType(TypeCategory.STRUCT, CORE_ROTATOR_PATH),
+}
 
 
 @dataclass(frozen=True)
@@ -81,8 +90,23 @@ class ReferenceDatabase:
     _parent_cache_packages: tuple[PackageConfig, ...] | None = field(
         default=None, init=False, repr=False
     )
+
     _member_types_by_name: dict[FName, list[ResolvedType]] = field(
         default_factory=dict, init=False, repr=False
+    )
+
+    _resolved_types: dict[
+        tuple[TypeReference | None, ReferencePath, frozenset[FName]], ResolvedType
+    ] = field(default_factory=dict, init=False, repr=False)
+    _resolved_types_parents: Mapping[ReferencePath, ReferencePath | None] | None = field(
+        default=None, init=False, repr=False
+    )
+
+    _resolved_structs: dict[tuple[ReferencePath, FName], ResolvedMember[StructDeclaration]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _resolved_structs_parents: Mapping[ReferencePath, ReferencePath | None] | None = field(
+        default=None, init=False, repr=False
     )
 
     def add_class(self, package_name: FName, declaration: ClassDeclaration) -> None:
@@ -98,6 +122,13 @@ class ReferenceDatabase:
                 raise CompilationError(msg)
 
         self.classes[path] = declaration
+
+        self._resolved_types.clear()
+        self._resolved_types_parents = None
+
+        self._resolved_structs.clear()
+        self._resolved_structs_parents = None
+
         self._parent_cache = None
         self._parent_cache_packages = None
 
@@ -125,12 +156,16 @@ class ReferenceDatabase:
         include_intrinsics: bool = False,
     ) -> ReferencePath:
         """Resolve a class name to its qualified path."""
-        allowed_packages = {current_package, *(package for package in visible_packages)}
-        available = set(self.classes)
-        available.update(path for path in additional_paths)
+        additional = set(additional_paths)
 
-        if include_intrinsics:
-            available.update(self.intrinsics)
+        def is_available(path: ReferencePath) -> bool:
+            return (
+                path in self.classes
+                or path in additional
+                or (include_intrinsics and path in self.intrinsics)
+            )
+
+        allowed_packages = {current_package, *(package for package in visible_packages)}
 
         if (package_path := name.outer) is not None:
             package_name = package_path.name
@@ -138,7 +173,7 @@ class ReferenceDatabase:
                 msg = f"Package {package_name!r} is not available to {current_package}"
                 raise CompilationError(msg)
 
-            if name not in available:
+            if not is_available(name):
                 msg = f"Unknown class: {name}"
                 raise CompilationError(msg)
 
@@ -146,13 +181,13 @@ class ReferenceDatabase:
 
         local_key = ReferencePath(name.name, ReferencePath(current_package))
 
-        if local_key in available:
+        if is_available(local_key):
             return local_key
 
         matches = [
             key
             for package_name in sorted(allowed_packages)
-            if (key := ReferencePath(name.name, ReferencePath(package_name))) in available
+            if is_available(key := ReferencePath(name.name, ReferencePath(package_name)))
         ]
 
         if not matches:
@@ -325,6 +360,26 @@ class ReferenceDatabase:
         visible_packages: set[FName],
         parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedType:
+        if parents is not self._resolved_types_parents:
+            self._resolved_types.clear()
+            self._resolved_types_parents = parents
+
+        key = (type_ref, current_class, frozenset(visible_packages))
+        cached = self._resolved_types.get(key)
+        if cached is not None:
+            return cached
+
+        resolved = self._resolve_type(type_ref, current_class, visible_packages, parents)
+        self._resolved_types[key] = resolved
+        return resolved
+
+    def _resolve_type(
+        self,
+        type_ref: TypeReference | None,
+        current_class: ReferencePath,
+        visible_packages: set[FName],
+        parents: Mapping[ReferencePath, ReferencePath | None],
+    ) -> ResolvedType:
         if type_ref is None:
             return ResolvedType(TypeCategory.VOID)
 
@@ -435,10 +490,7 @@ class ReferenceDatabase:
         class_path = self.resolve_class_path(
             name, current_package, visible_packages, include_intrinsics=True
         )
-        declaration = self.classes.get(class_path)
-        if class_path == CORE_INTERFACE_PATH or (
-            declaration is not None and declaration.is_interface
-        ):
+        if self.is_subclass(class_path, CORE_INTERFACE_PATH, parents):
             return ResolvedType(TypeCategory.INTERFACE, class_path)
 
         return ResolvedType(TypeCategory.OBJECT, class_path)
@@ -449,11 +501,21 @@ class ReferenceDatabase:
         name: FName,
         parents: Mapping[ReferencePath, ReferencePath | None],
     ) -> ResolvedMember[StructDeclaration]:
+        if parents is not self._resolved_structs_parents:
+            self._resolved_structs.clear()
+            self._resolved_structs_parents = parents
+
+        key = (class_path, name)
+        cached = self._resolved_structs.get(key)
+        if cached is not None:
+            return cached
 
         for owner, declaration in self.iter_class_hierarchy(class_path, parents):
             for struct in declaration.structs:
                 if struct.name == name:
-                    return ResolvedMember(owner, struct)
+                    resolved = ResolvedMember(owner, struct)
+                    self._resolved_structs[key] = resolved
+                    return resolved
 
         msg = f"Unknown struct {name!r} on {class_path}"
         raise CompilationError(msg)

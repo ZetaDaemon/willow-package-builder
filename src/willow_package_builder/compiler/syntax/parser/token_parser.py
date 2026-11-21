@@ -1,8 +1,15 @@
-from willow_package_builder.compiler.syntax.keyword import Keyword
+from functools import cache
+
+from willow_package_builder.compiler.syntax.keyword import Keyword, KeywordEnum
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
 from willow_package_builder.compiler.syntax.punctuation import Operator, Punctuation
 from willow_package_builder.logging import CompilationError
 from willow_package_builder.upackage import ReferencePath
+
+
+@cache
+def keyword_enum_members[E: KeywordEnum](enum_type: type[E]) -> dict[Keyword, E]:
+    return {member: member for member in enum_type}
 
 
 class TokenParser:
@@ -20,6 +27,13 @@ class TokenParser:
     def peek(self, offset: int = 0) -> Token:
         index = min(self.position + offset, len(self.tokens) - 1)
         return self.tokens[index]
+
+    def peek_keyword_enum[E: KeywordEnum](self, enum_type: type[E], offset: int = 0) -> E | None:
+        keyword = self.peek(offset).keyword
+        if keyword is None:
+            return None
+
+        return keyword_enum_members(enum_type).get(keyword)
 
     def advance(self) -> Token:
         token = self.peek()

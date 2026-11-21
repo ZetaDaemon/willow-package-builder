@@ -195,8 +195,9 @@ class DeclarationParser(DeclarationSyntaxParser):
 
         modifiers: list[StructModifier] = []
 
-        while self.peek() in StructModifier:
-            modifiers.append(StructModifier(self.advance()))
+        while (modifier := self.peek_keyword_enum(StructModifier)) is not None:
+            self.advance()
+            modifiers.append(modifier)
 
         name = self.expect_identifier().fname
 
@@ -243,7 +244,7 @@ class DeclarationParser(DeclarationSyntaxParser):
     def is_operator_start(self) -> bool:
         offset = 0
 
-        while (modifier := self.peek(offset)) in FunctionModifier:
+        while (modifier := self.peek_keyword_enum(FunctionModifier, offset)) is not None:
             offset += 1
 
             if modifier == FunctionModifier.NATIVE and self.peek(offset) == Punctuation.LEFT_PAREN:
@@ -259,7 +260,7 @@ class DeclarationParser(DeclarationSyntaxParser):
 
                 offset += 1
 
-        return self.peek(offset) in OperatorCategory
+        return self.peek_keyword_enum(OperatorCategory, offset) is not None
 
     def parse_parameter_default(self) -> tuple[Token, ...]:
         tokens: list[Token] = []
@@ -315,8 +316,9 @@ class DeclarationParser(DeclarationSyntaxParser):
         while True:
             modifiers: list[ParameterModifier] = []
 
-            while self.peek() in ParameterModifier:
-                modifiers.append(ParameterModifier(self.advance()))
+            while (modifier := self.peek_keyword_enum(ParameterModifier)) is not None:
+                self.advance()
+                modifiers.append(modifier)
 
             type_ref = self.parse_type()
             name_token = self.expect_identifier()
@@ -348,14 +350,8 @@ class DeclarationParser(DeclarationSyntaxParser):
         native_index = None
         start = self.peek()
 
-        while self.peek() in FunctionModifier:
-            token = self.advance()
-            try:
-                modifier = FunctionModifier(token)
-            except ValueError:
-                msg = f"Unknown operator modifier {token} at {token.line}:{token.column}"
-                raise CompilationError(msg) from None
-
+        while (modifier := self.peek_keyword_enum(FunctionModifier)) is not None:
+            self.advance()
             modifiers.append(modifier)
 
             if modifier == FunctionModifier.NATIVE and self.match(Punctuation.LEFT_PAREN):
@@ -445,14 +441,8 @@ class DeclarationParser(DeclarationSyntaxParser):
 
         start = self.peek()
 
-        while self.peek() in FunctionModifier:
-            token = self.advance()
-            try:
-                modifier = FunctionModifier(token)
-            except ValueError:
-                msg = f"Unknown function modifier {token} at {token.line}:{token.column}"
-                raise CompilationError(msg) from None
-
+        while (modifier := self.peek_keyword_enum(FunctionModifier)) is not None:
+            self.advance()
             modifiers.append(modifier)
 
             if modifier == FunctionModifier.NATIVE and self.match(Punctuation.LEFT_PAREN):
@@ -600,7 +590,10 @@ class DeclarationParser(DeclarationSyntaxParser):
                 )
                 continue
 
-            if token in FunctionModifier or token in FunctionCategory:
+            if (
+                self.peek_keyword_enum(FunctionModifier) is not None
+                or self.peek_keyword_enum(FunctionCategory) is not None
+            ):
                 declaration.functions.append(
                     self.parse_function_declaration(include_body_tokens=include_body_tokens)
                 )
@@ -614,7 +607,7 @@ class DeclarationParser(DeclarationSyntaxParser):
     def is_state_start(self) -> bool:
         offset = 0
 
-        while self.peek(offset) in StateModifier:
+        while self.peek_keyword_enum(StateModifier, offset) is not None:
             offset += 1
 
         return self.peek(offset) == ScriptKeywords.STATE
@@ -623,8 +616,9 @@ class DeclarationParser(DeclarationSyntaxParser):
         start = self.peek()
         modifiers: list[StateModifier] = []
 
-        while self.peek() in StateModifier:
-            modifiers.append(StateModifier(self.advance()))
+        while (modifier := self.peek_keyword_enum(StateModifier)) is not None:
+            self.advance()
+            modifiers.append(modifier)
 
         self.expect(ScriptKeywords.STATE)
 
@@ -659,8 +653,10 @@ class DeclarationParser(DeclarationSyntaxParser):
                 parser.expect(Punctuation.SEMICOLON)
                 continue
 
-            token = parser.peek()
-            if token in FunctionModifier or token in FunctionCategory:
+            if (
+                parser.peek_keyword_enum(FunctionModifier) is not None
+                or parser.peek_keyword_enum(FunctionCategory) is not None
+            ):
                 state.functions.append(
                     parser.parse_function_declaration(include_body_tokens=include_body_tokens)
                 )
