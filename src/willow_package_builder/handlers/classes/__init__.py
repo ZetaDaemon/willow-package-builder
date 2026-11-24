@@ -4,6 +4,9 @@ from willow_package_builder.handlers.classes.behavior_provider_definition_handle
     BehaviorProviderDefinitionHandler,
 )
 from willow_package_builder.handlers.classes.component_handler import ComponentHandler
+from willow_package_builder.handlers.classes.static_mesh_component_handler import (
+    StaticMeshComponentHandler,
+)
 from willow_package_builder.handlers.classes.weapon_partlist_handler import (
     WeaponPartListDefinitionHandler,
 )
@@ -24,4 +27,5 @@ CLASS_HANDLERS: tuple[type[ClassHandler], ...] = (
     WeaponPartListCollectionDefinitionHandler,
     BehaviorProviderDefinitionHandler,
     ComponentHandler,
+    StaticMeshComponentHandler,
 )

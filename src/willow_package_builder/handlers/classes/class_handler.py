@@ -333,9 +333,6 @@ def field_validation_error(value: object, annotation: object, path: str) -> str 
         for required_key in sorted(required_keys):
             if required_key not in items:
                 return f"{path}.{required_key}: required field is missing"
-        for required_key in sorted(required_keys):
-            if required_key not in items:
-                return f"{path}.{required_key}: required field is missing"
 
         for key, item in items.items():
             if not isinstance(key, str) or key not in fields:

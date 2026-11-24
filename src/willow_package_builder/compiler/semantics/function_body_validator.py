@@ -15,6 +15,7 @@ from willow_package_builder.compiler.syntax.expressions import (
     CallExpression,
     CastExpression,
     ConditionalExpression,
+    DefaultPropertyExpression,
     Expression,
     GlobalExpression,
     IdentifierExpression,
@@ -44,6 +45,7 @@ from willow_package_builder.compiler.syntax.statements import (
     IfStatement,
     ReturnStatement,
     Statement,
+    SwitchStatement,
     WhileStatement,
 )
 from willow_package_builder.logging import (
@@ -158,7 +160,11 @@ class FunctionBodyValidator:
                 self.validate_expression(expression.operand)
 
             case CallExpression():
-                self.validate_call(expression)
+                self._validate_call(expression)
+
+            case DefaultPropertyExpression():
+                if expression.class_expression is not None:
+                    self.validate_expression(expression.class_expression)
 
             case MemberExpression():
                 self.validate_expression(expression.object)
@@ -245,7 +251,8 @@ class FunctionBodyValidator:
 
                 if (
                     isinstance(statement.value, NoneExpression)
-                    and target_type.category is TypeCategory.OBJECT
+                    and target_type.category
+                    in (TypeCategory.OBJECT, TypeCategory.CLASS, TypeCategory.INTERFACE)
                     and self.resolver.array_dimension_of(statement.target) == 1
                 ):
                     return
@@ -282,6 +289,10 @@ class FunctionBodyValidator:
 
             case ExpressionStatement():
                 self.validate_command_expression(statement.expression)
+                return
+
+            case SwitchStatement():
+                self._validate_switch(statement, return_type)
                 return
 
             case IfStatement():
@@ -332,7 +343,7 @@ class FunctionBodyValidator:
                 return
 
             case ForeachStatement():
-                self.validate_foreach(statement, return_type)
+                self._validate_foreach(statement, return_type)
                 return
 
             case DoUntilStatement():
@@ -348,6 +359,50 @@ class FunctionBodyValidator:
             case _:
                 msg = f"Unsupported statement type: {type(statement).__name__}"
                 raise TypeError(msg)
+
+    def _validate_switch(self, statement: SwitchStatement, return_type: ResolvedType) -> None:
+        switch_type = self.validate_expression(statement.expression)
+
+        if (
+            switch_type.category in (TypeCategory.VOID, TypeCategory.ARRAY)
+            or self.resolver.array_dimension_of(statement.expression) != 1
+        ):
+            msg = f"Switch requires a scalar value, got {switch_type}"
+            raise CompilationError(msg)
+
+        scope = self.resolver.scope
+        path = scope.class_path + scope.function.name
+
+        for index, case in enumerate(statement.cases):
+            with declaration_context(path, case.location):
+                if case.value is None:
+                    if index != len(statement.cases) - 1:
+                        msg = "Default must be the last label in a switch"
+                        raise CompilationError(msg)
+                else:
+                    case_type = self.validate_expression(case.value)
+
+                    null_reference = isinstance(
+                        case.value, NoneExpression
+                    ) and switch_type.category in (
+                        TypeCategory.OBJECT,
+                        TypeCategory.CLASS,
+                        TypeCategory.INTERFACE,
+                    )
+
+                    compatible = (
+                        null_reference
+                        or self.resolver.accepts_value_type(switch_type, case_type)
+                        or self.resolver.implicit_numeric_cast_selector(case_type, switch_type)
+                        is not None
+                    )
+
+                    if self.resolver.array_dimension_of(case.value) != 1 or not compatible:
+                        msg = f"Switch case expects {switch_type}, got {case_type}"
+                        raise CompilationError(msg)
+
+                for child in case.statements:
+                    self.validate_statement(child, return_type)
 
     def validate_statement(self, statement: Statement, return_type: ResolvedType) -> None:
         scope = self.resolver.scope
@@ -409,7 +464,7 @@ class FunctionBodyValidator:
             msg = "Expression has no effect"
             raise CompilationError(msg)
 
-    def validate_call(self, expression: CallExpression) -> None:
+    def _validate_call(self, expression: CallExpression) -> None:
         builtin_call = self.resolver.resolve_builtin_call(expression)
 
         if builtin_call is not None:
@@ -612,7 +667,7 @@ class FunctionBodyValidator:
 
         return references.is_subclass(current, owner, parents)
 
-    def validate_foreach(self, statement: ForeachStatement, return_type: ResolvedType) -> None:
+    def _validate_foreach(self, statement: ForeachStatement, return_type: ResolvedType) -> None:
         iterator = statement.iterator
         array = iterator.callee
 
@@ -633,7 +688,7 @@ class FunctionBodyValidator:
                 msg = f"foreach requires a native iterator function, got {path}"
                 raise CompilationError(msg)
 
-            self.validate_call(iterator)
+            self._validate_call(iterator)
             for child in statement.statements:
                 self.validate_statement(child, return_type)
             return

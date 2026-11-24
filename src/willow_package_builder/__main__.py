@@ -1,11 +1,32 @@
 import argparse
 from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
 
+from willow_package_builder.build_settings import BuildSettings
 from willow_package_builder.games import TargetGame, select_game
 from willow_package_builder.logging import WarningAction, WarningCode
 
 from . import build_package
+
+
+class BuildArguments(Protocol):
+    """Typed interface for the parsed command-line arguments."""
+
+    game: TargetGame
+    target: Path
+    output: Path | None
+
+    debug: bool
+    silent_console: bool
+    log_objects: bool
+    force: bool
+    re_cache: bool
+
+    warnings: WarningAction
+    ignore_warning: list[WarningCode]
+    error_warning: list[WarningCode]
+
+    reference_path: list[Path]
 
 
 def main() -> None:
@@ -68,7 +89,10 @@ def main() -> None:
         action="store_true",
         help="Reparse class sources and regenerate declaration caches",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--log-objects", action="store_true", help="Log each top-level object as it is built"
+    )
+    args = cast("BuildArguments", parser.parse_args())  # pyright: ignore[reportInvalidCast]
 
     conflicting = set(args.ignore_warning) & set(args.error_warning)
 
@@ -76,7 +100,7 @@ def main() -> None:
         codes = ", ".join(sorted(code.value for code in conflicting))
         parser.error(f"Warnings cannot be both ignored and errors: {codes}")
 
-    default_action = cast("WarningAction", args.warnings)
+    default_action = args.warnings
     warning_actions: dict[WarningCode, WarningAction] = dict.fromkeys(WarningCode, default_action)
     warning_actions.update(dict.fromkeys(args.ignore_warning, WarningAction.IGNORE))
     warning_actions.update(dict.fromkeys(args.error_warning, WarningAction.ERROR))
@@ -85,12 +109,15 @@ def main() -> None:
         build_package(
             args.target,
             args.output,
-            debug=args.debug,
-            silent_console=args.silent_console,
             warning_actions=warning_actions,
             reference_paths=tuple(args.reference_path),
-            force=args.force,
-            re_cache=args.re_cache,
+            settings=BuildSettings(
+                debug=args.debug,
+                silent_console=args.silent_console,
+                log_objects=args.log_objects,
+                force=args.force,
+                re_cache=args.re_cache,
+            ),
         )
 
 

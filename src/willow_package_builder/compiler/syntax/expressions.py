@@ -113,6 +113,12 @@ class CastExpression(Expression):
 
 
 @dataclass
+class DefaultPropertyExpression(Expression):
+    class_expression: Expression | None
+    name: FName
+
+
+@dataclass
 class MemberExpression(Expression):
     object: Expression
     name: FName

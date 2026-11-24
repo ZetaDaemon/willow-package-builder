@@ -184,7 +184,7 @@ class Lexer:
 
         return character
 
-    def skip_trivia(self) -> None:
+    def _skip_trivia(self) -> None:
         """Skip whitespace and comments."""
         while True:
             character = self.peek()
@@ -251,7 +251,7 @@ class Lexer:
 
             return
 
-    def read_number(self) -> Token:
+    def _read_number(self) -> Token:
         start = self.position
         line = self.line
         column = self.column
@@ -303,7 +303,7 @@ class Lexer:
 
         return Token(category, self.source[start : self.position], line, column)
 
-    def read_quoted(self) -> Token:
+    def _read_quoted(self) -> Token:
         start = self.position
         line = self.line
         column = self.column
@@ -335,7 +335,7 @@ class Lexer:
         return Token(category, self.source[start : self.position], line, column)
 
     def next_token(self) -> Token:
-        self.skip_trivia()
+        self._skip_trivia()
 
         start = self.position
         line = self.line
@@ -362,14 +362,14 @@ class Lexer:
             return Token(TokenCategory.IDENTIFIER, source[start:position], line, column)
 
         if character.isdigit() or (character == "." and self.peek(1).isdigit()):
-            return self.read_number()
+            return self._read_number()
 
         if character in PUNCTUATION:
             self.advance()
             return Token(TokenCategory.SYMBOL, character, line, column)
 
         if character in ('"', "'"):
-            return self.read_quoted()
+            return self._read_quoted()
 
         for operator in OPERATORS_BY_FIRST.get(character, ()):
             if self.source.startswith(operator, start):

@@ -60,7 +60,6 @@ class ClassLoader:
     packages: tuple[PackageConfig, ...]
     build_packages: set[Path]
     references: ReferenceDatabase
-    re_cache: bool = field(default=False, kw_only=True)
 
     sources: dict[ReferencePath, ClassSource] = field(default_factory=dict, init=False, repr=False)
     _member_type_sources: dict[FName, list[ReferencePath]] = field(
@@ -552,7 +551,6 @@ class ClassLoader:
                 source.config,
                 source.path,
                 include_body_tokens=source.config.directory in self.build_packages,
-                re_cache=self.re_cache,
             )
         declaration = cached.declaration
 

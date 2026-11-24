@@ -18,10 +18,16 @@ if TYPE_CHECKING:
     from collections.abc import Hashable
     from pathlib import Path
 
+    from yaml import SafeLoader as _SafeLoader
     from yaml.nodes import MappingNode
+else:
+    try:
+        from yaml import CSafeLoader as _SafeLoader
+    except ImportError:
+        from yaml import SafeLoader as _SafeLoader
 
 
-class ObjectLoader(yaml.SafeLoader):
+class ObjectLoader(_SafeLoader):
     """Safe YAML loader that rejects duplicate mapping keys."""
 
     def construct_mapping(self, node: MappingNode, deep: bool = False) -> dict[Hashable, object]:

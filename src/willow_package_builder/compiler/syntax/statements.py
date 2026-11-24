@@ -84,3 +84,16 @@ class DoUntilStatement(Statement):
 class ForeachStatement(Statement):
     iterator: CallExpression
     statements: list[Statement]
+
+
+@dataclass
+class SwitchCase:
+    value: Expression | None
+    statements: list[Statement]
+    location: SourceLocation | None = field(default=None, kw_only=True)
+
+
+@dataclass
+class SwitchStatement(Statement):
+    expression: Expression
+    cases: list[SwitchCase]

@@ -75,3 +75,6 @@ class ScriptKeywords(KeywordEnum):
     FOREACH = "foreach"
     NEW = "new"
     VECT = "vect"
+    DEFAULT = "default"
+    SWITCH = "switch"
+    CASE = "case"

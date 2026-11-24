@@ -18,6 +18,7 @@ from willow_package_builder.compiler.syntax.expressions import (
     CastExpression,
     ClassLiteralExpression,
     ConditionalExpression,
+    DefaultPropertyExpression,
     EnumMemberExpression,
     Expression,
     FloatExpression,
@@ -130,6 +131,101 @@ BUILTIN_CALL_SIGNATURES = {
 }
 
 
+def primitive_cast_selector(source: ResolvedType, target: ResolvedType) -> Opcode | None:
+    selectors = get_game().PRIMITIVE_CAST_SELECTORS
+
+    if source.category is TypeCategory.STRUCT and target.category is TypeCategory.STRUCT:
+        match source.declaration_path, target.declaration_path:
+            case source_path, target_path if (
+                source_path == CORE_ROTATOR_PATH and target_path == CORE_VECTOR_PATH
+            ):
+                return selectors.ROTATOR_TO_VECTOR
+
+            case source_path, target_path if (
+                source_path == CORE_VECTOR_PATH and target_path == CORE_ROTATOR_PATH
+            ):
+                return selectors.VECTOR_TO_ROTATOR
+
+            case _:
+                pass
+
+    if target.category is TypeCategory.STRING:
+        match source.category:
+            case TypeCategory.BYTE | TypeCategory.ENUM:
+                return selectors.BYTE_TO_STRING
+
+            case TypeCategory.INT:
+                return selectors.INT_TO_STRING
+
+            case TypeCategory.BOOL:
+                return selectors.BOOL_TO_STRING
+
+            case TypeCategory.FLOAT:
+                return selectors.FLOAT_TO_STRING
+
+            case TypeCategory.OBJECT | TypeCategory.CLASS:
+                return selectors.OBJECT_TO_STRING
+
+            case TypeCategory.NAME:
+                return selectors.NAME_TO_STRING
+
+            case TypeCategory.INTERFACE:
+                return selectors.INTERFACE_TO_STRING
+
+            case _:
+                return None
+
+    match source.category:
+        case TypeCategory.FLOAT:
+            match target.category:
+                case TypeCategory.INT:
+                    return selectors.FLOAT_TO_INT
+                case TypeCategory.BYTE:
+                    return selectors.FLOAT_TO_BYTE
+                case TypeCategory.BOOL:
+                    return selectors.FLOAT_TO_BOOL
+                case _:
+                    pass
+
+        case TypeCategory.INT:
+            match target.category:
+                case TypeCategory.FLOAT:
+                    return selectors.INT_TO_FLOAT
+                case TypeCategory.BYTE:
+                    return selectors.INT_TO_BYTE
+                case TypeCategory.BOOL:
+                    return selectors.INT_TO_BOOL
+                case _:
+                    pass
+
+        case TypeCategory.BYTE:
+            match target.category:
+                case TypeCategory.FLOAT:
+                    return selectors.BYTE_TO_FLOAT
+                case TypeCategory.INT:
+                    return selectors.BYTE_TO_INT
+                case TypeCategory.BOOL:
+                    return selectors.BYTE_TO_BOOL
+                case _:
+                    pass
+
+        case TypeCategory.BOOL:
+            match target.category:
+                case TypeCategory.FLOAT:
+                    return selectors.BOOL_TO_FLOAT
+                case TypeCategory.INT:
+                    return selectors.BOOL_TO_INT
+                case TypeCategory.BYTE:
+                    return selectors.BOOL_TO_BYTE
+                case _:
+                    pass
+
+        case _:
+            pass
+
+    return None
+
+
 @dataclass
 class ExpressionResolver:
     context: BuildContext
@@ -206,100 +302,6 @@ class ExpressionResolver:
         self._binary_operators[key] = resolved
         return resolved
 
-    def primitive_cast_selector(self, source: ResolvedType, target: ResolvedType) -> Opcode | None:
-        selectors = get_game().PRIMITIVE_CAST_SELECTORS
-
-        if source.category is TypeCategory.STRUCT and target.category is TypeCategory.STRUCT:
-            match source.declaration_path, target.declaration_path:
-                case source_path, target_path if (
-                    source_path == CORE_ROTATOR_PATH and target_path == CORE_VECTOR_PATH
-                ):
-                    return selectors.ROTATOR_TO_VECTOR
-
-                case source_path, target_path if (
-                    source_path == CORE_VECTOR_PATH and target_path == CORE_ROTATOR_PATH
-                ):
-                    return selectors.VECTOR_TO_ROTATOR
-
-                case _:
-                    pass
-
-        if target.category is TypeCategory.STRING:
-            match source.category:
-                case TypeCategory.BYTE | TypeCategory.ENUM:
-                    return selectors.BYTE_TO_STRING
-
-                case TypeCategory.INT:
-                    return selectors.INT_TO_STRING
-
-                case TypeCategory.BOOL:
-                    return selectors.BOOL_TO_STRING
-
-                case TypeCategory.FLOAT:
-                    return selectors.FLOAT_TO_STRING
-
-                case TypeCategory.OBJECT | TypeCategory.CLASS:
-                    return selectors.OBJECT_TO_STRING
-
-                case TypeCategory.NAME:
-                    return selectors.NAME_TO_STRING
-
-                case TypeCategory.INTERFACE:
-                    return selectors.INTERFACE_TO_STRING
-
-                case _:
-                    return None
-
-        match source.category:
-            case TypeCategory.FLOAT:
-                match target.category:
-                    case TypeCategory.INT:
-                        return selectors.FLOAT_TO_INT
-                    case TypeCategory.BYTE:
-                        return selectors.FLOAT_TO_BYTE
-                    case TypeCategory.BOOL:
-                        return selectors.FLOAT_TO_BOOL
-                    case _:
-                        pass
-
-            case TypeCategory.INT:
-                match target.category:
-                    case TypeCategory.FLOAT:
-                        return selectors.INT_TO_FLOAT
-                    case TypeCategory.BYTE:
-                        return selectors.INT_TO_BYTE
-                    case TypeCategory.BOOL:
-                        return selectors.INT_TO_BOOL
-                    case _:
-                        pass
-
-            case TypeCategory.BYTE:
-                match target.category:
-                    case TypeCategory.FLOAT:
-                        return selectors.BYTE_TO_FLOAT
-                    case TypeCategory.INT:
-                        return selectors.BYTE_TO_INT
-                    case TypeCategory.BOOL:
-                        return selectors.BYTE_TO_BOOL
-                    case _:
-                        pass
-
-            case TypeCategory.BOOL:
-                match target.category:
-                    case TypeCategory.FLOAT:
-                        return selectors.BOOL_TO_FLOAT
-                    case TypeCategory.INT:
-                        return selectors.BOOL_TO_INT
-                    case TypeCategory.BYTE:
-                        return selectors.BOOL_TO_BYTE
-                    case _:
-                        pass
-
-            case _:
-                pass
-
-        return None
-
     def parameter_cast_selector(
         self, expression: Expression, parameter: ParameterDeclaration, owner: ReferencePath
     ) -> Opcode | None:
@@ -314,7 +316,7 @@ class ExpressionResolver:
         target = self.resolve_declared_type(parameter.type_ref, owner)
 
         if ParameterModifier.COERCE in parameter.modifiers:
-            return self.primitive_cast_selector(source, target)
+            return primitive_cast_selector(source, target)
 
         return self.implicit_numeric_cast_selector(source, target)
 
@@ -323,7 +325,7 @@ class ExpressionResolver:
     ) -> Opcode | None:
         numeric = (TypeCategory.BYTE, TypeCategory.INT, TypeCategory.FLOAT)
         if source.category in numeric and target.category in numeric:
-            return self.primitive_cast_selector(source, target)
+            return primitive_cast_selector(source, target)
 
         return None
 
@@ -379,10 +381,13 @@ class ExpressionResolver:
         if (
             target.category not in (TypeCategory.OBJECT, TypeCategory.INTERFACE)
             or target.declaration_path is None
-            or source.category is not TypeCategory.OBJECT
+            or source.category not in (TypeCategory.OBJECT, TypeCategory.INTERFACE)
             or self.array_dimension_of(expression.operand) != 1
         ):
-            msg = f"Cast to {target} requires a scalar object and a class or interface target"
+            msg = (
+                f"Cast to {target} requires a scalar object or interface "
+                "and a class or interface target"
+            )
             raise CompilationError(msg)
 
         return target
@@ -400,7 +405,7 @@ class ExpressionResolver:
         if source == target:
             return target, None
 
-        selector = self.primitive_cast_selector(source, target)
+        selector = primitive_cast_selector(source, target)
         if selector is None:
             msg = f"Casting {source.category} to {target.category} is not implemented yet"
             raise NotImplementedError(msg)
@@ -436,6 +441,13 @@ class ExpressionResolver:
         references = self.context.references
         parents = self.context.parents
         resolved = references.find_member_type(self.scope.class_path, enum_name, parents)
+
+        if resolved is None:
+            package = self.scope.class_path.get_outer().name
+            resolved = references.find_visible_member_type(
+                enum_name, package, self._visibility[package]
+            )
+
         if resolved is None or resolved.category is not TypeCategory.ENUM:
             return None
 
@@ -471,16 +483,21 @@ class ExpressionResolver:
 
         return EnumMemberExpression(enum_path, enum.members.index(name))
 
-    def resolve_numeric_constant(self, name: FName) -> IntegerExpression | FloatExpression | None:
-        try:
-            self.scope.resolve_variable(name)
-        except UnknownPropertyError:
-            pass
-        else:
-            return None
+    def resolve_numeric_constant(
+        self, name: FName, *, class_path: ReferencePath | None = None
+    ) -> IntegerExpression | FloatExpression | None:
+        if class_path is None:
+            try:
+                self.scope.resolve_variable(name)
+            except UnknownPropertyError:
+                pass
+            else:
+                return None
+
+            class_path = self.scope.class_path
 
         for owner, declaration in self.context.references.iter_class_hierarchy(
-            self.scope.class_path, self.context.parents
+            class_path, self.context.parents
         ):
             for constant in declaration.constants:
                 if constant.name != name:
@@ -652,6 +669,10 @@ class ExpressionResolver:
                     function.declaration.return_type, function.owner_class
                 )
 
+            case DefaultPropertyExpression():
+                member = self.resolve_default_property(expression)
+                return self.resolve_declared_type(member.declaration.type_ref, member.owner_class)
+
             case MemberExpression():
                 if self.resolve_builtin_member(expression) is BuiltinMember.ARRAY_LENGTH:
                     return ResolvedType(TypeCategory.INT)
@@ -725,7 +746,20 @@ class ExpressionResolver:
                 ):
                     return true_type
 
-                if true_type != false_type:
+                if (
+                    true_type.category is TypeCategory.OBJECT
+                    and false_type.category is TypeCategory.OBJECT
+                    and true_type.declaration_path is not None
+                    and false_type.declaration_path is not None
+                    and self.array_dimension_of(expression.when_true) == 1
+                    and self.array_dimension_of(expression.when_false) == 1
+                ):
+                    for owner, _ in self.context.references.iter_class_hierarchy(
+                        true_type.declaration_path, self.context.parents
+                    ):
+                        common_type = ResolvedType(TypeCategory.OBJECT, owner)
+                        if self.accepts_value_type(common_type, false_type):
+                            return common_type
                     msg = f"Conditional branches must match, got {true_type} and {false_type}"
                     raise CompilationError(msg)
 
@@ -961,6 +995,33 @@ class ExpressionResolver:
                 msg = "This function-call target is not implemented yet"
                 raise NotImplementedError(msg)
 
+    def resolve_default_property(
+        self, expression: DefaultPropertyExpression
+    ) -> ResolvedMember[VariableDeclaration]:
+        if expression.class_expression is None:
+            return self.context.references.resolve_variable(
+                self.scope.class_path, expression.name, self.context.parents
+            )
+
+        receiver = self.type_of(expression.class_expression)
+
+        if (
+            receiver.category is not TypeCategory.CLASS
+            or self.array_dimension_of(expression.class_expression) != 1
+            or len(receiver.arguments) != 1
+        ):
+            msg = f"Default property access requires a scalar class reference, got {receiver}"
+            raise CompilationError(msg)
+
+        bound = receiver.arguments[0]
+        if bound.category is not TypeCategory.OBJECT or bound.declaration_path is None:
+            msg = f"Default property access requires a class bound, got {bound}"
+            raise CompilationError(msg)
+
+        return self.context.references.resolve_variable(
+            bound.declaration_path, expression.name, self.context.parents
+        )
+
     def resolve_member(self, expression: MemberExpression) -> ResolvedMember[VariableDeclaration]:
         receiver = self.type_of(expression.object)
         key = (receiver, expression.name)
@@ -1027,6 +1088,9 @@ class ExpressionResolver:
                     return 1
 
                 return self.resolve_member(expression).declaration.array_dimension
+
+            case DefaultPropertyExpression():
+                return self.resolve_default_property(expression).declaration.array_dimension
 
             case _:
                 return 1

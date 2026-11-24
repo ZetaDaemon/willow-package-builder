@@ -19,8 +19,8 @@ from willow_package_builder.payloads.property_payloads import (
     UBytePropertyPayload,
     UClassPropertyPayload,
     UFloatPropertyPayload,
-    UIntPropertyPayload,
     UInterfacePropertyPayload,
+    UIntPropertyPayload,
     UNamePropertyPayload,
     UNumericAttributePropertyPayload,
     UObjectPropertyPayload,
@@ -93,6 +93,38 @@ ARRAY_INNER_FLAGS = (
 )
 
 
+def variable_modifier_flags(
+    modifiers: tuple[VariableModifier, ...], path: ReferencePath
+) -> PropertyFlags:
+    incompatible_pairs = (
+        (VariableModifier.PRIVATE, VariableModifier.PROTECTED),
+        (VariableModifier.PRIVATE, VariableModifier.PRIVATE_WRITE),
+        (VariableModifier.PROTECTED, VariableModifier.PRIVATE_WRITE),
+        (VariableModifier.PROTECTED, VariableModifier.PROTECTED_WRITE),
+        (VariableModifier.PRIVATE_WRITE, VariableModifier.PROTECTED_WRITE),
+    )
+
+    flags = PropertyFlags.NONE
+
+    for first, second in incompatible_pairs:
+        if first in modifiers and second in modifiers:
+            msg = f"Property {path} cannot combine {first.value!r} and {second.value!r}"
+            raise CompilationError(msg)
+
+    for modifier in modifiers:
+        if modifier is VariableModifier.NATIVE:
+            msg = f"Cannot compile native property {path}"
+            raise CompilationError(msg)
+
+        if modifier not in SUPPORTED_VARIABLE_MODIFIERS:
+            msg = f"Variable modifier {modifier.value!r} is not implemented"
+            raise NotImplementedError(msg)
+
+        flags |= VARIABLE_MODIFIER_FLAGS[modifier]
+
+    return flags
+
+
 @dataclass
 class PropertyBuilder(BuildComponent):
     references: PackageReferences
@@ -150,7 +182,7 @@ class PropertyBuilder(BuildComponent):
             msg = f"Attribute modifier must be on a class field: {path}"
             raise CompilationError(msg)
 
-        flags |= self.variable_modifier_flags(type_ref.modifiers, path)
+        flags |= variable_modifier_flags(type_ref.modifiers, path)
         resolved = self.context.references.resolve_type(
             type_ref,
             class_path,
@@ -287,7 +319,7 @@ class PropertyBuilder(BuildComponent):
         next_field: ReferencePath,
     ) -> UObject:
         path = owner.reference() + declaration.name
-        flags = self.variable_modifier_flags(declaration.modifiers, path)
+        flags = variable_modifier_flags(declaration.modifiers, path)
 
         if VariableModifier.ATTRIBUTE in declaration.modifiers and not isinstance(
             owner.payload, UClassPayload
@@ -377,41 +409,6 @@ class PropertyBuilder(BuildComponent):
         payload.modifier_stack = stack.reference()
         payload.related_property = base.reference()
         base_payload.related_property = effective.reference()
-
-    def variable_modifier_flags(
-        self, modifiers: tuple[VariableModifier, ...], path: ReferencePath
-    ) -> PropertyFlags:
-        incompatible_pairs = (
-            (VariableModifier.PRIVATE, VariableModifier.PROTECTED),
-            (VariableModifier.PRIVATE, VariableModifier.PRIVATE_WRITE),
-            (VariableModifier.PROTECTED, VariableModifier.PRIVATE_WRITE),
-            (VariableModifier.PROTECTED, VariableModifier.PROTECTED_WRITE),
-            (VariableModifier.PRIVATE_WRITE, VariableModifier.PROTECTED_WRITE),
-        )
-
-        flags = PropertyFlags.NONE
-
-        if VariableModifier.PRIVATE in modifiers and VariableModifier.PROTECTED in modifiers:
-            msg = f"Property {path} cannot be both private and protected"
-            raise CompilationError(msg)
-
-        for first, second in incompatible_pairs:
-            if first in modifiers and second in modifiers:
-                msg = f"Property {path} cannot combine {first.value!r} and {second.value!r}"
-                raise CompilationError(msg)
-
-        for modifier in modifiers:
-            if modifier is VariableModifier.NATIVE:
-                msg = f"Cannot compile native property {path}"
-                raise CompilationError(msg)
-
-            if modifier not in SUPPORTED_VARIABLE_MODIFIERS:
-                msg = f"Variable modifier {modifier.value!r} is not implemented"
-                raise NotImplementedError(msg)
-
-            flags |= VARIABLE_MODIFIER_FLAGS[modifier]
-
-        return flags
 
     def array_enum_reference(
         self, declaration: VariableDeclaration, class_path: ReferencePath

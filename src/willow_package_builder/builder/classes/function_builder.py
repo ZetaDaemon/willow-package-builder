@@ -66,33 +66,34 @@ FUNCTION_MODIFIER_FLAGS: dict[FunctionModifier, FunctionFlags] = {
 }
 
 
+def _parse_parameter_defaults(
+    function: FunctionDeclaration, resolver: ExpressionResolver
+) -> list[Expression | None]:
+    defaults: list[Expression | None] = []
+    owner = resolver.scope.class_path
+
+    for parameter in function.parameters:
+        if parameter.default_tokens is None:
+            defaults.append(None)
+            continue
+
+        path = owner + function.name + parameter.name
+
+        with declaration_context(path, parameter.location):
+            if ParameterModifier.OPTIONAL not in parameter.modifiers:
+                msg = "Non-optional parameter cannot have a default"
+                raise CompilationError(msg)
+
+            parser = FunctionParser.from_tokens(parameter.default_tokens, resolver)
+            defaults.append(parser.parse_default_expression())
+
+    return defaults
+
+
 @dataclass
 class FunctionBuilder(BuildComponent):
     references: PackageReferences
     properties: PropertyBuilder
-
-    def _parse_parameter_defaults(
-        self, function: FunctionDeclaration, resolver: ExpressionResolver
-    ) -> list[Expression | None]:
-        defaults: list[Expression | None] = []
-        owner = resolver.scope.class_path
-
-        for parameter in function.parameters:
-            if parameter.default_tokens is None:
-                defaults.append(None)
-                continue
-
-            path = owner + function.name + parameter.name
-
-            with declaration_context(path, parameter.location):
-                if ParameterModifier.OPTIONAL not in parameter.modifiers:
-                    msg = "Non-optional parameter cannot have a default"
-                    raise CompilationError(msg)
-
-                parser = FunctionParser.from_tokens(parameter.default_tokens, resolver)
-                defaults.append(parser.parse_default_expression())
-
-        return defaults
 
     def _process_function_parameters(
         self,
@@ -313,7 +314,7 @@ class FunctionBuilder(BuildComponent):
             flags &= ~FunctionFlags.DEFINED
             body = FunctionBody([], [])
 
-        parameter_defaults = self._parse_parameter_defaults(function, resolver)
+        parameter_defaults = _parse_parameter_defaults(function, resolver)
         FunctionBodyValidator(resolver).validate_parameter_defaults(parameter_defaults)
 
         locals_ = body.function_locals
@@ -334,6 +335,7 @@ class FunctionBuilder(BuildComponent):
             TypeCategory.OBJECT,
             TypeCategory.CLASS,
             TypeCategory.BYTE,
+            TypeCategory.ENUM,
             TypeCategory.NAME,
             TypeCategory.ARRAY,
             TypeCategory.STRUCT,

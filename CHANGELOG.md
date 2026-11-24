@@ -1,4 +1,38 @@
 # Changelog
+## [0.11]
+### Additions
+- Support `switch`, `case`, and `default`, including fallthrough and `break`.
+- Support class-default property reads through `default.Property` and
+  `ClassExpression.default.Property`.
+- Support class-qualified numeric constants through
+  `class'SomeClass'.const.CONSTANT_NAME`.
+- Support explicit interface-to-object and interface-to-interface casts.
+- Support enum return types on compiled functions.
+- Add `--log-objects` to enable individual top-level object build messages.
+
+### Changes
+- Disable individual object build messages by default.
+- Report the total time spent constructing objects.
+- Collect build options in `BuildSettings`, available through
+  `get_build_settings()` during a build.
+
+### Fixes
+- Serialize the native empty LOD-data array required by static mesh
+  components, preventing package-load crashes.
+- Support member access through interface references and assignment of
+  `None` to interface properties.
+- Infer a common object ancestor for compatible conditional-expression
+  branches.
+- Resolve bare enum members in return expressions using the return type.
+- Resolve visible enum types declared outside the current class hierarchy.
+
+### Performance
+- Use PyYAML's C-backed safe loader when available, retaining duplicate-key
+  validation and a Python-loader fallback.
+- Cache property defaults, archetype chains, and instancing field metadata.
+- Reduce unnecessary copying and traversal while constructing instanced
+  properties.
+
 ## [0.10]
 ### Additions
 - Support dynamic class expressions and optional outer, name, flags, and

@@ -125,7 +125,7 @@ class IfBlock:
 
     _opcodes: Opcodes = field(default_factory=lambda: get_game().OPCODES, init=False, repr=False)
 
-    def advance_branch(self) -> None:
+    def _advance_branch(self) -> None:
         """Close the preceding body and place its false-condition label."""
         if not self.active:
             msg = "Branch must be inside its if context"
@@ -141,15 +141,62 @@ class IfBlock:
 
     @contextmanager
     def elif_statement(self, condition: Bytecode) -> Generator[None]:
-        self.advance_branch()
+        self._advance_branch()
         self.otherwise = self.bytecode.begin_if(condition)
         yield
 
     @contextmanager
     def else_statement(self) -> Generator[None]:
-        self.advance_branch()
+        self._advance_branch()
         self.otherwise = None
         yield
+
+
+@dataclass
+class SwitchBlock:
+    bytecode: Bytecode
+    end: BytecodeLabel = field(default_factory=BytecodeLabel)
+    next_case: BytecodeLabel | None = None
+    has_default: bool = False
+    active: bool = True
+
+    _opcodes: Opcodes = field(default_factory=lambda: get_game().OPCODES, init=False, repr=False)
+
+    @contextmanager
+    def case_statement(self, value: Bytecode | None) -> Generator[None]:
+        if not self.active:
+            msg = "Case must be inside its switch context"
+            raise RuntimeError(msg)
+
+        if self.has_default:
+            msg = "Cannot add a case after default"
+            raise ValueError(msg)
+
+        if self.next_case is not None:
+            self.bytecode += self.next_case
+
+        self.bytecode += self._opcodes.CASE
+
+        if value is None:
+            self.has_default = True
+            self.next_case = None
+            self.bytecode += struct.pack("<H", UINT16_MAX)
+        else:
+            self.next_case = BytecodeLabel()
+            self.bytecode += BytecodeJump(self.next_case)
+            self.bytecode += value
+
+        yield
+
+    def break_statement(self) -> Bytecode:
+        if not self.active:
+            msg = "Switch block is no longer active"
+            raise RuntimeError(msg)
+
+        script = Bytecode()
+        script += self._opcodes.JUMP
+        script += BytecodeJump(self.end)
+        return script
 
 
 @dataclass
@@ -211,6 +258,14 @@ class Bytecode:
         result = Bytecode(self.parts.copy())
         result += other
         return result
+
+    def add_primitive_cast(self, operand: Bytecode, selector: Opcode | None) -> None:
+        """Append an operand with an optional primitive conversion."""
+        if selector is not None:
+            self += self._opcodes.PRIMITIVE_CAST
+            self += selector
+
+        self += operand
 
     def add_constant(self, value: bool | float | str) -> None:
         match value:
@@ -335,6 +390,28 @@ class Bytecode:
             self += branch.otherwise
 
         self += branch.end
+
+    @contextmanager
+    def switch_statement(self, expression: Bytecode, value_size: int) -> Generator[SwitchBlock]:
+        block = SwitchBlock(self)
+
+        self += self._opcodes.SWITCH_SIZE
+        self += expression
+        self += struct.pack("<I", value_size)
+
+        try:
+            yield block
+        finally:
+            block.active = False
+
+        if block.next_case is not None:
+            self += block.next_case
+
+        if not block.has_default:
+            self += self._opcodes.CASE
+            self += struct.pack("<H", UINT16_MAX)
+
+        self += block.end
 
     @contextmanager
     def while_statement(self, condition: Bytecode) -> Generator[LoopBlock]:

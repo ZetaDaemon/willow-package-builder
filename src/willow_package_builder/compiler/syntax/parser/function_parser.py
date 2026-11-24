@@ -14,6 +14,7 @@ from willow_package_builder.compiler.syntax.expressions import (
     CastExpression,
     ClassLiteralExpression,
     ConditionalExpression,
+    DefaultPropertyExpression,
     Expression,
     FloatExpression,
     GlobalExpression,
@@ -32,6 +33,7 @@ from willow_package_builder.compiler.syntax.expressions import (
 )
 from willow_package_builder.compiler.syntax.keyword import ScriptKeywords
 from willow_package_builder.compiler.syntax.lexer import Token, TokenCategory
+from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.compiler.syntax.punctuation import Operator, Punctuation
 from willow_package_builder.compiler.syntax.statements import (
     AssignmentStatement,
@@ -46,6 +48,8 @@ from willow_package_builder.compiler.syntax.statements import (
     IfStatement,
     ReturnStatement,
     Statement,
+    SwitchCase,
+    SwitchStatement,
     WhileStatement,
 )
 from willow_package_builder.logging import CompilationError, SourceLocation, declaration_context
@@ -169,6 +173,10 @@ class FunctionParser(DeclarationSyntaxParser):
 
                     case ScriptKeywords.NONE:
                         return NoneExpression()
+
+                    case ScriptKeywords.DEFAULT:
+                        self.expect(Punctuation.DOT)
+                        return DefaultPropertyExpression(None, self.expect_identifier().fname)
 
                     case ScriptKeywords.ARRAY_COUNT:
                         self.expect(Punctuation.LEFT_PAREN)
@@ -342,6 +350,63 @@ class FunctionParser(DeclarationSyntaxParser):
 
         return statements
 
+    def parse_switch_statement(self) -> SwitchStatement:
+        start = self.expect(ScriptKeywords.SWITCH)
+        self.expect(Punctuation.LEFT_PAREN)
+        expression = self.parse_expression()
+        self.expect(Punctuation.RIGHT_PAREN)
+        self.expect(Punctuation.LEFT_BRACE)
+
+        resolver = self.expression_resolver
+        if resolver is None:
+            msg = "Switch parsing requires an expression resolver"
+            raise ValueError(msg)
+
+        expression_type = resolver.type_of(expression)
+        enum_hint = (
+            expression_type.declaration_path
+            if expression_type.category is TypeCategory.ENUM
+            else None
+        )
+
+        cases: list[SwitchCase] = []
+        current_case: SwitchCase | None = None
+        has_default = False
+
+        while not self.match(Punctuation.RIGHT_BRACE):
+            token = self.peek()
+            location = SourceLocation(token.line, token.column)
+
+            if token.category is TokenCategory.EOF:
+                msg = "Unterminated switch statement"
+                raise CompilationError(msg, SourceLocation(start.line, start.column))
+
+            if self.match(ScriptKeywords.CASE):
+                value = self.parse_expression(enum_hint=enum_hint)
+                self.expect(Punctuation.COLON)
+                current_case = SwitchCase(value, [], location=location)
+                cases.append(current_case)
+                continue
+
+            if self.match(ScriptKeywords.DEFAULT):
+                if has_default:
+                    msg = "Switch statement has multiple default labels"
+                    raise CompilationError(msg, location)
+
+                self.expect(Punctuation.COLON)
+                has_default = True
+                current_case = SwitchCase(None, [], location=location)
+                cases.append(current_case)
+                continue
+
+            if current_case is None:
+                msg = "Expected case or default label in switch"
+                raise CompilationError(msg, location)
+
+            current_case.statements.extend(self.parse_statement_branch())
+
+        return SwitchStatement(expression, cases)
+
     def parse_if_statement(self) -> IfStatement:
         self.expect(ScriptKeywords.IF)
         self.expect(Punctuation.LEFT_PAREN)
@@ -383,7 +448,23 @@ class FunctionParser(DeclarationSyntaxParser):
             if self.match(Punctuation.SEMICOLON):
                 return ReturnStatement()
 
-            value = self.parse_expression()
+            resolver = self.expression_resolver
+            if resolver is None:
+                msg = "Return expression parsing requires an expression resolver"
+                raise ValueError(msg)
+
+            scope = resolver.scope
+            return_type = resolver.resolve_declared_type(
+                scope.function.return_type, scope.class_path
+            )
+
+            value = self.parse_expression(
+                enum_hint=(
+                    return_type.declaration_path
+                    if return_type.category is TypeCategory.ENUM
+                    else None
+                )
+            )
             self.expect(Punctuation.SEMICOLON)
             return ReturnStatement(value)
 
@@ -399,6 +480,9 @@ class FunctionParser(DeclarationSyntaxParser):
                     f"at {token.line}:{token.column}"
                 )
                 raise CompilationError(msg)
+
+            case ScriptKeywords.SWITCH:
+                return self.parse_switch_statement()
 
             case ScriptKeywords.IF:
                 return self.parse_if_statement()
@@ -548,6 +632,34 @@ class FunctionParser(DeclarationSyntaxParser):
 
         while True:
             if self.match(Punctuation.DOT):
+                if self.match(ScriptKeywords.DEFAULT):
+                    self.expect(Punctuation.DOT)
+                    name = self.expect_identifier().fname
+                    expression = DefaultPropertyExpression(expression, name)
+                    continue
+
+                if isinstance(expression, ClassLiteralExpression) and self.match(
+                    VariableModifier.CONST
+                ):
+                    self.expect(Punctuation.DOT)
+                    name = self.expect_identifier().fname
+
+                    owner = resolver.resolve_declared_type(
+                        TypeReference(expression.path), resolver.scope.class_path
+                    )
+                    path = owner.declaration_path
+                    if path is None:
+                        msg = f"Constant owner {owner} has no declaration path"
+                        raise CompilationError(msg)
+
+                    constant = resolver.resolve_numeric_constant(name, class_path=path)
+                    if constant is None:
+                        msg = f"Unknown constant {path}.{name}"
+                        raise CompilationError(msg)
+
+                    expression = constant
+                    continue
+
                 if isinstance(expression, ClassLiteralExpression) and self.match(
                     ScriptKeywords.ENUM
                 ):

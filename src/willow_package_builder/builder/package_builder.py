@@ -103,7 +103,7 @@ class PackageBuilder:
             ],
         }
 
-    def prepare_class_defaults(self, class_names: Iterable[ReferencePath]) -> None:
+    def _prepare_class_defaults(self, class_names: Iterable[ReferencePath]) -> None:
         """Build default records for classes needed by this package."""
         visible = collect_visible_packages(self.config, self.context.packages)
 
@@ -111,7 +111,7 @@ class PackageBuilder:
             path, _ = self.context.references.resolve_class(name, self.config.name, visible)
             self.defaults.build_class_defaults(path)
 
-    def compile_classes(self) -> None:
+    def _compile_classes(self) -> None:
         """Create class definitions, CDOs, fields, and function bytecode exports."""
         info("Preparing class exports")
         start = perf_counter()
@@ -139,7 +139,7 @@ class PackageBuilder:
         if class_names:
             info("Building class defaults")
             start = perf_counter()
-            self.prepare_class_defaults(class_names)
+            self._prepare_class_defaults(class_names)
             info(f"Built class defaults in {perf_counter() - start:.3f}s")
 
             info("Preparing default subobjects")
@@ -151,7 +151,7 @@ class PackageBuilder:
             info(f"Prepared default subobjects in {perf_counter() - start:.3f}s")
 
             info("Compiling classes")
-            self.compile_classes()
+            self._compile_classes()
 
             self.object_builder.build_default_objects(templates_by_class)
             for class_path in self.classes:
@@ -171,13 +171,17 @@ class PackageBuilder:
             if isinstance(declaration, ObjectDefinition)
         ]
 
-        self.prepare_class_defaults(declaration.class_name for declaration in declarations)
+        self._prepare_class_defaults(declaration.class_name for declaration in declarations)
 
         info("Constructing objects")
+        start = perf_counter()
+
         self.object_builder.construct_objects()
         self.object_builder.link_archetypes()
         self.object_builder.validate_archetype_cycles()
         self.object_builder.build_all_properties()
         self.object_builder.prepare_handlers()
+
+        info(f"Constructed objects in {perf_counter() - start:.3f}s")
 
         return self.package

@@ -191,6 +191,8 @@ Delegate variables and qualified comparator expressions are unsupported for
 
 Function-body variable reads support scalar primitive values, enums, object and class references, dynamic arrays, and structs. Fixed arrays can be indexed or passed to matching fixed-array parameters.
 
+Functions can return enum values. Bare enum members in return expressions are resolved using the declared return type.
+
 ### Parameters and calls
 
 Implemented call handling includes:
@@ -239,15 +241,17 @@ Implemented expression forms:
 - Native short-circuit operators using their declared skip behavior.
 - Name literals such as `'FieldName'`.
 - Bare and enum-qualified enum members and supported enum comparisons. Assignments can resolve bare members using the destination's enum type. Explicit owner qualification is supported through forms such as `class'Engine.AttributeDefinition'.enum'EAttributeTranslationStyle'.ATTRSTYLE_ModifierText`.
-- Class literals, such as `class'SomeClass'`, and `None` in supported
-  object-reference expressions.
-- Conditional expressions (`Condition ? WhenTrue : WhenFalse`).
-- Explicit casts among `byte`, `int`, `float`, and `bool`, and object
-  casts such as `SomeClass(Expression)`.
+- Class literals, such as `class'SomeClass'`, and `None` in supported object-reference expressions.
+- Conditional expressions (`Condition ? WhenTrue : WhenFalse`), including compatible object branches whose result type is their nearest common ancestor.
+- Explicit casts among `byte`, `int`, `float`, and `bool`, and object casts such as `SomeClass(Expression)`.
 - Vector literals with numeric components, such as `vect(0, 0, 1)`.
 - Object construction with `new(Outer) class'SomeClass'`.
 - String coercion for supported scalar operands of `coerce string` operator  parameters, including object references, class references, names, enums,
   numeric values, bools, and interfaces.
+- Class-default property reads using `default.Property` or `ClassExpression.default.Property`, including class-reference variables and class literals.
+- Class-qualified integer and float literal constants using `class'SomeClass'.const.CONSTANT_NAME`.
+- Explicit casts from interfaces to objects or other interfaces.
+- Member access through interface references.
 
 Operator overloads and precedence come from the parsed reference declarations. An operator symbol's presence in the lexer does not guarantee that its source expression can be resolved and emitted.
 

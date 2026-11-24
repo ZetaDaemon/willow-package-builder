@@ -4,8 +4,9 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
+from willow_package_builder.build_settings import get_build_settings
 from willow_package_builder.builder.build_component import BuildComponent
-from willow_package_builder.compiler.semantics.types import TypeCategory
+from willow_package_builder.compiler.semantics.types import ResolvedType, TypeCategory
 from willow_package_builder.compiler.syntax.modifiers import VariableModifier
 from willow_package_builder.handlers.registry import get_class_handler
 from willow_package_builder.logging import (
@@ -69,6 +70,46 @@ class _InstancingState:
     owners: list[UObject] = field(default_factory=list)
 
 
+def _remap_default_properties(
+    properties: dict[FName, Value], remap: dict[ReferencePath, ReferencePath]
+) -> dict[FName, Value]:
+    """Copy inherited values and redirect references to the derived CDO tree."""
+
+    def remap_value(value: Value) -> Value:
+        match value:
+            case ObjectValue():
+                path = remap.get(value.path, value.path)
+                reference = (
+                    None if value.reference is None else remap.get(value.reference, value.reference)
+                )
+                return replace(value, path=path, reference=reference)
+            case DelegateValue():
+                return replace(value, target=remap.get(value.target, value.target))
+            case ArrayValue():
+                return ArrayValue([remap_value(element) for element in value.elements])
+            case StructValue():
+                return replace(
+                    value, values={name: remap_value(item) for name, item in value.values.items()}
+                )
+            case _:
+                return deepcopy(value)
+
+    return {name: remap_value(value) for name, value in properties.items()}
+
+
+def _replace_array_elements(value: ArrayValue, replacements: dict[int, Value]) -> ArrayValue | None:
+    """Copy an array only when at least one element needs replacing."""
+    if not replacements:
+        return None
+
+    return ArrayValue(
+        [
+            replacements[index] if index in replacements else deepcopy(element)
+            for index, element in enumerate(value.elements)
+        ]
+    )
+
+
 @dataclass
 class ObjectBuilder(BuildComponent):
     references: PackageReferences
@@ -77,6 +118,20 @@ class ObjectBuilder(BuildComponent):
 
     definitions: list[Definition] = field(default_factory=list, init=False)
     exports: dict[Definition, UObject] = field(default_factory=dict, init=False)
+
+    _instancing_fields: dict[
+        ReferencePath, tuple[tuple[ReferencePath, VariableDeclaration], ...]
+    ] = field(default_factory=dict, init=False, repr=False)
+
+    _instancing_field_types: dict[tuple[ReferencePath, FName], ResolvedType] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _property_default_values: dict[tuple[ReferencePath, FName], Value] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _archetype_chains: dict[ReferencePath, tuple[UObject, ...]] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def _register_generated_object(
         self, definition: ObjectDefinition, registered: dict[ReferencePath, Definition]
@@ -205,6 +260,11 @@ class ObjectBuilder(BuildComponent):
             self.exports[definition] = obj
 
     def property_default_value(self, class_path: ReferencePath, name: FName) -> Value:
+        key = (class_path, name)
+        cached = self._property_default_values.get(key)
+        if cached is not None:
+            return deepcopy(cached)
+
         member = self.context.references.resolve_variable(class_path, name, self.context.parents)
         definition = member.declaration
         if member.owner_class.outer is None:
@@ -236,7 +296,9 @@ class ObjectBuilder(BuildComponent):
             if name in declaration.defaults:
                 values = merge_values(values, {name: declaration.defaults[name]})
 
-        return values[name]
+        result = values[name]
+        self._property_default_values[key] = result
+        return deepcopy(result)
 
     def _build_properties(
         self, definition: ObjectDefinition, visible_packages: set[FName]
@@ -302,6 +364,8 @@ class ObjectBuilder(BuildComponent):
 
     def build_all_properties(self) -> None:
         """Build properties in archetype dependency order."""
+        self._property_default_values.clear()
+        self._archetype_chains.clear()
         visible = collect_visible_packages(self.config, self.context.packages)
         definitions = {
             obj.reference(): definition
@@ -334,7 +398,10 @@ class ObjectBuilder(BuildComponent):
                     raise ValueError(msg)  # noqa: TRY004
 
                 try:
-                    if isinstance(definition.outer, FolderDefinition):
+                    if get_build_settings().log_objects and isinstance(
+                        definition.outer, FolderDefinition
+                    ):
+                        info(f"Building object {self.package.format_object(obj)}")
                         info(f"Building object {self.package.format_object(obj)}")
 
                     payload.properties = self._build_properties(definition, visible)
@@ -597,14 +664,14 @@ class ObjectBuilder(BuildComponent):
 
             completed.update(chain)
 
-    def archetype_property_value(
-        self, obj: UObject, class_path: ReferencePath, name: FName
-    ) -> Value:
-        """Find a property's effective value before this object's overrides."""
-        values = {name: self.property_default_value(class_path, name)}
-        overrides: list[Value] = []
+    def _archetype_chain(self, archetype: ReferencePath) -> tuple[UObject, ...]:
+        cached = self._archetype_chains.get(archetype)
+        if cached is not None:
+            return cached
+
+        chain: list[UObject] = []
         visited: set[ReferencePath] = set()
-        current = obj.archetype
+        current = archetype
 
         while not current.is_none():
             if current in visited:
@@ -615,19 +682,30 @@ class ObjectBuilder(BuildComponent):
             target = self.package.lookup_object_by_path(current)
 
             if not isinstance(target, UObject):
-                # External archetype values are unavailable.
                 break
 
-            payload = target.payload
+            chain.append(target)
+            current = target.archetype
 
+        result = tuple(chain)
+        self._archetype_chains[archetype] = result
+        return result
+
+    def archetype_property_value(
+        self, obj: UObject, class_path: ReferencePath, name: FName
+    ) -> Value:
+        """Find a property's effective value before this object's overrides."""
+        values = {name: self.property_default_value(class_path, name)}
+        overrides: list[Value] = []
+
+        for target in self._archetype_chain(obj.archetype):
+            payload = target.payload
             if not isinstance(payload, ObjectInstancePayload):
                 msg = f"Archetype has an invalid payload: {target.reference()}"
                 raise ValueError(msg)  # noqa: TRY004
 
             if name in payload.properties:
                 overrides.append(payload.properties[name])
-
-            current = target.archetype
 
         for override in reversed(overrides):
             values = merge_values(values, {name: override})
@@ -976,10 +1054,9 @@ class ObjectBuilder(BuildComponent):
             msg = f"Expected a fixed-array value for {obj.reference()}.{property_name}"
             raise TypeError(msg)
 
-        elements: list[Value] = []
-        changed = False
+        replacements: dict[int, Value] = {}
 
-        for element in value.elements:
+        for index, element in enumerate(value.elements):
             replacement = self._construct_instanced_value(
                 obj,
                 property_name,
@@ -989,13 +1066,10 @@ class ObjectBuilder(BuildComponent):
                 variable.modifiers,
                 instancing,
             )
-            if replacement is None:
-                elements.append(deepcopy(element))
-            else:
-                elements.append(replacement)
-                changed = True
+            if replacement is not None:
+                replacements[index] = replacement
 
-        return ArrayValue(elements) if changed else None
+        return _replace_array_elements(value, replacements)
 
     def _construct_instanced_value(
         self,
@@ -1033,10 +1107,9 @@ class ObjectBuilder(BuildComponent):
                     msg = f"Array type requires one element type: {type_ref}"
                     raise ValueError(msg)
 
-                elements: list[Value] = []
-                changed = False
+                array_replacements: dict[int, Value] = {}
 
-                for element in value.elements:
+                for index, element in enumerate(value.elements):
                     replacement = self._construct_instanced_value(
                         obj,
                         property_name,
@@ -1046,14 +1119,10 @@ class ObjectBuilder(BuildComponent):
                         modifiers,
                         instancing,
                     )
-                    if replacement is None:
-                        elements.append(deepcopy(element))
-                    else:
-                        elements.append(replacement)
-                        changed = True
+                    if replacement is not None:
+                        array_replacements[index] = replacement
 
-                if changed:
-                    return ArrayValue(elements)
+                return _replace_array_elements(value, array_replacements)
 
             case TypeCategory.STRUCT:
                 if not isinstance(value, StructValue):
@@ -1066,8 +1135,7 @@ class ObjectBuilder(BuildComponent):
                     msg = "Resolved struct has no declaration path"
                     raise ValueError(msg)
 
-                result = deepcopy(value)
-                changed = False
+                struct_replacements: dict[FName, Value] = {}
 
                 for name, field_value in value.values.items():
                     member = self.context.references.resolve_struct_variable(
@@ -1085,16 +1153,36 @@ class ObjectBuilder(BuildComponent):
                     )
 
                     if replacement is not None:
-                        result.values[name] = replacement
-                        changed = True
+                        struct_replacements[name] = replacement
 
-                if changed:
+                if struct_replacements:
+                    result = deepcopy(value)
+                    result.values.update(struct_replacements)
                     return result
 
             case _:
                 pass
 
         return None
+
+    def _instancing_fields_for(
+        self, class_path: ReferencePath
+    ) -> tuple[tuple[ReferencePath, VariableDeclaration], ...]:
+        cached = self._instancing_fields.get(class_path)
+        if cached is not None:
+            return cached
+
+        fields: dict[FName, tuple[ReferencePath, VariableDeclaration]] = {}
+
+        for owner, declaration in self.context.references.iter_class_hierarchy(
+            class_path, self.context.parents
+        ):
+            for variable in declaration.variables:
+                fields.setdefault(variable.name, (owner, variable))
+
+        result = tuple(fields.values())
+        self._instancing_fields[class_path] = result
+        return result
 
     def construct_instanced_properties(
         self,
@@ -1109,55 +1197,54 @@ class ObjectBuilder(BuildComponent):
             msg = f"Object has no instance payload: {obj.reference()}"
             raise TypeError(msg)
 
-        processed: set[FName] = set()
-
         if instancing is None:
             instancing = _InstancingState()
 
         instancing.owners.append(obj)
         try:
-            for owner, declaration in self.context.references.iter_class_hierarchy(
-                payload.class_path, self.context.parents
-            ):
-                for variable in declaration.variables:
-                    name = variable.name
+            for owner, variable in self._instancing_fields_for(payload.class_path):
+                name = variable.name
 
-                    if name in processed:
-                        continue
+                # Handler-written properties without raw YAML stay untouched.
+                if name in payload.properties and name not in supplied_properties:
+                    continue
 
-                    processed.add(name)
-
-                    # Handler-written properties without raw YAML stay untouched.
-                    if name in payload.properties and name not in supplied_properties:
-                        continue
-
+                key = (owner, name)
+                resolved = self._instancing_field_types.get(key)
+                if resolved is None:
                     resolved = self.values.resolve_field_type(variable, owner)
+                    self._instancing_field_types[key] = resolved
 
-                    if resolved.category not in (
-                        TypeCategory.OBJECT,
-                        TypeCategory.ARRAY,
-                        TypeCategory.STRUCT,
-                    ):
-                        continue
+                if resolved.category not in (
+                    TypeCategory.OBJECT,
+                    TypeCategory.ARRAY,
+                    TypeCategory.STRUCT,
+                ):
+                    continue
 
-                    if name in payload.properties:
-                        value = payload.properties[name]
-                    else:
-                        value = self.archetype_property_value(obj, payload.class_path, name)
+                if resolved.category is TypeCategory.OBJECT and not self.properties_are_instanced(
+                    (*variable.modifiers, *variable.type_ref.modifiers)
+                ):
+                    continue
 
-                    replacement = self._construct_instanced_field_value(
-                        obj,
-                        name,
-                        value,
-                        variable,
-                        owner,
-                        instancing,
-                        supplied=name in supplied_properties,
-                        raw_value=supplied_properties.get(name),
-                    )
+                if name in payload.properties:
+                    value = payload.properties[name]
+                else:
+                    value = self.archetype_property_value(obj, payload.class_path, name)
 
-                    if replacement is not None:
-                        payload.properties[name] = replacement
+                replacement = self._construct_instanced_field_value(
+                    obj,
+                    name,
+                    value,
+                    variable,
+                    owner,
+                    instancing,
+                    supplied=name in supplied_properties,
+                    raw_value=supplied_properties.get(name),
+                )
+
+                if replacement is not None:
+                    payload.properties[name] = replacement
         finally:
             instancing.owners.pop()
 
@@ -1207,7 +1294,7 @@ class ObjectBuilder(BuildComponent):
 
         effective = self.class_default_values(class_path)
         effective.update(cdo_payload.properties)
-        remapped = self._remap_default_properties(effective, remap)
+        remapped = _remap_default_properties(effective, remap)
 
         for name, value in remapped.items():
             if name in cdo_payload.properties or value != effective[name]:
@@ -1283,7 +1370,7 @@ class ObjectBuilder(BuildComponent):
                 raise TypeError(msg)
 
             effective = self.class_default_values(class_path)
-            remapped = self._remap_default_properties(effective, remap)
+            remapped = _remap_default_properties(effective, remap)
 
             for name, value in remapped.items():
                 if name in payload.properties or value != effective[name]:
@@ -1348,7 +1435,7 @@ class ObjectBuilder(BuildComponent):
                     msg = f"Default object has an invalid payload: {original.reference()}"
                     raise TypeError(msg)
 
-                properties = self._remap_default_properties(original_payload.properties, remap)
+                properties = _remap_default_properties(original_payload.properties, remap)
 
             scope: dict[FName, ReferencePath] = {}
             for depth in range(len(key) + 1):
@@ -1380,32 +1467,3 @@ class ObjectBuilder(BuildComponent):
                 properties = merge_values(properties, overrides)
 
             payload.properties = properties
-
-    def _remap_default_properties(
-        self, properties: dict[FName, Value], remap: dict[ReferencePath, ReferencePath]
-    ) -> dict[FName, Value]:
-        """Copy inherited values and redirect references to the derived CDO tree."""
-
-        def remap_value(value: Value) -> Value:
-            match value:
-                case ObjectValue():
-                    path = remap.get(value.path, value.path)
-                    reference = (
-                        None
-                        if value.reference is None
-                        else remap.get(value.reference, value.reference)
-                    )
-                    return replace(value, path=path, reference=reference)
-                case DelegateValue():
-                    return replace(value, target=remap.get(value.target, value.target))
-                case ArrayValue():
-                    return ArrayValue([remap_value(element) for element in value.elements])
-                case StructValue():
-                    return replace(
-                        value,
-                        values={name: remap_value(item) for name, item in value.values.items()},
-                    )
-                case _:
-                    return deepcopy(value)
-
-        return {name: remap_value(value) for name, value in properties.items()}

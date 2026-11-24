@@ -76,6 +76,22 @@ class ResolvedMember[T]:
     state_name: FName | None = None
 
 
+def _parent_class_name(
+    class_path: ReferencePath, declaration: ClassDeclaration
+) -> ReferencePath | None:
+    """Return the explicit or implicit parent class name."""
+    if declaration.parent is not None:
+        return declaration.parent
+
+    if declaration.is_interface:
+        if class_path == CORE_INTERFACE_PATH:
+            return CORE_OBJECT_PATH
+
+        return CORE_INTERFACE_PATH
+
+    return None
+
+
 @dataclass
 class ReferenceDatabase:
     classes: dict[ReferencePath, ClassDeclaration] = field(default_factory=dict)
@@ -201,21 +217,6 @@ class ReferenceDatabase:
 
         return matches[0]
 
-    def parent_class_name(
-        self, class_path: ReferencePath, declaration: ClassDeclaration
-    ) -> ReferencePath | None:
-        """Return the explicit or implicit parent class name."""
-        if declaration.parent is not None:
-            return declaration.parent
-
-        if declaration.is_interface:
-            if class_path == CORE_INTERFACE_PATH:
-                return CORE_OBJECT_PATH
-
-            return CORE_INTERFACE_PATH
-
-        return None
-
     def resolve_class(
         self, name: ReferencePath, current_package: FName, visible_packages: set[FName]
     ) -> tuple[ReferencePath, ClassDeclaration]:
@@ -241,7 +242,7 @@ class ReferenceDatabase:
 
             package_key = class_path.outer.name
             config = configs[package_key]
-            parent_name = self.parent_class_name(class_path, declaration)
+            parent_name = _parent_class_name(class_path, declaration)
 
             if parent_name is None:
                 parents[class_path] = None

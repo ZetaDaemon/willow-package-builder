@@ -156,7 +156,7 @@ class ClassBuilder(BuildComponent):
 
         return names
 
-    def resolve_config_name(self, class_path: ReferencePath) -> FName:
+    def _resolve_config_name(self, class_path: ReferencePath) -> FName:
         """Return the nearest explicit config name in the class hierarchy."""
         inherit_owner: ReferencePath | None = None
 
@@ -189,7 +189,7 @@ class ClassBuilder(BuildComponent):
 
         return NONE_NAME
 
-    def resolve_inherited_modifier_flags(self, class_path: ReferencePath) -> ClassFlags:
+    def _resolve_inherited_modifier_flags(self, class_path: ReferencePath) -> ClassFlags:
         """Apply inherited class flags and explicit overrides in hierarchy order."""
         hierarchy = list(
             self.context.references.iter_class_hierarchy(class_path, self.context.parents)
@@ -403,12 +403,12 @@ class ClassBuilder(BuildComponent):
                 raise NotImplementedError(msg)
 
             flags = ClassFlags.COMPILED | ClassFlags.PARSED
-            flags |= self.resolve_inherited_modifier_flags(class_path)
+            flags |= self._resolve_inherited_modifier_flags(class_path)
 
             if exports.declaration.is_interface:
                 flags |= ClassFlags.INTERFACE | ClassFlags.ABSTRACT
 
-            config_name = self.resolve_config_name(class_path)
+            config_name = self._resolve_config_name(class_path)
             if config_name == NONE_NAME and any(
                 VariableModifier.CONFIG in variable.modifiers
                 or VariableModifier.GLOBAL_CONFIG in variable.modifiers
@@ -430,7 +430,7 @@ class ClassBuilder(BuildComponent):
             ):
                 flags |= ClassFlags.LOCALIZED
 
-            if self.has_instanced_properties(class_path):
+            if self._has_instanced_properties(class_path):
                 flags |= ClassFlags.HAS_INSTANCED_PROPS
 
             for modifier in exports.declaration.modifiers:
@@ -592,7 +592,7 @@ class ClassBuilder(BuildComponent):
                 )
                 payload.children = obj.reference()
 
-    def has_instanced_properties(self, class_path: ReferencePath) -> bool:
+    def _has_instanced_properties(self, class_path: ReferencePath) -> bool:
         """Check direct and inherited fields for instanced object references."""
         for owner, declaration in self.context.references.iter_class_hierarchy(
             class_path, self.context.parents

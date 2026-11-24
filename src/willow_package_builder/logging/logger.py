@@ -6,6 +6,8 @@ from dataclasses import KW_ONLY, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, TextIO, overload
 
+from willow_package_builder.build_settings import get_build_settings
+
 from .diagnostics import (
     CompilationError,
     PackageBuilderError,
@@ -31,9 +33,6 @@ class Logger:
 
     _: KW_ONLY
 
-    debug: bool = False
-    silent_console: bool = False
-
     warning_actions: dict[WarningCode, WarningAction] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -52,7 +51,7 @@ class Logger:
                 print(f"{prefix} {line}", file=file)
 
     def _log(self, message: str, console_out: TextIO, file_prefix: LogPrefix) -> None:
-        if not self.silent_console:
+        if not get_build_settings().silent_console:
             print(message, file=console_out)
         self._log_to_file(message, file_prefix)
 
@@ -95,7 +94,7 @@ class Logger:
             yield
         except (PackageBuilderError, UnsupportedFeatureError) as error:
             self._log(f"{type(error).__name__}: {error}", sys.stderr, LogPrefix.ERROR)
-            if self.debug:
+            if get_build_settings().debug:
                 self._log_to_file(traceback.format_exc(), LogPrefix.ERROR)
                 raise
             raise SystemExit(1) from None

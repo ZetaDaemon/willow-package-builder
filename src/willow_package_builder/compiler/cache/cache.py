@@ -5,6 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from willow_package_builder.build_settings import get_build_settings
 from willow_package_builder.compiler.source import decode_source
 from willow_package_builder.compiler.syntax.declarations import ClassDeclaration
 from willow_package_builder.compiler.syntax.lexer import Lexer
@@ -53,7 +54,7 @@ def read_cached_class(path: Path) -> CachedClass:
 
 
 def load_or_parse_class(
-    config: PackageConfig, source_path: Path, *, include_body_tokens: bool, re_cache: bool = False
+    config: PackageConfig, source_path: Path, *, include_body_tokens: bool
 ) -> CachedClass:
     source_path = source_path.resolve()
     relative_path = source_path.relative_to(config.directory)
@@ -65,7 +66,7 @@ def load_or_parse_class(
 
     cached = None
 
-    if not re_cache:
+    if not get_build_settings().re_cache:
         with contextlib.suppress(
             OSError,
             ValueError,
